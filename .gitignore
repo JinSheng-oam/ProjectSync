@@ -1,0 +1,38 @@
+# Dependencies
+node_modules/
+.pnpm-store/
+
+# Build artifacts
+dist/
+dist-ssr/
+*.local
+
+# Tauri build artifacts
+src-tauri/target/
+src-tauri/gen/
+
+# Logs & Environment
+logs/
+*.log
+.env
+.env.*.local
+
+# Editor & OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# ProjectSync Development Documents (per user rule: dev docs must not be uploaded to GitHub)
+docs/
+*.md
+/MANIFEST.json
+/tests/M0_ACCEPTANCE.csv
+/sql/
+*.example.yml
+*.example.toml
+
+# Impeccable temporary artifacts
+.impeccable/
+.impeccable/brief-app-body.md
+.impeccable/mocks/

@@ -1,0 +1,100 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    color-scheme: light;
+    --color-canvas: 248 250 252;       /* slate-50 #f8fafc */
+    --color-rail: 255 255 255;         /* white #ffffff */
+    --color-surface: 255 255 255;      /* white #ffffff */
+    --color-elevated: 241 245 249;     /* slate-100 #f1f5f9 */
+    --color-muted: 226 232 240;        /* slate-200 #e2e8f0 */
+    --color-border: 226 232 240;       /* slate-200 #e2e8f0 */
+    --color-border-light: 203 213 225; /* slate-300 #cbd5e1 */
+  }
+
+  .dark {
+    color-scheme: dark;
+    --color-canvas: 9 13 22;          /* #090d16 */
+    --color-rail: 13 19 34;           /* #0d1322 */
+    --color-surface: 18 26 45;        /* #121a2d */
+    --color-elevated: 23 34 59;       /* #17223b */
+    --color-muted: 30 45 74;          /* #1e2d4a */
+    --color-border: 31 46 77;         /* #1f2e4d */
+    --color-border-light: 42 61 102;  /* #2a3d66 */
+  }
+
+  body {
+    margin: 0;
+    padding: 0;
+    background-color: rgb(var(--color-canvas));
+    color: #334155;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI Variable Text", "Segoe UI", system-ui, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei UI", "Microsoft YaHei", "Source Han Sans SC", "Noto Sans SC", sans-serif;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    text-rendering: optimizeLegibility;
+    font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+  }
+
+  h1, h2, h3, h4, h5, h6 {
+    text-wrap: balance;
+    letter-spacing: -0.01em;
+  }
+
+  p {
+    text-wrap: pretty;
+  }
+
+  .dark body {
+    color: #f1f5f9;
+  }
+
+  /* Browser surface theming per Impeccable craft-floor requirement */
+  ::selection {
+    background-color: rgba(6, 182, 212, 0.25);
+    color: #0891b2;
+  }
+
+  .dark ::selection {
+    background-color: rgba(6, 182, 212, 0.35);
+    color: #a5f3fc;
+  }
+
+  /* Custom Aerospace Scrollbars */
+  ::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    background: #cbd5e1;
+    border-radius: 3px;
+  }
+
+  .dark ::-webkit-scrollbar-thumb {
+    background: #1f2e4d;
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    background: #94a3b8;
+  }
+
+  .dark ::-webkit-scrollbar-thumb:hover {
+    background: #2a3d66;
+  }
+
+  /* Tabular numbers for all numbers and tables */
+  table, code, .font-mono {
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* Custom Caret */
+  input, textarea {
+    caret-color: #06b6d4;
+  }
+}
