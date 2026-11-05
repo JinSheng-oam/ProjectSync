@@ -119,7 +119,9 @@ export function Button({
   className = '',
   onClick,
   type = 'button',
+  title,
 }: {
+  title?: string;
   children: React.ReactNode;
   variant?: 'primary' | 'secondary' | 'danger' | 'ghost' | 'accent' | 'coral';
   size?: 'sm' | 'md' | 'lg';
@@ -157,6 +159,7 @@ export function Button({
       type={type}
       disabled={disabled}
       onClick={onClick}
+      title={title}
       className={`${baseClasses} ${sizeClasses} ${variantClasses} ${className}`}
     >
       {children}

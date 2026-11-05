@@ -20,6 +20,24 @@ export type ActiveNav =
   | 'ai'
   | 'settings';
 
+export interface AiMergeMessage {
+  id: string;
+  role: 'user' | 'assistant';
+  content: string;
+  timestamp: number;
+}
+
+export interface AiMergeSession {
+  conflictId: string;
+  relativePath: string;
+  status: 'idle' | 'merging' | 'ready' | 'applying' | 'error';
+  preview: AiMergePreviewDto | null;
+  suggestions: string;
+  messages: AiMergeMessage[];
+  error: string | null;
+  isOpen: boolean;
+}
+
 export function useSyncStore() {
   const [theme, setTheme] = useState<'dark' | 'light'>(() => {
     if (typeof window !== 'undefined') {
@@ -39,6 +57,7 @@ export function useSyncStore() {
   const [isWizardOpen, setIsWizardOpen] = useState(false);
   const [loading, setLoading] = useState(true);
   const [bannerAlert, setBannerAlert] = useState<string | null>(null);
+  const [aiSession, setAiSession] = useState<AiMergeSession | null>(null);
   const refreshInFlight = useRef(false);
   const progressByTaskId = useRef(new Map<string, number>());
 
@@ -216,6 +235,141 @@ export function useSyncStore() {
     }
   };
 
+  const startAiMerge = async (conflict: ConflictItemDto) => {
+    setAiSession({
+      conflictId: conflict.id,
+      relativePath: conflict.relativePath,
+      status: 'merging',
+      preview: null,
+      suggestions: '',
+      messages: [],
+      error: null,
+      isOpen: true,
+    });
+
+    try {
+      const preview = await api.previewAiMerge(conflict.id);
+      const suggestions = preview.suggestions || '已自动完成双端差异智能合并，请审阅下方代码。';
+      setAiSession((prev) => {
+        if (!prev || prev.conflictId !== conflict.id) return prev;
+        return {
+          ...prev,
+          status: 'ready',
+          preview,
+          suggestions,
+          messages: [
+            {
+              id: 'init',
+              role: 'assistant',
+              content: suggestions,
+              timestamp: Date.now(),
+            },
+          ],
+        };
+      });
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setAiSession((prev) => {
+        if (!prev || prev.conflictId !== conflict.id) return prev;
+        return {
+          ...prev,
+          status: 'error',
+          error: msg,
+        };
+      });
+    }
+  };
+
+  const refineAiMerge = async (instruction: string, currentContent?: string) => {
+    if (!aiSession || !aiSession.preview) return;
+    const userMsg: AiMergeMessage = {
+      id: `u-${Date.now()}`,
+      role: 'user',
+      content: instruction,
+      timestamp: Date.now(),
+    };
+
+    setAiSession((prev) => {
+      if (!prev) return null;
+      return {
+        ...prev,
+        status: 'merging',
+        error: null,
+        messages: [...prev.messages, userMsg],
+      };
+    });
+
+    try {
+      const updatedPreview = await api.refineAiMerge({
+        conflictId: aiSession.conflictId,
+        previewId: aiSession.preview.previewId,
+        instruction,
+        currentContent,
+      });
+
+      const assistantMsg: AiMergeMessage = {
+        id: `a-${Date.now()}`,
+        role: 'assistant',
+        content: updatedPreview.suggestions || `已根据指令「${instruction}」调整合并结果。`,
+        timestamp: Date.now(),
+      };
+
+      setAiSession((prev) => {
+        if (!prev || prev.conflictId !== aiSession.conflictId) return prev;
+        return {
+          ...prev,
+          status: 'ready',
+          preview: updatedPreview,
+          suggestions: updatedPreview.suggestions || prev.suggestions,
+          messages: [...prev.messages, assistantMsg],
+        };
+      });
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setAiSession((prev) => {
+        if (!prev) return null;
+        return {
+          ...prev,
+          status: 'ready',
+          error: `调整失败: ${msg}`,
+        };
+      });
+    }
+  };
+
+  const applyAiMerge = async (finalContent?: string) => {
+    if (!aiSession || !aiSession.preview) return;
+    const { conflictId, preview } = aiSession;
+    setAiSession((prev) => (prev ? { ...prev, status: 'applying' } : null));
+    try {
+      if (finalContent && finalContent !== preview.mergedContent) {
+        // Apply manual refinement if user edited content before saving
+        await api.refineAiMerge({
+          conflictId,
+          previewId: preview.previewId,
+          instruction: '应用用户手动编辑的代码内容',
+          currentContent: finalContent,
+        });
+      }
+      const result = await api.applyAiMerge(conflictId, preview.previewId);
+      setBannerAlert(result.message);
+      setTimeout(() => setBannerAlert(null), 7000);
+      setAiSession(null);
+      await refreshAll();
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setAiSession((prev) => (prev ? { ...prev, status: 'ready', error: msg } : null));
+    }
+  };
+
+  const setAiSessionOpen = (isOpen: boolean) => {
+    setAiSession((prev) => (prev ? { ...prev, isOpen } : null));
+  };
+
+  const cancelAiMerge = () => {
+    setAiSession(null);
+  };
+
   const handlePreviewAiMerge = async (conflictId: string): Promise<AiMergePreviewDto> => {
     return api.previewAiMerge(conflictId);
   };
@@ -259,5 +413,11 @@ export function useSyncStore() {
     handleResolveConflict,
     handlePreviewAiMerge,
     handleApplyAiMerge,
+    aiSession,
+    startAiMerge,
+    refineAiMerge,
+    applyAiMerge,
+    setAiSessionOpen,
+    cancelAiMerge,
   };
 }

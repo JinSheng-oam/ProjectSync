@@ -11,9 +11,11 @@ import {
   Bell,
   Sun,
   Moon,
+  Sparkles,
 } from 'lucide-react';
 import { Button } from '../common/UIComponents';
 import { SyncRootDto } from '../../types/dto';
+import { AiMergeSession } from '../../stores/syncStore';
 
 interface TopHeaderProps {
   title: string;
@@ -24,6 +26,8 @@ interface TopHeaderProps {
   onPauseAll: () => void;
   onResumeAll: () => void;
   bannerAlert: string | null;
+  aiSession?: AiMergeSession | null;
+  onOpenAiMerge?: () => void;
 }
 
 export function TopHeader({
@@ -35,6 +39,8 @@ export function TopHeader({
   onPauseAll,
   onResumeAll,
   bannerAlert,
+  aiSession,
+  onOpenAiMerge,
 }: TopHeaderProps) {
   const [isOnline, setIsOnline] = useState(true);
   const [allPaused, setAllPaused] = useState(false);
@@ -103,6 +109,27 @@ export function TopHeader({
           <Bell className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400" />
           <span>{bannerAlert}</span>
         </div>
+      )}
+
+      {/* Persistent Background AI Merge Indicator */}
+      {aiSession && (aiSession.status === 'merging' || aiSession.status === 'ready') && (
+        <button
+          type="button"
+          onClick={onOpenAiMerge}
+          className={`hidden sm:flex items-center gap-2 px-3 py-1.5 rounded-xl text-xs font-medium border shadow-soft-sm transition-all cursor-pointer ${
+            aiSession.status === 'merging'
+              ? 'bg-amber-50 dark:bg-amber-950/50 text-amber-900 dark:text-amber-200 border-amber-300 dark:border-amber-700 animate-pulse'
+              : 'bg-emerald-50 dark:bg-emerald-950/50 text-emerald-900 dark:text-emerald-200 border-emerald-300 dark:border-emerald-700 hover:bg-emerald-100 dark:hover:bg-emerald-900/60'
+          }`}
+          title="点击打开 AI 合并交互与审阅面板"
+        >
+          <Sparkles className={`w-3.5 h-3.5 ${aiSession.status === 'merging' ? 'animate-spin text-amber-600 dark:text-amber-400' : 'text-emerald-600 dark:text-emerald-400'}`} />
+          <span>
+            {aiSession.status === 'merging' ? 'AI 正在后台合并: ' : 'AI 合并已就绪: '}
+            <strong className="font-mono">{aiSession.relativePath}</strong>
+          </span>
+          <span className="text-[11px] underline opacity-80">点击查看</span>
+        </button>
       )}
 
       {/* Global Controls & Desktop Window Mock */}

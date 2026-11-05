@@ -62,7 +62,7 @@ export function SyncHistoryView({ history }: { history: HistoryItemDto[] }) {
           variant="secondary"
           size="md"
           onClick={handleExportCSV}
-          className="gap-2"
+          className="gap-2 shrink-0"
         >
           <Download className="w-4 h-4 text-indigo-600 dark:text-indigo-400" />
           <span>导出 CSV</span>
@@ -79,7 +79,7 @@ export function SyncHistoryView({ history }: { history: HistoryItemDto[] }) {
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
               placeholder="按文件名、项目名过滤..."
-              className="w-full bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 rounded-xl pl-9 pr-3 py-1.5 text-xs text-slate-900 dark:text-slate-100 focus:outline-none focus:border-indigo-500"
+              className="w-full bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 rounded-xl pl-9 pr-3 py-1.5 text-xs text-slate-900 dark:text-slate-100 focus:outline-none focus:border-indigo-500 font-sans"
             />
           </div>
         </div>
@@ -112,75 +112,87 @@ export function SyncHistoryView({ history }: { history: HistoryItemDto[] }) {
         </div>
       </div>
 
-      {/* History Ledger Table */}
-      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl overflow-hidden shadow-soft-sm transition-colors">
-        <table className="w-full text-left text-xs font-mono">
-          <thead className="bg-slate-50 dark:bg-slate-800/60 border-b border-slate-200 dark:border-slate-800 text-slate-600 dark:text-slate-400 text-[11px]">
-            <tr>
-              <th className="py-2.5 px-4 font-medium">执行时间</th>
-              <th className="py-2.5 px-4 font-medium">所属项目</th>
-              <th className="py-2.5 px-4 font-medium">同步动作</th>
-              <th className="py-2.5 px-4 font-medium">目标路径</th>
-              <th className="py-2.5 px-4 font-medium">状态与错误码</th>
-              <th className="py-2.5 px-4 font-medium text-right">传输量</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-slate-100 dark:divide-slate-800 text-xs">
-            {filteredHistory.length === 0 ? (
+      {/* History Ledger Table with Horizontal Scroll Support to Prevent Truncation */}
+      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-soft-sm transition-colors overflow-hidden">
+        <div className="overflow-x-auto w-full">
+          <table className="w-full text-left text-xs font-mono min-w-[840px] divide-y divide-slate-100 dark:divide-slate-800">
+            <thead className="bg-slate-50 dark:bg-slate-800/60 border-b border-slate-200 dark:border-slate-800 text-slate-600 dark:text-slate-400 text-[11px]">
               <tr>
-                <td colSpan={6} className="py-10 text-center text-slate-500 dark:text-slate-400 font-sans">
-                  没有找到符合筛选条件的同步历史记录
-                </td>
+                <th className="py-2.5 px-4 font-medium w-44 min-w-[150px]">执行时间</th>
+                <th className="py-2.5 px-4 font-medium w-36 min-w-[110px]">所属项目</th>
+                <th className="py-2.5 px-4 font-medium w-40 min-w-[130px]">同步动作</th>
+                <th className="py-2.5 px-4 font-medium min-w-[240px]">目标路径</th>
+                <th className="py-2.5 px-4 font-medium w-44 min-w-[140px]">状态与错误码</th>
+                <th className="py-2.5 px-4 font-medium text-right w-28 min-w-[90px]">传输量</th>
               </tr>
-            ) : (
-              filteredHistory.map((item) => (
-                <tr key={item.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/40 transition-colors">
-                  <td className="py-2.5 px-4 text-slate-500 dark:text-slate-400">
-                    {new Date(item.timestamp).toLocaleString()}
-                  </td>
-                  <td className="py-2.5 px-4 text-slate-900 dark:text-slate-100 font-medium">{item.projectName}</td>
-                  <td className="py-2.5 px-4">
-                    <span
-                      className={`px-1.5 py-0.5 rounded text-[11px] font-semibold ${
-                        item.action.startsWith('Upload')
-                          ? 'bg-indigo-50 dark:bg-indigo-950/80 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800'
-                          : item.action === 'CreateConflictCopy' || item.action === 'AiMerge'
-                          ? 'bg-amber-50 dark:bg-amber-950/80 text-amber-800 dark:text-amber-300 border border-amber-200 dark:border-amber-800'
-                          : 'bg-indigo-50 dark:bg-indigo-950/80 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800'
-                      }`}
-                    >
-                      {item.action}
-                    </span>
-                  </td>
-                  <td className="py-2.5 px-4 text-slate-800 dark:text-slate-200">{item.relativePath}</td>
-                  <td className="py-2.5 px-4">
-                    {item.status === 'SUCCESS' ? (
-                      <span className="inline-flex items-center gap-1 text-emerald-700 dark:text-emerald-300 font-medium">
-                        <CheckCircle2 className="w-3.5 h-3.5" />
-                        成功
-                      </span>
-                    ) : (
-                      <div className="space-y-0.5">
-                        <span className="inline-flex items-center gap-1 text-amber-700 dark:text-amber-400 font-semibold">
-                          <AlertTriangle className="w-3.5 h-3.5" />
-                          {item.errorCode || 'BLOCKED'}
-                        </span>
-                        {item.errorMessage && (
-                          <div className="text-[11px] text-slate-500 dark:text-slate-400 truncate max-w-xs" title={item.errorMessage}>
-                            {item.errorMessage}
-                          </div>
-                        )}
-                      </div>
-                    )}
-                  </td>
-                  <td className="py-2.5 px-4 text-right text-slate-600 dark:text-slate-400 tabular-nums">
-                    {(item.bytes / 1024).toFixed(1)} KB
+            </thead>
+            <tbody className="divide-y divide-slate-100 dark:divide-slate-800 text-xs">
+              {filteredHistory.length === 0 ? (
+                <tr>
+                  <td colSpan={6} className="py-12 text-center text-slate-500 dark:text-slate-400 font-sans">
+                    没有找到符合筛选条件的同步历史记录
                   </td>
                 </tr>
-              ))
-            )}
-          </tbody>
-        </table>
+              ) : (
+                filteredHistory.map((item) => (
+                  <tr key={item.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/40 transition-colors">
+                    <td className="py-2.5 px-4 text-slate-500 dark:text-slate-400 whitespace-nowrap">
+                      {new Date(item.timestamp).toLocaleString()}
+                    </td>
+                    <td className="py-2.5 px-4 text-slate-900 dark:text-slate-100 font-medium truncate max-w-[160px]" title={item.projectName}>
+                      {item.projectName}
+                    </td>
+                    <td className="py-2.5 px-4 whitespace-nowrap">
+                      <span
+                        className={`px-1.5 py-0.5 rounded text-[11px] font-semibold ${
+                          item.action.startsWith('Upload')
+                            ? 'bg-indigo-50 dark:bg-indigo-950/80 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800'
+                            : item.action === 'CreateConflictCopy' || item.action === 'AiMerge'
+                            ? 'bg-amber-50 dark:bg-amber-950/80 text-amber-800 dark:text-amber-300 border border-amber-200 dark:border-amber-800'
+                            : 'bg-indigo-50 dark:bg-indigo-950/80 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800'
+                        }`}
+                      >
+                        {item.action}
+                      </span>
+                    </td>
+                    <td className="py-2.5 px-4 text-slate-800 dark:text-slate-200 break-all max-w-sm" title={item.relativePath}>
+                      {item.relativePath}
+                    </td>
+                    <td className="py-2.5 px-4 whitespace-nowrap">
+                      {item.status === 'SUCCESS' ? (
+                        <span className="inline-flex items-center gap-1 text-emerald-700 dark:text-emerald-300 font-medium">
+                          <CheckCircle2 className="w-3.5 h-3.5" />
+                          成功
+                        </span>
+                      ) : (
+                        <div className="space-y-0.5">
+                          <span className="inline-flex items-center gap-1 text-amber-700 dark:text-amber-400 font-semibold">
+                            <AlertTriangle className="w-3.5 h-3.5" />
+                            {item.errorCode || 'BLOCKED'}
+                          </span>
+                          {item.errorMessage && (
+                            <div className="text-[11px] text-slate-500 dark:text-slate-400 truncate max-w-xs" title={item.errorMessage}>
+                              {item.errorMessage}
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </td>
+                    <td className="py-2.5 px-4 text-right text-slate-600 dark:text-slate-400 tabular-nums whitespace-nowrap">
+                      {(item.bytes / 1024).toFixed(1)} KB
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+        {filteredHistory.length > 0 && (
+          <div className="px-4 py-2 border-t border-slate-100 dark:border-slate-800 bg-slate-50/60 dark:bg-slate-800/40 text-[11px] text-slate-500 dark:text-slate-400 flex items-center justify-between">
+            <span>共记录 {filteredHistory.length} 项同步操作</span>
+            <span className="hidden sm:inline">在较窄屏幕下可左右滑动表格浏览完整字段</span>
+          </div>
+        )}
       </div>
     </div>
   );

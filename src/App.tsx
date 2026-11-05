@@ -37,8 +37,12 @@ export function App() {
     handleEnableSync,
     handleRetryTask,
     handleResolveConflict,
-    handlePreviewAiMerge,
-    handleApplyAiMerge,
+    aiSession,
+    startAiMerge,
+    refineAiMerge,
+    applyAiMerge,
+    setAiSessionOpen,
+    cancelAiMerge,
   } = useSyncStore();
 
   const [remoteProject, setRemoteProject] = useState<DiscoveredProject | null>(null);
@@ -89,6 +93,11 @@ export function App() {
           onPauseAll={handlePauseAll}
           onResumeAll={handleResumeAll}
           bannerAlert={bannerAlert}
+          aiSession={aiSession}
+          onOpenAiMerge={() => {
+            setCurrentNav('conflicts');
+            setAiSessionOpen(true);
+          }}
         />
 
         {/* Scrollable View Container */}
@@ -149,8 +158,13 @@ export function App() {
                 <ConflictCenter
                   conflicts={conflicts}
                   onResolve={handleResolveConflict}
-                  onPreviewAiMerge={handlePreviewAiMerge}
-                  onApplyAiMerge={handleApplyAiMerge}
+                  aiSession={aiSession}
+                  onStartAiMerge={startAiMerge}
+                  onRefineAiMerge={refineAiMerge}
+                  onApplyAiMerge={applyAiMerge}
+                  onCloseAiMergeModal={() => setAiSessionOpen(false)}
+                  onOpenAiMergeModal={() => setAiSessionOpen(true)}
+                  onCancelAiMerge={cancelAiMerge}
                   onOpenAiSettings={() => setCurrentNav('ai')}
                 />
               )}

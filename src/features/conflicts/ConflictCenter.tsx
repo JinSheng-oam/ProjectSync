@@ -10,24 +10,40 @@ import {
   Bot,
   LoaderCircle,
   Sparkles,
+  Send,
+  User,
+  Check,
+  RotateCcw,
+  Minimize2,
 } from 'lucide-react';
-import { AiMergePreviewDto, AiSettingsDto, ConflictItemDto, ConflictResolution } from '../../types/dto';
+import { AiSettingsDto, ConflictItemDto, ConflictResolution } from '../../types/dto';
 import { Button } from '../../components/common/UIComponents';
 import { api } from '../../services/api';
+import { AiMergeSession } from '../../stores/syncStore';
 
 interface ConflictCenterProps {
   conflicts: ConflictItemDto[];
   onResolve: (conflictId: string, resolution: ConflictResolution) => Promise<void>;
-  onPreviewAiMerge: (conflictId: string) => Promise<AiMergePreviewDto>;
-  onApplyAiMerge: (conflictId: string, previewId: string) => Promise<void>;
+  aiSession?: AiMergeSession | null;
+  onStartAiMerge: (conflict: ConflictItemDto) => Promise<void>;
+  onRefineAiMerge: (instruction: string, currentContent?: string) => Promise<void>;
+  onApplyAiMerge: (finalContent?: string) => Promise<void>;
+  onCloseAiMergeModal: () => void;
+  onOpenAiMergeModal: () => void;
+  onCancelAiMerge: () => void;
   onOpenAiSettings: () => void;
 }
 
 export function ConflictCenter({
   conflicts,
   onResolve,
-  onPreviewAiMerge,
+  aiSession,
+  onStartAiMerge,
+  onRefineAiMerge,
   onApplyAiMerge,
+  onCloseAiMergeModal,
+  onOpenAiMergeModal,
+  onCancelAiMerge,
   onOpenAiSettings,
 }: ConflictCenterProps) {
   const unresolvedConflicts = conflicts.filter((c) => c.status === 'UNRESOLVED');
@@ -42,9 +58,10 @@ export function ConflictCenter({
   } | null>(null);
   const [processing, setProcessing] = useState(false);
   const [aiSettings, setAiSettings] = useState<AiSettingsDto | null>(null);
-  const [aiPreview, setAiPreview] = useState<AiMergePreviewDto | null>(null);
-  const [aiBusy, setAiBusy] = useState(false);
-  const [aiError, setAiError] = useState('');
+
+  // Local draft content for manual edits in the merge modal
+  const [localDraftContent, setLocalDraftContent] = useState('');
+  const [agentInstruction, setAgentInstruction] = useState('');
 
   const activeConflict = conflicts.find((c) => c.id === selectedId) || unresolvedConflicts[0];
 
@@ -56,37 +73,12 @@ export function ConflictCenter({
     return () => { active = false; };
   }, []);
 
+  // Sync draft content whenever aiSession preview updates
   useEffect(() => {
-    setAiPreview(null);
-    setAiError('');
-  }, [selectedId]);
-
-  const handleAiMergePreview = async () => {
-    if (!activeConflict) return;
-    setAiBusy(true);
-    setAiError('');
-    try {
-      setAiPreview(await onPreviewAiMerge(activeConflict.id));
-    } catch (reason: unknown) {
-      setAiError(errorMessage(reason));
-    } finally {
-      setAiBusy(false);
+    if (aiSession?.preview) {
+      setLocalDraftContent(aiSession.preview.mergedContent);
     }
-  };
-
-  const handleAiMergeApply = async () => {
-    if (!activeConflict || !aiPreview) return;
-    setAiBusy(true);
-    setAiError('');
-    try {
-      await onApplyAiMerge(activeConflict.id, aiPreview.previewId);
-      setAiPreview(null);
-    } catch (reason: unknown) {
-      setAiError(errorMessage(reason));
-    } finally {
-      setAiBusy(false);
-    }
-  };
+  }, [aiSession?.preview]);
 
   const handleApplyResolution = async () => {
     if (!confirmResolution) return;
@@ -98,6 +90,15 @@ export function ConflictCenter({
       setProcessing(false);
     }
   };
+
+  const handleSendAgentInstruction = async () => {
+    if (!agentInstruction.trim() || !aiSession) return;
+    const instruction = agentInstruction.trim();
+    setAgentInstruction('');
+    await onRefineAiMerge(instruction, localDraftContent);
+  };
+
+  const isAiMergingThis = aiSession && aiSession.conflictId === activeConflict?.id;
 
   return (
     <div className="space-y-6 max-w-7xl mx-auto">
@@ -150,6 +151,7 @@ export function ConflictCenter({
             <div className="divide-y divide-slate-100 dark:divide-slate-800 max-h-[600px] overflow-y-auto">
               {unresolvedConflicts.map((item) => {
                 const isSelected = item.id === (activeConflict?.id || selectedId);
+                const hasSession = aiSession && aiSession.conflictId === item.id;
                 return (
                   <div
                     key={item.id}
@@ -161,12 +163,20 @@ export function ConflictCenter({
                     }`}
                   >
                     <div className="flex items-center justify-between gap-2">
-                      <span className="text-xs font-mono font-medium truncate max-w-[200px]" title={item.relativePath}>
+                      <span className="text-xs font-mono font-medium truncate max-w-[180px]" title={item.relativePath}>
                         {item.relativePath}
                       </span>
-                      <span className="text-[11px] font-mono px-2 py-0.5 rounded-md bg-amber-100 dark:bg-amber-950 text-amber-900 dark:text-amber-200 border border-amber-300 dark:border-amber-700 shrink-0">
-                        {item.conflictType}
-                      </span>
+                      <div className="flex items-center gap-1 shrink-0">
+                        {hasSession && (
+                          <span className="px-1.5 py-0.2 rounded text-[10px] font-medium bg-indigo-100 text-indigo-700 dark:bg-indigo-950 dark:text-indigo-300 flex items-center gap-0.5">
+                            <Sparkles className="w-2.5 h-2.5" />
+                            {aiSession.status === 'merging' ? '合并中' : 'AI待审'}
+                          </span>
+                        )}
+                        <span className="text-[11px] font-mono px-2 py-0.5 rounded-md bg-amber-100 dark:bg-amber-950 text-amber-900 dark:text-amber-200 border border-amber-300 dark:border-amber-700">
+                          {item.conflictType}
+                        </span>
+                      </div>
                     </div>
 
                     <div className="flex items-center justify-between text-[11px] text-slate-600 dark:text-slate-400 font-mono">
@@ -321,11 +331,13 @@ export function ConflictCenter({
                     </p>
                   </div>
 
-                  {/* Action: AI text merge */}
+                  {/* Action 2: AI text merge with Agent Refinement */}
                   <div
-                    className={`p-3.5 rounded-xl border space-y-1.5 shadow-soft-sm transition-all ${
-                      aiSettings?.configured
-                        ? 'border-amber-300 bg-amber-50/70 hover:bg-amber-100/70 cursor-pointer dark:border-amber-700 dark:bg-amber-950/20 dark:hover:bg-amber-950/40'
+                    className={`p-3.5 rounded-xl border space-y-1.5 shadow-soft-sm transition-all cursor-pointer ${
+                      isAiMergingThis
+                        ? 'border-indigo-500 bg-indigo-50/80 dark:border-indigo-500 dark:bg-indigo-950/40 ring-2 ring-indigo-500/20'
+                        : aiSettings?.configured
+                        ? 'border-amber-300 bg-amber-50/70 hover:bg-amber-100/70 dark:border-amber-700 dark:bg-amber-950/20 dark:hover:bg-amber-950/40'
                         : 'border-slate-200 bg-slate-50/70 dark:border-slate-800 dark:bg-slate-900/60'
                     }`}
                     onClick={() => {
@@ -333,24 +345,40 @@ export function ConflictCenter({
                         onOpenAiSettings();
                         return;
                       }
-                      void handleAiMergePreview();
+                      if (isAiMergingThis) {
+                        onOpenAiMergeModal();
+                      } else {
+                        void onStartAiMerge(activeConflict);
+                      }
                     }}
                   >
                     <div className="flex items-center justify-between gap-2 text-xs font-semibold text-amber-900 dark:text-amber-200">
                       <span className="flex items-center gap-1.5">
                         <Sparkles className="h-4 w-4 text-amber-600 dark:text-amber-400" />
-                        <span>{aiSettings?.configured ? 'AI 智能合并' : '配置 AI 合并'}</span>
+                        <span>
+                          {isAiMergingThis
+                            ? aiSession.status === 'merging'
+                              ? 'AI 正在后台合并中…'
+                              : '查看 AI 合并审阅面板'
+                            : aiSettings?.configured
+                            ? 'AI 智能合并与建议'
+                            : '配置 AI 合并'}
+                        </span>
                       </span>
-                      {aiBusy && <LoaderCircle className="h-3.5 w-3.5 animate-spin" />}
+                      {isAiMergingThis && aiSession.status === 'merging' && (
+                        <LoaderCircle className="h-3.5 w-3.5 animate-spin text-amber-600" />
+                      )}
                     </div>
                     <p className="text-[11px] leading-normal text-slate-600 dark:text-slate-400">
-                      {aiSettings?.configured
-                        ? '将双方 UTF-8 文本发送给已配置模型，生成完整合并结果供你审阅；原始版本自动备份。'
+                      {isAiMergingThis
+                        ? '已保留合并状态，点击即可继续与 AI Agent 交互微调并确认写入。'
+                        : aiSettings?.configured
+                        ? 'AI 给出中文合并建议，支持类 Agent 连续下达指令调整文件；切换页面不受影响。'
                         : '需要先在 AI 设置中保存接口和模型。'}
                     </p>
                   </div>
 
-                  {/* Action 2: KEEP_LOCAL */}
+                  {/* Action 3: KEEP_LOCAL */}
                   <div
                     onClick={() =>
                       setConfirmResolution({
@@ -371,7 +399,7 @@ export function ConflictCenter({
                     </p>
                   </div>
 
-                  {/* Action 3: KEEP_REMOTE */}
+                  {/* Action 4: KEEP_REMOTE */}
                   <div
                     onClick={() =>
                       setConfirmResolution({
@@ -392,10 +420,11 @@ export function ConflictCenter({
                     </p>
                   </div>
                 </div>
-                {aiError && (
+
+                {aiSession?.error && (
                   <div role="alert" className="flex items-start gap-2 rounded-xl border border-rose-200 bg-rose-50 p-3 text-xs text-rose-800 dark:border-rose-900 dark:bg-rose-950/30 dark:text-rose-300">
                     <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
-                    <span className="break-words">{aiError}</span>
+                    <span className="break-words">{aiSession.error}</span>
                   </div>
                 )}
               </div>
@@ -404,7 +433,7 @@ export function ConflictCenter({
         </div>
       )}
 
-      {/* Confirmation Modal for Conflict Action */}
+      {/* Confirmation Modal for Standard Conflict Action */}
       {confirmResolution && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/50 dark:bg-black/80 backdrop-blur-sm animate-in fade-in duration-150">
           <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-soft-lg w-full max-w-lg p-6 space-y-4">
@@ -444,53 +473,234 @@ export function ConflictCenter({
         </div>
       )}
 
-      {aiPreview && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/55 p-4 backdrop-blur-sm dark:bg-black/80">
-          <div className="flex max-h-[92vh] w-full max-w-4xl flex-col space-y-4 rounded-2xl border border-slate-200 bg-white p-6 shadow-soft-lg dark:border-slate-800 dark:bg-slate-900">
-            <div className="flex items-start justify-between gap-4 border-b border-slate-200 pb-4 dark:border-slate-800">
-              <div className="flex items-start gap-3">
+      {/* Advanced AI Agent Workspace & Merge Review Modal */}
+      {aiSession && aiSession.isOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 p-4 backdrop-blur-sm dark:bg-black/80 animate-in fade-in duration-150">
+          <div className="flex max-h-[92vh] w-full max-w-6xl flex-col rounded-2xl border border-slate-200 bg-white shadow-soft-lg dark:border-slate-800 dark:bg-slate-900 overflow-hidden">
+            {/* Modal Header */}
+            <div className="flex items-center justify-between gap-4 border-b border-slate-200 px-6 py-4 dark:border-slate-800 bg-slate-50/70 dark:bg-slate-950/60 shrink-0">
+              <div className="flex items-center gap-3">
                 <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-amber-200 bg-amber-50 text-amber-600 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-300">
                   <Sparkles className="h-5 w-5" />
                 </div>
                 <div>
-                  <h3 className="text-base font-semibold text-slate-900 dark:text-slate-100">审阅 AI 合并结果</h3>
-                  <p className="mt-0.5 break-all font-mono text-xs text-slate-500 dark:text-slate-400">{aiPreview.relativePath}</p>
+                  <h3 className="text-base font-semibold text-slate-900 dark:text-slate-100 flex items-center gap-2">
+                    <span>AI 智能合并与协同审阅</span>
+                    <span className="text-xs px-2 py-0.5 rounded-md bg-indigo-50 dark:bg-indigo-950 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800 font-medium">
+                      Agent 交互中
+                    </span>
+                  </h3>
+                  <p className="mt-0.5 break-all font-mono text-xs text-slate-500 dark:text-slate-400">
+                    {aiSession.relativePath}
+                  </p>
                 </div>
               </div>
-              <span className="rounded-lg border border-slate-200 bg-slate-50 px-2 py-1 font-mono text-[11px] text-slate-600 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300">
-                {aiPreview.model}
-              </span>
-            </div>
 
-            <div className="flex items-start gap-2 rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs leading-relaxed text-amber-900 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-200">
-              <ShieldAlert className="mt-0.5 h-4 w-4 shrink-0" />
-              <span>确认后会同时替换本地和 WebDAV 文件。原始本地与远端版本已分别备份到 ProjectSync 回收站；请先完整审阅以下内容。</span>
-            </div>
-
-            <textarea
-              readOnly
-              aria-label="AI 合并结果预览"
-              value={aiPreview.mergedContent}
-              className="min-h-64 flex-1 resize-none overflow-auto rounded-xl border border-slate-200 bg-slate-50 p-3 font-mono text-xs leading-relaxed text-slate-800 outline-none dark:border-slate-700 dark:bg-slate-950/60 dark:text-slate-200"
-            />
-
-            {aiError && (
-              <div role="alert" className="rounded-xl border border-rose-200 bg-rose-50 p-3 text-xs text-rose-800 dark:border-rose-900 dark:bg-rose-950/30 dark:text-rose-300">
-                {aiError}
-              </div>
-            )}
-
-            <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-200 pt-4 dark:border-slate-800">
-              <span className="font-mono text-[11px] text-slate-500 dark:text-slate-400">
-                本地 {formatBytes(aiPreview.localSize)} · 远端 {formatBytes(aiPreview.remoteSize)}
-              </span>
               <div className="flex items-center gap-2">
-                <Button variant="secondary" size="md" onClick={() => setAiPreview(null)} disabled={aiBusy}>
-                  取消
+                {aiSession.preview?.model && (
+                  <span className="rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-1 font-mono text-[11px] text-slate-600 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300">
+                    {aiSession.preview.model}
+                  </span>
+                )}
+                <button
+                  type="button"
+                  onClick={onCloseAiMergeModal}
+                  title="最小化并在后台保持"
+                  className="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+                >
+                  <Minimize2 className="w-4 h-4" />
+                </button>
+              </div>
+            </div>
+
+            {/* Split Workspace Body: Left Code Editor (7 cols) + Right Agent Instructions & Chinese Suggestions (5 cols) */}
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-0 flex-1 min-h-0 overflow-hidden divide-y lg:divide-y-0 lg:divide-x divide-slate-200 dark:divide-slate-800">
+              {/* Left Column: Editable Merged Content (7 Cols) */}
+              <div className="lg:col-span-7 flex flex-col min-h-0 bg-slate-50/40 dark:bg-slate-900/40 relative">
+                <div className="flex items-center justify-between px-4 py-2.5 border-b border-slate-200 dark:border-slate-800 bg-slate-100/60 dark:bg-slate-800/40 text-xs shrink-0">
+                  <span className="font-semibold text-slate-800 dark:text-slate-200 flex items-center gap-1.5">
+                    <span>最终合并代码</span>
+                    <span className="text-[11px] font-normal text-slate-500 dark:text-slate-400">(可直接手动微调)</span>
+                  </span>
+                  <span className="font-mono text-[11px] text-slate-500 dark:text-slate-400">
+                    {localDraftContent.length} 字符 · {localDraftContent.split('\n').length} 行
+                  </span>
+                </div>
+
+                <div className="flex-1 p-3 min-h-0 relative">
+                  <textarea
+                    aria-label="AI 合并代码预览与编辑"
+                    value={localDraftContent}
+                    onChange={(e) => setLocalDraftContent(e.target.value)}
+                    className="w-full h-full resize-none rounded-xl border border-slate-200 bg-white p-3 font-mono text-xs leading-relaxed text-slate-900 outline-none focus:border-indigo-500 dark:border-slate-700 dark:bg-slate-950/70 dark:text-slate-100 transition-colors"
+                    placeholder={aiSession.status === 'merging' ? 'AI 正在分析并生成合并代码...' : '合并内容为空'}
+                  />
+
+                  {aiSession.status === 'merging' && (
+                    <div className="absolute inset-3 bg-white/80 dark:bg-slate-900/80 backdrop-blur-[2px] rounded-xl flex flex-col items-center justify-center gap-3 z-10 animate-in fade-in">
+                      <LoaderCircle className="w-7 h-7 text-indigo-600 animate-spin" />
+                      <div className="text-xs font-medium text-slate-700 dark:text-slate-300">
+                        AI 正在分析差异并执行合并指令，请稍候...
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* Right Column: AI Suggestions & Agent Command Interactive Panel (5 Cols) */}
+              <div className="lg:col-span-5 flex flex-col min-h-0 bg-white dark:bg-slate-900">
+                <div className="flex items-center justify-between px-4 py-2.5 border-b border-slate-200 dark:border-slate-800 bg-slate-50/70 dark:bg-slate-800/50 text-xs shrink-0">
+                  <span className="font-semibold text-slate-800 dark:text-slate-200 flex items-center gap-1.5">
+                    <Bot className="w-4 h-4 text-indigo-600 dark:text-indigo-400" />
+                    <span>AI 合并建议与指令 (Agent)</span>
+                  </span>
+                  <span className="text-[11px] text-slate-500 dark:text-slate-400">
+                    {aiSession.messages.length} 条记录
+                  </span>
+                </div>
+
+                {/* Messages & Suggestions Scrollable Box */}
+                <div className="flex-1 p-4 space-y-3.5 overflow-y-auto min-h-0 text-xs">
+                  {/* Primary Chinese Suggestions Card */}
+                  {aiSession.suggestions && (
+                    <div className="p-3.5 rounded-xl border border-emerald-200 dark:border-emerald-800/80 bg-emerald-50/60 dark:bg-emerald-950/30 text-emerald-950 dark:text-emerald-100 space-y-1.5 shadow-soft-sm">
+                      <div className="font-semibold text-xs flex items-center gap-1.5 text-emerald-800 dark:text-emerald-300">
+                        <Sparkles className="w-3.5 h-3.5 text-emerald-600" />
+                        <span>AI 中文合并建议与说明:</span>
+                      </div>
+                      <div className="text-xs leading-relaxed whitespace-pre-wrap font-sans text-slate-700 dark:text-slate-200">
+                        {aiSession.suggestions}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Agent Dialog Stream */}
+                  {aiSession.messages.map((msg) => (
+                    <div
+                      key={msg.id}
+                      className={`flex gap-2.5 items-start ${
+                        msg.role === 'user' ? 'justify-end' : 'justify-start'
+                      }`}
+                    >
+                      {msg.role === 'assistant' && (
+                        <div className="w-6 h-6 rounded-lg bg-indigo-100 dark:bg-indigo-950 border border-indigo-200 dark:border-indigo-800 flex items-center justify-center text-indigo-600 dark:text-indigo-400 shrink-0 mt-0.5">
+                          <Bot className="w-3.5 h-3.5" />
+                        </div>
+                      )}
+
+                      <div
+                        className={`p-3 rounded-2xl max-w-[85%] text-xs leading-relaxed ${
+                          msg.role === 'user'
+                            ? 'bg-indigo-600 text-white rounded-tr-none'
+                            : 'bg-slate-100 dark:bg-slate-800/80 text-slate-800 dark:text-slate-200 border border-slate-200/60 dark:border-slate-700/60 rounded-tl-none whitespace-pre-wrap'
+                        }`}
+                      >
+                        {msg.content}
+                      </div>
+
+                      {msg.role === 'user' && (
+                        <div className="w-6 h-6 rounded-lg bg-slate-200 dark:bg-slate-700 flex items-center justify-center text-slate-600 dark:text-slate-300 shrink-0 mt-0.5">
+                          <User className="w-3.5 h-3.5" />
+                        </div>
+                      )}
+                    </div>
+                  ))}
+
+                  {aiSession.error && (
+                    <div className="p-3 rounded-xl border border-rose-200 bg-rose-50 dark:border-rose-900 dark:bg-rose-950/40 text-rose-800 dark:text-rose-200 text-xs">
+                      {aiSession.error}
+                    </div>
+                  )}
+                </div>
+
+                {/* Quick Directive Chips */}
+                <div className="px-4 py-2 border-t border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-850 flex flex-wrap gap-1.5 text-[11px] shrink-0">
+                  <span className="text-slate-400 self-center">快捷指令:</span>
+                  {[
+                    '优先采用本地实现的修改',
+                    '同时保留双端全部代码',
+                    '远端优先，仅合入本地字段',
+                    '精简重复项并统一中文注释',
+                  ].map((chip) => (
+                    <button
+                      key={chip}
+                      type="button"
+                      disabled={aiSession.status === 'merging'}
+                      onClick={() => setAgentInstruction(chip)}
+                      className="px-2 py-0.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:border-indigo-400 dark:hover:border-indigo-600 transition-colors disabled:opacity-50"
+                    >
+                      {chip}
+                    </button>
+                  ))}
+                </div>
+
+                {/* Agent Prompt Input Bar */}
+                <div className="p-3 border-t border-slate-200 dark:border-slate-800 bg-slate-50/80 dark:bg-slate-900 flex gap-2 shrink-0">
+                  <input
+                    type="text"
+                    value={agentInstruction}
+                    onChange={(e) => setAgentInstruction(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        void handleSendAgentInstruction();
+                      }
+                    }}
+                    disabled={aiSession.status === 'merging'}
+                    placeholder="向 AI 下达调整指令，例如：把第20行配置改为远端..."
+                    className="flex-1 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-1.5 text-xs text-slate-900 dark:text-slate-100 outline-none focus:border-indigo-500 disabled:opacity-50"
+                  />
+                  <Button
+                    variant="primary"
+                    size="sm"
+                    disabled={!agentInstruction.trim() || aiSession.status === 'merging'}
+                    onClick={() => void handleSendAgentInstruction()}
+                    className="gap-1 shrink-0"
+                  >
+                    <Send className="w-3.5 h-3.5" />
+                    <span>发送指令</span>
+                  </Button>
+                </div>
+              </div>
+            </div>
+
+            {/* Modal Footer Controls */}
+            <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-200 px-6 py-3.5 dark:border-slate-800 bg-slate-50/70 dark:bg-slate-950/60 shrink-0">
+              <span className="text-[11px] text-slate-500 dark:text-slate-400">
+                提示：合并状态在全局后台保持，切换到其他页面后可随时在顶部或冲突列表点击返回。
+              </span>
+
+              <div className="flex items-center gap-2">
+                <Button
+                  variant="ghost"
+                  size="md"
+                  onClick={onCloseAiMergeModal}
+                  title="最小化并保留在后台，可随时返回查看"
+                >
+                  后台运行 (暂存)
                 </Button>
-                <Button variant="accent" size="md" onClick={handleAiMergeApply} disabled={aiBusy} className="gap-1.5">
-                  {aiBusy ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <Bot className="h-4 w-4" />}
-                  {aiBusy ? '正在写入…' : '确认写入两端'}
+                <Button
+                  variant="secondary"
+                  size="md"
+                  onClick={onCancelAiMerge}
+                  className="gap-1"
+                >
+                  <RotateCcw className="w-3.5 h-3.5" />
+                  放弃本次合并
+                </Button>
+                <Button
+                  variant="accent"
+                  size="md"
+                  onClick={() => void onApplyAiMerge(localDraftContent)}
+                  disabled={aiSession.status === 'merging' || aiSession.status === 'applying' || !localDraftContent.trim()}
+                  className="gap-1.5"
+                >
+                  {aiSession.status === 'applying' ? (
+                    <LoaderCircle className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <Check className="h-4 w-4" />
+                  )}
+                  <span>{aiSession.status === 'applying' ? '正在写入两端…' : '确认写入两端'}</span>
                 </Button>
               </div>
             </div>
@@ -499,16 +709,4 @@ export function ConflictCenter({
       )}
     </div>
   );
-}
-
-function errorMessage(reason: unknown): string {
-  if (typeof reason === 'object' && reason !== null && 'message' in reason) {
-    return String(reason.message);
-  }
-  return String(reason);
-}
-
-function formatBytes(value: number): string {
-  if (value < 1024) return `${value} B`;
-  return `${(value / 1024).toFixed(1)} KiB`;
 }

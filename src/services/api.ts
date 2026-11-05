@@ -17,6 +17,7 @@ import {
   SaveAiSettingsInput,
   AiConnectionTestDto,
   AiMergePreviewDto,
+  RefineAiMergeInput,
 } from '../types/dto';
 import {
   INITIAL_ACCOUNTS,
@@ -640,6 +641,7 @@ export const api = {
         conflictId,
         relativePath: 'docs/merge-preview.md',
         mergedContent: '# 合并预览\n\n本地与远端内容已合并。',
+        suggestions: '检测到本地新增了部分实现逻辑，远端更新了配置说明。已合并双方有效变更，请审阅下方的代码或在右侧发送指令继续微调。',
         localSize: 1024,
         remoteSize: 1280,
         model: mockAiSettings.model,
@@ -649,6 +651,25 @@ export const api = {
     }
     const { invoke } = await import('@tauri-apps/api/core');
     return invoke<AiMergePreviewDto>('preview_ai_merge', { conflictId });
+  },
+
+  async refineAiMerge(input: RefineAiMergeInput): Promise<AiMergePreviewDto> {
+    if (!isTauriEnv) {
+      return {
+        previewId: input.previewId,
+        conflictId: input.conflictId,
+        relativePath: 'docs/merge-preview.md',
+        mergedContent: (input.currentContent || '# 合并预览\n\n本地与远端内容已合并。') + `\n\n// [AI Agent 修改记录]: 已按指令「${input.instruction}」调整`,
+        suggestions: `已根据您的指令「${input.instruction}」对合并内容进行修改，请继续审阅。如需进一步微调可继续输入。`,
+        localSize: 1024,
+        remoteSize: 1280,
+        model: mockAiSettings.model,
+        createdAt: Date.now(),
+        expiresAt: Date.now() + 7_200_000,
+      };
+    }
+    const { invoke } = await import('@tauri-apps/api/core');
+    return invoke<AiMergePreviewDto>('refine_ai_merge', { input });
   },
 
   async applyAiMerge(conflictId: string, previewId: string): Promise<{ success: boolean; message: string }> {

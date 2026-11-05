@@ -248,9 +248,17 @@ export interface AiMergePreviewDto {
   conflictId: string;
   relativePath: string;
   mergedContent: string;
+  suggestions?: string;
   localSize: number;
   remoteSize: number;
   model: string;
   createdAt: number;
   expiresAt: number;
+}
+
+export interface RefineAiMergeInput {
+  conflictId: string;
+  previewId: string;
+  instruction: string;
+  currentContent?: string;
 }

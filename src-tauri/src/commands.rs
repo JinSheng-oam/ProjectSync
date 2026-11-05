@@ -648,6 +648,28 @@ pub async fn preview_ai_merge(
     api(state.sync.preview_ai_merge(&conflict_id).await)
 }
 
+#[derive(Debug, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RefineAiMergeInput {
+    pub conflict_id: String,
+    pub preview_id: String,
+    pub instruction: String,
+    pub current_content: Option<String>,
+}
+
+#[tauri::command]
+pub async fn refine_ai_merge(
+    state: State<'_, AppState>,
+    input: RefineAiMergeInput,
+) -> ApiResult<AiMergePreviewDto> {
+    api(state.sync.refine_ai_merge(
+        &input.conflict_id,
+        &input.preview_id,
+        &input.instruction,
+        input.current_content.as_deref(),
+    ).await)
+}
+
 #[tauri::command]
 pub async fn apply_ai_merge(
     state: State<'_, AppState>,
@@ -828,6 +850,7 @@ pub fn register_commands(builder: tauri::Builder<tauri::Wry>) -> tauri::Builder<
         get_conflict_detail,
         resolve_conflict,
         preview_ai_merge,
+        refine_ai_merge,
         apply_ai_merge,
         query_sync_history,
         export_diagnostics,
