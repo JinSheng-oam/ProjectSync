@@ -11,6 +11,7 @@ import { SyncHistoryView } from './features/history/SyncHistoryView';
 import { SettingsView } from './features/settings/SettingsView';
 import { AddProjectWizard } from './features/wizard/AddProjectWizard';
 import { ProjectManagementView } from './features/projects/ProjectManagementView';
+import { AiSettingsView } from './features/ai/AiSettingsView';
 
 export function App() {
   const {
@@ -36,6 +37,8 @@ export function App() {
     handleEnableSync,
     handleRetryTask,
     handleResolveConflict,
+    handlePreviewAiMerge,
+    handleApplyAiMerge,
   } = useSyncStore();
 
   const [remoteProject, setRemoteProject] = useState<DiscoveredProject | null>(null);
@@ -58,6 +61,7 @@ export function App() {
     webdav: 'WebDAV 远端节点管理',
     conflicts: '冲突拦截与版本裁决',
     history: '全量同步审计日志',
+    ai: 'AI 服务与冲突合并',
     settings: '系统配置与引擎参数',
   };
 
@@ -145,6 +149,9 @@ export function App() {
                 <ConflictCenter
                   conflicts={conflicts}
                   onResolve={handleResolveConflict}
+                  onPreviewAiMerge={handlePreviewAiMerge}
+                  onApplyAiMerge={handleApplyAiMerge}
+                  onOpenAiSettings={() => setCurrentNav('ai')}
                 />
               )}
 
@@ -158,6 +165,8 @@ export function App() {
               {currentNav === 'history' && (
                 <SyncHistoryView history={history} />
               )}
+
+              {currentNav === 'ai' && <AiSettingsView />}
 
               {currentNav === 'settings' && <SettingsView />}
             </>

@@ -13,6 +13,10 @@ import {
   AppSettingsDto,
   RemoteEntryDto,
   RuleImpactDto,
+  AiSettingsDto,
+  SaveAiSettingsInput,
+  AiConnectionTestDto,
+  AiMergePreviewDto,
 } from '../types/dto';
 import {
   INITIAL_ACCOUNTS,
@@ -268,6 +272,14 @@ export const mockEngine = new MockEngine();
 
 // Check if running in real Tauri window
 const isTauriEnv = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
+
+let mockAiSettings: AiSettingsDto = {
+  endpoint: 'https://api.openai.com/v1',
+  model: 'gpt-4o-mini',
+  hasApiKey: false,
+  configured: true,
+  mergePrompt: '合并本地与远端修改，保留双方意图；不要引入新事实、删除无关内容或改变文件格式。',
+};
 
 export const api = {
   isTauri: isTauriEnv,
@@ -564,5 +576,84 @@ export const api = {
     if (!isTauriEnv) return;
     const { invoke } = await import('@tauri-apps/api/core');
     return invoke('update_app_settings', { settings });
+  },
+
+  async getAiSettings(): Promise<AiSettingsDto> {
+    if (!isTauriEnv) return { ...mockAiSettings };
+    const { invoke } = await import('@tauri-apps/api/core');
+    return invoke<AiSettingsDto>('get_ai_settings');
+  },
+
+  async saveAiSettings(settings: SaveAiSettingsInput): Promise<AiSettingsDto> {
+    if (!isTauriEnv) {
+      mockAiSettings = {
+        endpoint: settings.endpoint.trim(),
+        model: settings.model.trim(),
+        hasApiKey: settings.clearApiKey ? false : Boolean(settings.apiKey?.trim()) || mockAiSettings.hasApiKey,
+        configured: Boolean(settings.endpoint.trim() && settings.model.trim()),
+        mergePrompt: settings.mergePrompt.trim(),
+      };
+      return { ...mockAiSettings };
+    }
+    const { invoke } = await import('@tauri-apps/api/core');
+    return invoke<AiSettingsDto>('save_ai_settings', { settings });
+  },
+
+  async testAiSettings(input?: { endpoint: string; model: string; apiKey?: string }): Promise<AiConnectionTestDto> {
+    if (!isTauriEnv) return { message: '连接成功，模型返回：OK', model: input?.model || mockAiSettings.model, latencyMs: 320 };
+    const { invoke } = await import('@tauri-apps/api/core');
+    return invoke<AiConnectionTestDto>('test_ai_settings', { input });
+  },
+
+  async listAiModels(endpoint: string, apiKey?: string): Promise<string[]> {
+    if (!isTauriEnv) {
+      return ['gpt-4.1', 'gpt-4.1-mini', 'gpt-4o', 'gpt-4o-mini'];
+    }
+    const { invoke } = await import('@tauri-apps/api/core');
+    return invoke<string[]>('list_ai_models', {
+      input: { endpoint, apiKey: apiKey || undefined },
+    });
+  },
+
+  async listAiScopePaths(localPath: string): Promise<string[]> {
+    if (!isTauriEnv) return ['README.md', 'package.json', 'docs/overview.md', 'src/main.tsx'];
+    const { invoke } = await import('@tauri-apps/api/core');
+    return invoke<string[]>('list_ai_scope_paths', { localPath });
+  },
+
+  async suggestAiScope(instruction: string, paths: string[]): Promise<SyncRuleDto[]> {
+    if (!isTauriEnv) {
+      return [
+        { id: -1, ruleType: 'INCLUDE', pattern: '**/*.md', enabled: true, priority: 10 },
+        { id: -2, ruleType: 'INCLUDE', pattern: '**/docs/**', enabled: true, priority: 20 },
+        { id: -3, ruleType: 'EXCLUDE', pattern: '**/node_modules/**', enabled: true, priority: 30 },
+      ];
+    }
+    const { invoke } = await import('@tauri-apps/api/core');
+    return invoke<SyncRuleDto[]>('suggest_ai_scope', { input: { instruction, paths } });
+  },
+
+  async previewAiMerge(conflictId: string): Promise<AiMergePreviewDto> {
+    if (!isTauriEnv) {
+      return {
+        previewId: '00000000-0000-4000-8000-000000000001',
+        conflictId,
+        relativePath: 'docs/merge-preview.md',
+        mergedContent: '# 合并预览\n\n本地与远端内容已合并。',
+        localSize: 1024,
+        remoteSize: 1280,
+        model: mockAiSettings.model,
+        createdAt: Date.now(),
+        expiresAt: Date.now() + 7_200_000,
+      };
+    }
+    const { invoke } = await import('@tauri-apps/api/core');
+    return invoke<AiMergePreviewDto>('preview_ai_merge', { conflictId });
+  },
+
+  async applyAiMerge(conflictId: string, previewId: string): Promise<{ success: boolean; message: string }> {
+    if (!isTauriEnv) return { success: true, message: 'AI 合并已写入本地与 WebDAV；合并前两版已备份。' };
+    const { invoke } = await import('@tauri-apps/api/core');
+    return invoke('apply_ai_merge', { conflictId, previewId });
   },
 };

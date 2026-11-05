@@ -1,3 +1,4 @@
+mod ai;
 mod ai_scope;
 mod app;
 mod commands;

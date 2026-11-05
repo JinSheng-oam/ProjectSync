@@ -6,6 +6,7 @@ import {
   TaskDto,
   HistoryItemDto,
   ConflictResolution,
+  AiMergePreviewDto,
 } from '../types/dto';
 import { api } from '../services/api';
 
@@ -16,6 +17,7 @@ export type ActiveNav =
   | 'webdav'
   | 'conflicts'
   | 'history'
+  | 'ai'
   | 'settings';
 
 export function useSyncStore() {
@@ -214,6 +216,17 @@ export function useSyncStore() {
     }
   };
 
+  const handlePreviewAiMerge = async (conflictId: string): Promise<AiMergePreviewDto> => {
+    return api.previewAiMerge(conflictId);
+  };
+
+  const handleApplyAiMerge = async (conflictId: string, previewId: string) => {
+    const result = await api.applyAiMerge(conflictId, previewId);
+    setBannerAlert(result.message);
+    setTimeout(() => setBannerAlert(null), 7000);
+    await refreshAll();
+  };
+
   const openProjectDetail = (rootId: string) => {
     setSelectedProjectId(rootId);
     setCurrentNav('project_detail');
@@ -244,5 +257,7 @@ export function useSyncStore() {
     handleEnableSync,
     handleRetryTask,
     handleResolveConflict,
+    handlePreviewAiMerge,
+    handleApplyAiMerge,
   };
 }

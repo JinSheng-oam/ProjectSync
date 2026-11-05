@@ -8,6 +8,7 @@ import {
   Plus,
   ShieldCheck,
   Cpu,
+  Sparkles,
 } from 'lucide-react';
 import { ActiveNav } from '../../stores/syncStore';
 import { SyncRootDto, ConflictItemDto, WebDavAccountDto } from '../../types/dto';
@@ -63,6 +64,12 @@ export function CommandRail({
       id: 'history' as ActiveNav,
       label: '同步日志',
       icon: History,
+      badge: null,
+    },
+    {
+      id: 'ai' as ActiveNav,
+      label: 'AI 设置',
+      icon: Sparkles,
       badge: null,
     },
     {

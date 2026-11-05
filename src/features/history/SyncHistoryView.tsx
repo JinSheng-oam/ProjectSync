@@ -95,6 +95,7 @@ export function SyncHistoryView({ history }: { history: HistoryItemDto[] }) {
             <option value="UploadUpdate">UploadUpdate</option>
             <option value="DownloadUpdate">DownloadUpdate</option>
             <option value="CreateConflictCopy">CreateConflictCopy</option>
+            <option value="AiMerge">AiMerge</option>
             <option value="MoveLocalToTrash">MoveLocalToTrash</option>
           </select>
 
@@ -143,7 +144,7 @@ export function SyncHistoryView({ history }: { history: HistoryItemDto[] }) {
                       className={`px-1.5 py-0.5 rounded text-[11px] font-semibold ${
                         item.action.startsWith('Upload')
                           ? 'bg-indigo-50 dark:bg-indigo-950/80 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800'
-                          : item.action === 'CreateConflictCopy'
+                          : item.action === 'CreateConflictCopy' || item.action === 'AiMerge'
                           ? 'bg-amber-50 dark:bg-amber-950/80 text-amber-800 dark:text-amber-300 border border-amber-200 dark:border-amber-800'
                           : 'bg-indigo-50 dark:bg-indigo-950/80 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800'
                       }`}

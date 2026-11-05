@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
   AlertTriangle,
   ShieldAlert,
@@ -7,16 +7,29 @@ import {
   FileCheck2,
   Copy,
   CheckCircle,
+  Bot,
+  LoaderCircle,
+  Sparkles,
 } from 'lucide-react';
-import { ConflictItemDto, ConflictResolution } from '../../types/dto';
+import { AiMergePreviewDto, AiSettingsDto, ConflictItemDto, ConflictResolution } from '../../types/dto';
 import { Button } from '../../components/common/UIComponents';
+import { api } from '../../services/api';
 
 interface ConflictCenterProps {
   conflicts: ConflictItemDto[];
   onResolve: (conflictId: string, resolution: ConflictResolution) => Promise<void>;
+  onPreviewAiMerge: (conflictId: string) => Promise<AiMergePreviewDto>;
+  onApplyAiMerge: (conflictId: string, previewId: string) => Promise<void>;
+  onOpenAiSettings: () => void;
 }
 
-export function ConflictCenter({ conflicts, onResolve }: ConflictCenterProps) {
+export function ConflictCenter({
+  conflicts,
+  onResolve,
+  onPreviewAiMerge,
+  onApplyAiMerge,
+  onOpenAiSettings,
+}: ConflictCenterProps) {
   const unresolvedConflicts = conflicts.filter((c) => c.status === 'UNRESOLVED');
   const [selectedId, setSelectedId] = useState<string | null>(
     unresolvedConflicts.length > 0 ? unresolvedConflicts[0].id : null
@@ -28,8 +41,52 @@ export function ConflictCenter({ conflicts, onResolve }: ConflictCenterProps) {
     description: string;
   } | null>(null);
   const [processing, setProcessing] = useState(false);
+  const [aiSettings, setAiSettings] = useState<AiSettingsDto | null>(null);
+  const [aiPreview, setAiPreview] = useState<AiMergePreviewDto | null>(null);
+  const [aiBusy, setAiBusy] = useState(false);
+  const [aiError, setAiError] = useState('');
 
   const activeConflict = conflicts.find((c) => c.id === selectedId) || unresolvedConflicts[0];
+
+  useEffect(() => {
+    let active = true;
+    api.getAiSettings()
+      .then((value) => { if (active) setAiSettings(value); })
+      .catch(() => { if (active) setAiSettings(null); });
+    return () => { active = false; };
+  }, []);
+
+  useEffect(() => {
+    setAiPreview(null);
+    setAiError('');
+  }, [selectedId]);
+
+  const handleAiMergePreview = async () => {
+    if (!activeConflict) return;
+    setAiBusy(true);
+    setAiError('');
+    try {
+      setAiPreview(await onPreviewAiMerge(activeConflict.id));
+    } catch (reason: unknown) {
+      setAiError(errorMessage(reason));
+    } finally {
+      setAiBusy(false);
+    }
+  };
+
+  const handleAiMergeApply = async () => {
+    if (!activeConflict || !aiPreview) return;
+    setAiBusy(true);
+    setAiError('');
+    try {
+      await onApplyAiMerge(activeConflict.id, aiPreview.previewId);
+      setAiPreview(null);
+    } catch (reason: unknown) {
+      setAiError(errorMessage(reason));
+    } finally {
+      setAiBusy(false);
+    }
+  };
 
   const handleApplyResolution = async () => {
     if (!confirmResolution) return;
@@ -242,7 +299,7 @@ export function ConflictCenter({ conflicts, onResolve }: ConflictCenterProps) {
                   </span>
                 </div>
 
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3">
                   {/* Action 1: KEEP_BOTH (Default Recommended) */}
                   <div
                     onClick={() =>
@@ -261,6 +318,35 @@ export function ConflictCenter({ conflicts, onResolve }: ConflictCenterProps) {
                     </div>
                     <p className="text-[11px] text-slate-700 dark:text-slate-300 leading-normal">
                       推荐首选。为远端内容创建独立冲突副本，本地修改原样保留，确保两端数据均不丢失。
+                    </p>
+                  </div>
+
+                  {/* Action: AI text merge */}
+                  <div
+                    className={`p-3.5 rounded-xl border space-y-1.5 shadow-soft-sm transition-all ${
+                      aiSettings?.configured
+                        ? 'border-amber-300 bg-amber-50/70 hover:bg-amber-100/70 cursor-pointer dark:border-amber-700 dark:bg-amber-950/20 dark:hover:bg-amber-950/40'
+                        : 'border-slate-200 bg-slate-50/70 dark:border-slate-800 dark:bg-slate-900/60'
+                    }`}
+                    onClick={() => {
+                      if (!aiSettings?.configured) {
+                        onOpenAiSettings();
+                        return;
+                      }
+                      void handleAiMergePreview();
+                    }}
+                  >
+                    <div className="flex items-center justify-between gap-2 text-xs font-semibold text-amber-900 dark:text-amber-200">
+                      <span className="flex items-center gap-1.5">
+                        <Sparkles className="h-4 w-4 text-amber-600 dark:text-amber-400" />
+                        <span>{aiSettings?.configured ? 'AI 智能合并' : '配置 AI 合并'}</span>
+                      </span>
+                      {aiBusy && <LoaderCircle className="h-3.5 w-3.5 animate-spin" />}
+                    </div>
+                    <p className="text-[11px] leading-normal text-slate-600 dark:text-slate-400">
+                      {aiSettings?.configured
+                        ? '将双方 UTF-8 文本发送给已配置模型，生成完整合并结果供你审阅；原始版本自动备份。'
+                        : '需要先在 AI 设置中保存接口和模型。'}
                     </p>
                   </div>
 
@@ -306,6 +392,12 @@ export function ConflictCenter({ conflicts, onResolve }: ConflictCenterProps) {
                     </p>
                   </div>
                 </div>
+                {aiError && (
+                  <div role="alert" className="flex items-start gap-2 rounded-xl border border-rose-200 bg-rose-50 p-3 text-xs text-rose-800 dark:border-rose-900 dark:bg-rose-950/30 dark:text-rose-300">
+                    <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+                    <span className="break-words">{aiError}</span>
+                  </div>
+                )}
               </div>
             </div>
           )}
@@ -351,6 +443,72 @@ export function ConflictCenter({ conflicts, onResolve }: ConflictCenterProps) {
           </div>
         </div>
       )}
+
+      {aiPreview && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/55 p-4 backdrop-blur-sm dark:bg-black/80">
+          <div className="flex max-h-[92vh] w-full max-w-4xl flex-col space-y-4 rounded-2xl border border-slate-200 bg-white p-6 shadow-soft-lg dark:border-slate-800 dark:bg-slate-900">
+            <div className="flex items-start justify-between gap-4 border-b border-slate-200 pb-4 dark:border-slate-800">
+              <div className="flex items-start gap-3">
+                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-amber-200 bg-amber-50 text-amber-600 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-300">
+                  <Sparkles className="h-5 w-5" />
+                </div>
+                <div>
+                  <h3 className="text-base font-semibold text-slate-900 dark:text-slate-100">审阅 AI 合并结果</h3>
+                  <p className="mt-0.5 break-all font-mono text-xs text-slate-500 dark:text-slate-400">{aiPreview.relativePath}</p>
+                </div>
+              </div>
+              <span className="rounded-lg border border-slate-200 bg-slate-50 px-2 py-1 font-mono text-[11px] text-slate-600 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300">
+                {aiPreview.model}
+              </span>
+            </div>
+
+            <div className="flex items-start gap-2 rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs leading-relaxed text-amber-900 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-200">
+              <ShieldAlert className="mt-0.5 h-4 w-4 shrink-0" />
+              <span>确认后会同时替换本地和 WebDAV 文件。原始本地与远端版本已分别备份到 ProjectSync 回收站；请先完整审阅以下内容。</span>
+            </div>
+
+            <textarea
+              readOnly
+              aria-label="AI 合并结果预览"
+              value={aiPreview.mergedContent}
+              className="min-h-64 flex-1 resize-none overflow-auto rounded-xl border border-slate-200 bg-slate-50 p-3 font-mono text-xs leading-relaxed text-slate-800 outline-none dark:border-slate-700 dark:bg-slate-950/60 dark:text-slate-200"
+            />
+
+            {aiError && (
+              <div role="alert" className="rounded-xl border border-rose-200 bg-rose-50 p-3 text-xs text-rose-800 dark:border-rose-900 dark:bg-rose-950/30 dark:text-rose-300">
+                {aiError}
+              </div>
+            )}
+
+            <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-200 pt-4 dark:border-slate-800">
+              <span className="font-mono text-[11px] text-slate-500 dark:text-slate-400">
+                本地 {formatBytes(aiPreview.localSize)} · 远端 {formatBytes(aiPreview.remoteSize)}
+              </span>
+              <div className="flex items-center gap-2">
+                <Button variant="secondary" size="md" onClick={() => setAiPreview(null)} disabled={aiBusy}>
+                  取消
+                </Button>
+                <Button variant="accent" size="md" onClick={handleAiMergeApply} disabled={aiBusy} className="gap-1.5">
+                  {aiBusy ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <Bot className="h-4 w-4" />}
+                  {aiBusy ? '正在写入…' : '确认写入两端'}
+                </Button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
+}
+
+function errorMessage(reason: unknown): string {
+  if (typeof reason === 'object' && reason !== null && 'message' in reason) {
+    return String(reason.message);
+  }
+  return String(reason);
+}
+
+function formatBytes(value: number): string {
+  if (value < 1024) return `${value} B`;
+  return `${(value / 1024).toFixed(1)} KiB`;
 }

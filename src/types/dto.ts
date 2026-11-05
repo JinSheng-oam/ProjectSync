@@ -10,6 +10,7 @@ export type SyncAction =
   | 'MoveRemoteToTrash'
   | 'MoveLocalToTrash'
   | 'CreateConflictCopy'
+  | 'AiMerge'
   | 'MarkClean'
   | 'Skip'
   | 'Blocked';
@@ -219,3 +220,37 @@ export interface RuleImpactDto {
 }
 
 export interface DiscoveredProject { accountId: string; remotePath: string; remoteProjectId: string; name: string; }
+
+export interface AiSettingsDto {
+  endpoint: string;
+  model: string;
+  hasApiKey: boolean;
+  configured: boolean;
+  mergePrompt: string;
+}
+
+export interface SaveAiSettingsInput {
+  endpoint: string;
+  model: string;
+  apiKey?: string;
+  clearApiKey?: boolean;
+  mergePrompt: string;
+}
+
+export interface AiConnectionTestDto {
+  message: string;
+  model: string;
+  latencyMs: number;
+}
+
+export interface AiMergePreviewDto {
+  previewId: string;
+  conflictId: string;
+  relativePath: string;
+  mergedContent: string;
+  localSize: number;
+  remoteSize: number;
+  model: string;
+  createdAt: number;
+  expiresAt: number;
+}

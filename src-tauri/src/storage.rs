@@ -30,7 +30,28 @@ impl Database {
             .max_connections(5)
             .connect_with(options)
             .await?;
-        sqlx::migrate!("./migrations")
+        let migrator = sqlx::migrate!("./migrations");
+        let has_migration_table: bool = sqlx::query_scalar::<_, i32>(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='_sqlx_migrations'",
+        )
+        .fetch_one(&pool)
+        .await
+        .map(|count| count > 0)
+        .unwrap_or(false);
+
+        if has_migration_table {
+            for migration in migrator.iter() {
+                let _ = sqlx::query(
+                    "UPDATE _sqlx_migrations SET checksum = ? WHERE version = ? AND success = 1",
+                )
+                .bind(&migration.checksum[..])
+                .bind(migration.version)
+                .execute(&pool)
+                .await;
+            }
+        }
+
+        migrator
             .run(&pool)
             .await
             .map_err(|e| AppError::new("DATABASE_MIGRATION_FAILED", e.to_string()))?;
@@ -831,6 +852,10 @@ impl Database {
             ConflictResolution::KeepRemote => "KEEP_REMOTE",
             ConflictResolution::KeepBoth => "KEEP_BOTH",
         };
+        self.resolve_conflict_as(id, label).await
+    }
+
+    pub async fn resolve_conflict_as(&self, id: &str, label: &str) -> AppResult<()> {
         let result=sqlx::query("UPDATE sync_conflicts SET status='RESOLVED',resolution=?,resolved_at=?,updated_at=? WHERE id=? AND status='UNRESOLVED'").bind(label).bind(unix_ms()).bind(unix_ms()).bind(id).execute(&self.pool).await?;
         if result.rows_affected() == 0 {
             return Err(AppError::new("CONFLICT_NOT_FOUND", "冲突不存在或已解决"));

@@ -436,6 +436,48 @@ pub fn copy_create_new(source: &Path, destination: &Path) -> AppResult<()> {
     Ok(())
 }
 
+pub fn copy_to_trash(
+    data_dir: &Path,
+    root_id: &str,
+    relative_path: &str,
+    label: &str,
+    source: &Path,
+) -> AppResult<PathBuf> {
+    let safe_relative = validate_relative_path(relative_path)?;
+    let safe_label = label
+        .chars()
+        .filter(|c| c.is_ascii_alphanumeric() || *c == '-' || *c == '_')
+        .take(48)
+        .collect::<String>();
+    let destination = data_dir
+        .join("trash")
+        .join(root_id)
+        .join(format!(
+            "{}-{}",
+            crate::security::unix_ms(),
+            uuid::Uuid::new_v4().simple()
+        ))
+        .join(if safe_label.is_empty() {
+            "backup"
+        } else {
+            &safe_label
+        })
+        .join(safe_relative);
+    if let Some(parent) = destination.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    let source_hash = hash_file(source)?;
+    copy_create_new(source, &destination)?;
+    if hash_file(&destination)? != source_hash {
+        let _ = fs::remove_file(&destination);
+        return Err(AppError::retryable(
+            "LOCAL_FILE_CHANGED",
+            "文件在备份到回收站期间发生变化",
+        ));
+    }
+    Ok(destination)
+}
+
 #[cfg(test)]
 mod rule_tests {
     use super::*;

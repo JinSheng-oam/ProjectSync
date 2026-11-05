@@ -186,6 +186,7 @@ pub enum SyncAction {
     MoveRemoteToTrash,
     MoveLocalToTrash,
     CreateConflictCopy,
+    AiMerge,
     MarkClean,
     Skip,
     Blocked,
@@ -201,6 +202,7 @@ impl SyncAction {
             Self::MoveRemoteToTrash => "MOVE_REMOTE_TO_TRASH",
             Self::MoveLocalToTrash => "MOVE_LOCAL_TO_TRASH",
             Self::CreateConflictCopy => "CREATE_CONFLICT_COPY",
+            Self::AiMerge => "AI_MERGE",
             Self::MarkClean => "MARK_CLEAN",
             Self::Skip => "SKIP",
             Self::Blocked => "BLOCKED",
@@ -216,6 +218,7 @@ impl SyncAction {
             "MOVE_REMOTE_TO_TRASH" => Self::MoveRemoteToTrash,
             "MOVE_LOCAL_TO_TRASH" => Self::MoveLocalToTrash,
             "CREATE_CONFLICT_COPY" => Self::CreateConflictCopy,
+            "AI_MERGE" => Self::AiMerge,
             "MARK_CLEAN" => Self::MarkClean,
             "BLOCKED" => Self::Blocked,
             _ => Self::Skip,
@@ -378,6 +381,20 @@ pub struct RemoteVersionDto {
     pub etag: String,
     pub size_bytes: u64,
     pub modified_at: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AiMergePreviewDto {
+    pub preview_id: String,
+    pub conflict_id: String,
+    pub relative_path: String,
+    pub merged_content: String,
+    pub local_size: u64,
+    pub remote_size: u64,
+    pub model: String,
+    pub created_at: i64,
+    pub expires_at: i64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

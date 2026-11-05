@@ -2,9 +2,10 @@ use crate::{
     app::AppState,
     credentials::CredentialStore,
     domain::{
-        api, ApiResult, AppSettingsDto, ConflictResolution, HistoryItemDto, InitialSyncPreviewDto,
-        RuleImpactDto, SyncFileItemDto, SyncRootDto, SyncRuleDto, SyncStatusDto, SyncSummaryDto,
-        TaskDto, WebDavAccountDto, WebDavAccountInput, WebDavCapabilities,
+        api, AiMergePreviewDto, ApiResult, AppSettingsDto, ConflictResolution, HistoryItemDto,
+        InitialSyncPreviewDto, RuleImpactDto, SyncFileItemDto, SyncRootDto, SyncRuleDto,
+        SyncStatusDto, SyncSummaryDto, TaskDto, WebDavAccountDto, WebDavAccountInput,
+        WebDavCapabilities,
     },
     filesystem::{scan_local, RuleEngine},
     security::{normalize_remote_path, validate_relative_path, validate_webdav_url},
@@ -640,6 +641,27 @@ pub async fn resolve_conflict(
 }
 
 #[tauri::command]
+pub async fn preview_ai_merge(
+    state: State<'_, AppState>,
+    conflict_id: String,
+) -> ApiResult<AiMergePreviewDto> {
+    api(state.sync.preview_ai_merge(&conflict_id).await)
+}
+
+#[tauri::command]
+pub async fn apply_ai_merge(
+    state: State<'_, AppState>,
+    conflict_id: String,
+    preview_id: String,
+) -> ApiResult<serde_json::Value> {
+    api(async {
+        let message = state.sync.apply_ai_merge(&conflict_id, &preview_id).await?;
+        Ok(serde_json::json!({"success":true,"message":message}))
+    }
+    .await)
+}
+
+#[tauri::command]
 pub async fn query_sync_history(
     state: State<'_, AppState>,
     keyword: Option<String>,
@@ -770,6 +792,10 @@ async fn setting_bool(state: &AppState, key: &str, default: bool) -> bool {
 
 pub fn register_commands(builder: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
     builder.invoke_handler(tauri::generate_handler![
+        crate::ai::get_ai_settings,
+        crate::ai::save_ai_settings,
+        crate::ai::test_ai_settings,
+        crate::ai::list_ai_models,
         crate::ai_scope::list_ai_scope_paths,
         crate::ai_scope::suggest_ai_scope,
         list_webdav_accounts,
@@ -801,6 +827,8 @@ pub fn register_commands(builder: tauri::Builder<tauri::Wry>) -> tauri::Builder<
         list_conflicts,
         get_conflict_detail,
         resolve_conflict,
+        preview_ai_merge,
+        apply_ai_merge,
         query_sync_history,
         export_diagnostics,
         backup_database,
