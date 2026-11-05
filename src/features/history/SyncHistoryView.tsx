@@ -45,13 +45,13 @@ export function SyncHistoryView({ history }: { history: HistoryItemDto[] }) {
   return (
     <div className="space-y-6 max-w-7xl mx-auto">
       {/* Top Banner */}
-      <div className="bg-aerospace-surface border border-aerospace-border rounded-xl p-5 shadow-soft-sm flex items-center justify-between">
+      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 shadow-soft-sm flex items-center justify-between transition-colors">
         <div className="flex items-center gap-3.5">
-          <div className="w-10 h-10 rounded-lg bg-indigo-100 dark:bg-indigo-500/20 border border-indigo-200 dark:border-indigo-500/40 flex items-center justify-center text-indigo-600 dark:text-indigo-400 shrink-0">
+          <div className="w-10 h-10 rounded-xl bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 flex items-center justify-center text-indigo-600 dark:text-indigo-400 shrink-0">
             <History className="w-5 h-5" />
           </div>
           <div>
-            <h2 className="text-base font-semibold text-slate-900 dark:text-slate-100">同步日志</h2>
+            <h2 className="text-base font-semibold text-slate-900 dark:text-slate-100">全量同步审计日志</h2>
             <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
               记录本地与 WebDAV 之间的文件上传、下载、冲突副本生成与删除备份。
             </p>
@@ -65,12 +65,12 @@ export function SyncHistoryView({ history }: { history: HistoryItemDto[] }) {
           className="gap-2"
         >
           <Download className="w-4 h-4 text-indigo-600 dark:text-indigo-400" />
-          导出 CSV
+          <span>导出 CSV</span>
         </Button>
       </div>
 
       {/* Filter and Search Bar */}
-      <div className="bg-aerospace-surface border border-aerospace-border rounded-xl p-3.5 shadow-soft-sm flex flex-wrap items-center justify-between gap-3">
+      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-3.5 shadow-soft-sm flex flex-wrap items-center justify-between gap-3 transition-colors">
         <div className="flex items-center gap-2 flex-1 min-w-[260px]">
           <div className="relative flex-1">
             <Search className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
@@ -79,7 +79,7 @@ export function SyncHistoryView({ history }: { history: HistoryItemDto[] }) {
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
               placeholder="按文件名、项目名过滤..."
-              className="w-full bg-white dark:bg-aerospace-canvas border border-slate-300 dark:border-aerospace-border rounded-lg pl-9 pr-3 py-1.5 text-xs text-slate-900 dark:text-slate-100 focus:outline-none focus:border-indigo-500"
+              className="w-full bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 rounded-xl pl-9 pr-3 py-1.5 text-xs text-slate-900 dark:text-slate-100 focus:outline-none focus:border-indigo-500"
             />
           </div>
         </div>
@@ -89,7 +89,7 @@ export function SyncHistoryView({ history }: { history: HistoryItemDto[] }) {
           <select
             value={actionFilter}
             onChange={(e) => setActionFilter(e.target.value)}
-            className="bg-white dark:bg-aerospace-canvas border border-slate-300 dark:border-aerospace-border rounded-lg px-2.5 py-1.5 text-slate-800 dark:text-slate-300 focus:outline-none focus:border-indigo-500 font-mono"
+            className="bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 rounded-xl px-2.5 py-1.5 text-slate-800 dark:text-slate-200 focus:outline-none focus:border-indigo-500 font-mono"
           >
             <option value="ALL">全部动作</option>
             <option value="UploadUpdate">UploadUpdate</option>
@@ -101,7 +101,7 @@ export function SyncHistoryView({ history }: { history: HistoryItemDto[] }) {
           <select
             value={statusFilter}
             onChange={(e) => setStatusFilter(e.target.value)}
-            className="bg-white dark:bg-aerospace-canvas border border-slate-300 dark:border-aerospace-border rounded-lg px-2.5 py-1.5 text-slate-800 dark:text-slate-300 focus:outline-none focus:border-indigo-500"
+            className="bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 rounded-xl px-2.5 py-1.5 text-slate-800 dark:text-slate-200 focus:outline-none focus:border-indigo-500"
           >
             <option value="ALL">全部状态</option>
             <option value="SUCCESS">成功</option>
@@ -112,40 +112,40 @@ export function SyncHistoryView({ history }: { history: HistoryItemDto[] }) {
       </div>
 
       {/* History Ledger Table */}
-      <div className="bg-aerospace-surface border border-aerospace-border rounded-xl overflow-hidden shadow-soft-sm">
+      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl overflow-hidden shadow-soft-sm transition-colors">
         <table className="w-full text-left text-xs font-mono">
-          <thead className="bg-slate-50 dark:bg-aerospace-rail/80 border-b border-aerospace-border text-slate-600 dark:text-slate-400 text-[11px]">
+          <thead className="bg-slate-50 dark:bg-slate-800/60 border-b border-slate-200 dark:border-slate-800 text-slate-600 dark:text-slate-400 text-[11px]">
             <tr>
-              <th className="py-2.5 px-4">执行时间</th>
-              <th className="py-2.5 px-4">所属项目</th>
-              <th className="py-2.5 px-4">同步动作</th>
-              <th className="py-2.5 px-4">目标路径</th>
-              <th className="py-2.5 px-4">状态与错误码</th>
-              <th className="py-2.5 px-4 text-right">传输量</th>
+              <th className="py-2.5 px-4 font-medium">执行时间</th>
+              <th className="py-2.5 px-4 font-medium">所属项目</th>
+              <th className="py-2.5 px-4 font-medium">同步动作</th>
+              <th className="py-2.5 px-4 font-medium">目标路径</th>
+              <th className="py-2.5 px-4 font-medium">状态与错误码</th>
+              <th className="py-2.5 px-4 font-medium text-right">传输量</th>
             </tr>
           </thead>
-          <tbody className="divide-y divide-aerospace-border">
+          <tbody className="divide-y divide-slate-100 dark:divide-slate-800 text-xs">
             {filteredHistory.length === 0 ? (
               <tr>
-                <td colSpan={6} className="py-10 text-center text-slate-400 dark:text-slate-500">
-                  没有找到符合筛选条件的同步历史
+                <td colSpan={6} className="py-10 text-center text-slate-500 dark:text-slate-400 font-sans">
+                  没有找到符合筛选条件的同步历史记录
                 </td>
               </tr>
             ) : (
               filteredHistory.map((item) => (
-                <tr key={item.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/30 transition-colors">
+                <tr key={item.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/40 transition-colors">
                   <td className="py-2.5 px-4 text-slate-500 dark:text-slate-400">
                     {new Date(item.timestamp).toLocaleString()}
                   </td>
-                  <td className="py-2.5 px-4 text-slate-800 dark:text-slate-300 font-medium">{item.projectName}</td>
+                  <td className="py-2.5 px-4 text-slate-900 dark:text-slate-100 font-medium">{item.projectName}</td>
                   <td className="py-2.5 px-4">
                     <span
-                      className={`px-1.5 py-0.5 rounded text-[10px] font-semibold ${
+                      className={`px-1.5 py-0.5 rounded text-[11px] font-semibold ${
                         item.action.startsWith('Upload')
-                          ? 'bg-indigo-100 dark:bg-indigo-950 text-indigo-800 dark:text-indigo-400 border border-indigo-200 dark:border-indigo-800'
+                          ? 'bg-indigo-50 dark:bg-indigo-950/80 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800'
                           : item.action === 'CreateConflictCopy'
-                          ? 'bg-amber-100 dark:bg-amber-950 text-amber-800 dark:text-amber-300 border border-amber-200 dark:border-amber-800'
-                          : 'bg-indigo-100 dark:bg-indigo-950 text-indigo-800 dark:text-indigo-400 border border-indigo-200 dark:border-indigo-800'
+                          ? 'bg-amber-50 dark:bg-amber-950/80 text-amber-800 dark:text-amber-300 border border-amber-200 dark:border-amber-800'
+                          : 'bg-indigo-50 dark:bg-indigo-950/80 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800'
                       }`}
                     >
                       {item.action}
@@ -154,25 +154,25 @@ export function SyncHistoryView({ history }: { history: HistoryItemDto[] }) {
                   <td className="py-2.5 px-4 text-slate-800 dark:text-slate-200">{item.relativePath}</td>
                   <td className="py-2.5 px-4">
                     {item.status === 'SUCCESS' ? (
-                      <span className="inline-flex items-center gap-1 text-emerald-600 dark:text-emerald-400">
+                      <span className="inline-flex items-center gap-1 text-emerald-700 dark:text-emerald-300 font-medium">
                         <CheckCircle2 className="w-3.5 h-3.5" />
                         成功
                       </span>
                     ) : (
                       <div className="space-y-0.5">
-                        <span className="inline-flex items-center gap-1 text-amber-600 dark:text-amber-400 font-semibold">
+                        <span className="inline-flex items-center gap-1 text-amber-700 dark:text-amber-400 font-semibold">
                           <AlertTriangle className="w-3.5 h-3.5" />
                           {item.errorCode || 'BLOCKED'}
                         </span>
                         {item.errorMessage && (
-                          <div className="text-[10px] text-slate-500 dark:text-slate-400 truncate max-w-xs" title={item.errorMessage}>
+                          <div className="text-[11px] text-slate-500 dark:text-slate-400 truncate max-w-xs" title={item.errorMessage}>
                             {item.errorMessage}
                           </div>
                         )}
                       </div>
                     )}
                   </td>
-                  <td className="py-2.5 px-4 text-right text-slate-600 dark:text-slate-400">
+                  <td className="py-2.5 px-4 text-right text-slate-600 dark:text-slate-400 tabular-nums">
                     {(item.bytes / 1024).toFixed(1)} KB
                   </td>
                 </tr>

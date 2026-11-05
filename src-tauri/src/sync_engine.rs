@@ -13,12 +13,16 @@ use crate::{
     storage::Database,
     webdav::{href_to_dav_path, PutCondition, WebDavClient},
 };
+use futures_util::StreamExt;
 use serde::{Deserialize, Serialize};
 use std::{
     collections::{BTreeSet, HashMap},
     fs,
     path::{Path, PathBuf},
-    sync::{Arc, Mutex},
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc, Mutex,
+    },
     time::Instant,
 };
 use tauri::{AppHandle, Emitter};
@@ -30,6 +34,7 @@ pub struct SyncCoordinator {
     data_dir: PathBuf,
     app: AppHandle,
     root_locks: Arc<Mutex<HashMap<String, Arc<AsyncMutex<()>>>>>,
+    root_cancellations: Arc<Mutex<HashMap<String, Arc<AtomicBool>>>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -38,6 +43,8 @@ struct RootManifest {
     remote_project_id: String,
 }
 
+type TransferProgress = Arc<dyn Fn(u64) + Send + Sync>;
+
 impl SyncCoordinator {
     pub fn new(db: Database, data_dir: PathBuf, app: AppHandle) -> Self {
         Self {
@@ -45,6 +52,7 @@ impl SyncCoordinator {
             data_dir,
             app,
             root_locks: Arc::new(Mutex::new(HashMap::new())),
+            root_cancellations: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 
@@ -57,6 +65,54 @@ impl SyncCoordinator {
             .entry(root_id.to_owned())
             .or_insert_with(|| Arc::new(AsyncMutex::new(())))
             .clone())
+    }
+
+    fn cancellation_for(&self, root_id: &str) -> AppResult<Arc<AtomicBool>> {
+        let mut cancellations = self
+            .root_cancellations
+            .lock()
+            .map_err(|_| AppError::new("ENGINE_LOCK_FAILED", "同步控制状态不可用"))?;
+        Ok(cancellations
+            .entry(root_id.to_owned())
+            .or_insert_with(|| Arc::new(AtomicBool::new(false)))
+            .clone())
+    }
+
+    pub fn cancel_root(&self, root_id: &str) {
+        if let Ok(cancellation) = self.cancellation_for(root_id) {
+            cancellation.store(true, Ordering::Release);
+        }
+    }
+
+    fn transfer_progress(
+        &self,
+        root_id: &str,
+        task_id: &str,
+        path: &str,
+        action: SyncAction,
+        total: u64,
+    ) -> TransferProgress {
+        let app = self.app.clone();
+        let root_id = root_id.to_owned();
+        let task_id = task_id.to_owned();
+        let path = path.to_owned();
+        let operation = serde_json::to_value(action).unwrap_or_default();
+        let last_emit = Arc::new(Mutex::new((Instant::now(), 0_u64)));
+        Arc::new(move |transferred| {
+            if let Ok(mut last) = last_emit.lock() {
+                let now = Instant::now();
+                if transferred >= total
+                    || transferred.saturating_sub(last.1) >= 256 * 1024
+                    || now.duration_since(last.0) >= std::time::Duration::from_millis(250)
+                {
+                    *last = (now, transferred);
+                    let _ = app.emit(
+                        "sync://progress",
+                        serde_json::json!({"rootId":root_id,"taskId":task_id,"path":path,"operation":operation,"bytesTransferred":transferred,"totalBytes":total}),
+                    );
+                }
+            }
+        })
     }
 
     pub async fn client_for(
@@ -257,6 +313,7 @@ impl SyncCoordinator {
             status: "IDLE".to_owned(),
             poll_interval_seconds,
             debounce_ms,
+            max_parallel_transfers: 2,
             last_sync_at: None,
             initial_sync_completed: false,
             initial_sync_confirmed: false,
@@ -307,8 +364,31 @@ impl SyncCoordinator {
     }
 
     pub async fn sync_now(&self, root_id: &str) -> AppResult<SyncSummaryDto> {
+        self.sync_with_lock_policy(root_id, false)
+            .await?
+            .ok_or_else(|| AppError::new("ENGINE_LOCK_FAILED", "同步未能获取执行锁"))
+    }
+
+    pub async fn sync_now_if_idle(&self, root_id: &str) -> AppResult<Option<SyncSummaryDto>> {
+        self.sync_with_lock_policy(root_id, true).await
+    }
+
+    async fn sync_with_lock_policy(
+        &self,
+        root_id: &str,
+        skip_if_busy: bool,
+    ) -> AppResult<Option<SyncSummaryDto>> {
         let lock = self.lock_for(root_id)?;
-        let _guard = lock.lock().await;
+        let cancellation = self.cancellation_for(root_id)?;
+        let _guard = if skip_if_busy {
+            match lock.try_lock_owned() {
+                Ok(guard) => guard,
+                Err(_) => return Ok(None),
+            }
+        } else {
+            lock.lock_owned().await
+        };
+        cancellation.store(false, Ordering::Release);
         let started_at = unix_ms();
         let mut summary = SyncSummaryDto {
             root_id: root_id.to_owned(),
@@ -336,6 +416,10 @@ impl SyncCoordinator {
         }
         self.db.set_root_status(root_id, "SCANNING_LOCAL").await?;
         let result = self.sync_locked(&root, &mut summary).await;
+        let interrupted = matches!(
+            result.as_ref().err().map(|error| error.code.as_str()),
+            Some("SYNC_INTERRUPTED" | "ROOT_DISABLED" | "ROOT_NOT_FOUND")
+        );
         if let Err(error) = result.as_ref() {
             let account_status = match error.code.as_str() {
                 "DAV_AUTH_FAILED" => Some("AUTH_FAILED"),
@@ -349,28 +433,48 @@ impl SyncCoordinator {
                     .await;
             }
         }
+        let current_root = self.db.root(root_id).await.ok();
         let has_conflicts = self
             .db
             .root_has_unresolved_conflicts(root_id)
             .await
             .unwrap_or(false);
-        let status = if has_conflicts {
+        let status = if current_root.as_ref().is_none_or(|root| !root.enabled) {
+            "DISABLED"
+        } else if current_root.as_ref().is_some_and(|root| {
+            root.status == "PAUSED"
+                || (interrupted
+                    && matches!(
+                        root.status.as_str(),
+                        "SCANNING_LOCAL" | "SCANNING_REMOTE" | "PLANNING" | "SYNCING"
+                    ))
+        }) {
+            "PAUSED"
+        } else if has_conflicts {
             "CONFLICT"
         } else if result.is_err() || summary.failed > 0 || summary.blocked > 0 {
             "ERROR"
         } else {
             "IDLE"
         };
-        let _ = self.db.finish_sync(root_id, status).await;
+        if current_root.is_some() {
+            let _ = self.db.finish_sync(root_id, status).await;
+        }
         summary.finished_at = Some(unix_ms());
         self.emit(
             "sync://root-status",
             serde_json::json!({"rootId":root_id,"status":status,"timestamp":summary.finished_at}),
         );
-        result.map(|_| summary)
+        drop(_guard);
+        if interrupted {
+            Ok(Some(summary))
+        } else {
+            result.map(|_| Some(summary))
+        }
     }
 
     async fn sync_locked(&self, root: &RootRecord, summary: &mut SyncSummaryDto) -> AppResult<()> {
+        self.ensure_sync_active(&root.id).await?;
         let (_, client) = self.client_for(&root.account_id).await?;
         let account = self.db.account(&root.account_id).await?;
         let capabilities = account.capabilities.unwrap_or_else(unsafe_capabilities);
@@ -394,6 +498,7 @@ impl SyncCoordinator {
             .await?;
         self.db.set_root_status(&root.id, "SCANNING_LOCAL").await?;
         let local = scan_local_cached(&root.local_path, &rules, &old_baseline)?;
+        self.ensure_sync_active(&root.id).await?;
         self.db.set_root_status(&root.id, "SCANNING_REMOTE").await?;
         let remote = scan_remote(
             &client,
@@ -403,6 +508,7 @@ impl SyncCoordinator {
             &old_baseline,
         )
         .await?;
+        self.ensure_sync_active(&root.id).await?;
         self.db
             .set_account_status(&root.account_id, "ONLINE")
             .await?;
@@ -421,7 +527,40 @@ impl SyncCoordinator {
             &capabilities,
         );
         self.db.set_root_status(&root.id, "SYNCING").await?;
+        let mut transfer_jobs = Vec::new();
         for item in plan {
+            self.ensure_sync_active(&root.id).await?;
+            if matches!(
+                item.action,
+                SyncAction::UploadNew
+                    | SyncAction::UploadUpdate
+                    | SyncAction::DownloadNew
+                    | SyncAction::DownloadUpdate
+            ) {
+                let total = item
+                    .local
+                    .as_ref()
+                    .map(|entry| entry.size)
+                    .or_else(|| item.remote.as_ref().map(|entry| entry.size))
+                    .unwrap_or_default();
+                let (task, ready) = self
+                    .db
+                    .prepare_task(
+                        &root.id,
+                        &item.path,
+                        &item.action,
+                        total,
+                        item.local.as_ref().map(|entry| entry.hash.as_str()),
+                        item.expected_remote_etag.as_deref(),
+                    )
+                    .await?;
+                if ready {
+                    transfer_jobs.push((item, task, total));
+                } else {
+                    summary.skipped += 1;
+                }
+                continue;
+            }
             match item.action {
                 SyncAction::Skip => summary.skipped += 1,
                 SyncAction::MarkClean => {
@@ -504,6 +643,7 @@ impl SyncCoordinator {
                                             &remote_copy,
                                             &capabilities,
                                             &self.data_dir,
+                                            None,
                                         )
                                         .await
                                         .is_ok()
@@ -619,11 +759,11 @@ impl SyncCoordinator {
                     summary.blocked += 1;
                 }
                 action => {
-                    let bytes = item
+                    let total = item
                         .local
                         .as_ref()
-                        .map(|v| v.size)
-                        .or_else(|| item.remote.as_ref().map(|v| v.size))
+                        .map(|entry| entry.size)
+                        .or_else(|| item.remote.as_ref().map(|entry| entry.size))
                         .unwrap_or_default();
                     let (task, ready) = self
                         .db
@@ -631,144 +771,199 @@ impl SyncCoordinator {
                             &root.id,
                             &item.path,
                             &action,
-                            bytes,
-                            item.local.as_ref().map(|v| v.hash.as_str()),
+                            total,
+                            item.local.as_ref().map(|entry| entry.hash.as_str()),
                             item.expected_remote_etag.as_deref(),
                         )
                         .await?;
-                    if !ready {
+                    if ready {
+                        let (uploaded, downloaded, failed, blocked) = self
+                            .execute_planned_task(
+                                &root,
+                                &client,
+                                &capabilities,
+                                &item,
+                                &task,
+                                total,
+                            )
+                            .await?;
+                        summary.uploaded += uploaded;
+                        summary.downloaded += downloaded;
+                        summary.failed += failed;
+                        summary.blocked += blocked;
+                    } else {
                         summary.skipped += 1;
-                        continue;
-                    }
-                    self.db
-                        .set_task(&task, crate::domain::TaskStatus::Running, 0, None)
-                        .await?;
-                    self.emit(
-                        "sync://progress",
-                        serde_json::json!({"rootId":root.id,"taskId":task,"path":item.path,"operation":action,"bytesTransferred":0,"totalBytes":bytes}),
-                    );
-                    let started = Instant::now();
-                    match self
-                        .execute_item(root, &client, &capabilities, &item, &task)
-                        .await
-                    {
-                        Ok(transfer_bytes) => {
-                            self.db
-                                .set_task(
-                                    &task,
-                                    crate::domain::TaskStatus::Succeeded,
-                                    transfer_bytes,
-                                    None,
-                                )
-                                .await?;
-                            let history_id = self
-                                .db
-                                .add_history(HistoryEntry {
-                                    root_id: &root.id,
-                                    task_id: Some(&task),
-                                    path: &item.path,
-                                    action: &action,
-                                    status: "SUCCESS",
-                                    bytes: transfer_bytes,
-                                    duration_ms: started.elapsed().as_millis() as u64,
-                                    error: None,
-                                })
-                                .await?;
-                            self.emit(
-                                "sync://progress",
-                                serde_json::json!({"rootId":root.id,"taskId":task,"path":item.path,"operation":action,"bytesTransferred":transfer_bytes,"totalBytes":bytes}),
-                            );
-                            self.emit(
-                                "sync://history-updated",
-                                serde_json::json!({"rootId":root.id,"historyId":history_id}),
-                            );
-                            match action {
-                                SyncAction::UploadNew | SyncAction::UploadUpdate => {
-                                    summary.uploaded += 1
-                                }
-                                SyncAction::DownloadNew | SyncAction::DownloadUpdate => {
-                                    summary.downloaded += 1
-                                }
-                                _ => summary.skipped += 1,
-                            }
-                            self.emit("sync://task-completed",serde_json::json!({"taskId":task,"rootId":root.id,"path":item.path,"result":"SUCCESS"}));
-                        }
-                        Err(error) => {
-                            let attempts = self.db.task_attempts(&task).await?;
-                            let retry_limit = self
-                                .db
-                                .setting("retryLimit")
-                                .await?
-                                .and_then(|v| v.parse().ok())
-                                .unwrap_or(5_u32);
-                            let task_status = if error.code.starts_with("BLOCKED_") {
-                                crate::domain::TaskStatus::Blocked
-                            } else if error.retryable && attempts < retry_limit {
-                                crate::domain::TaskStatus::RetryWait
-                            } else {
-                                crate::domain::TaskStatus::Failed
-                            };
-                            self.db
-                                .set_task(
-                                    &task,
-                                    task_status,
-                                    0,
-                                    Some((&error.code, &error.message)),
-                                )
-                                .await?;
-                            let history_id = self
-                                .db
-                                .add_history(HistoryEntry {
-                                    root_id: &root.id,
-                                    task_id: Some(&task),
-                                    path: &item.path,
-                                    action: &action,
-                                    status: if error.code.starts_with("BLOCKED_") {
-                                        "BLOCKED"
-                                    } else {
-                                        "FAILED"
-                                    },
-                                    bytes: 0,
-                                    duration_ms: started.elapsed().as_millis() as u64,
-                                    error: Some((&error.code, &error.message)),
-                                })
-                                .await?;
-                            self.emit(
-                                "sync://history-updated",
-                                serde_json::json!({"rootId":root.id,"historyId":history_id}),
-                            );
-                            if error.code == "DAV_CONNECTION_FAILED" {
-                                self.emit(
-                                    "sync://network-status",
-                                    serde_json::json!({"online":false,"checkedAt":unix_ms()}),
-                                );
-                            }
-                            let account_status = match error.code.as_str() {
-                                "DAV_AUTH_FAILED" => Some("AUTH_FAILED"),
-                                "DAV_CONNECTION_FAILED" => Some("OFFLINE"),
-                                _ => None,
-                            };
-                            if let Some(account_status) = account_status {
-                                let _ = self
-                                    .db
-                                    .set_account_status(&root.account_id, account_status)
-                                    .await;
-                            }
-                            if error.code.starts_with("BLOCKED_") {
-                                summary.blocked += 1;
-                            } else {
-                                summary.failed += 1;
-                            }
-                            self.emit("sync://task-failed",serde_json::json!({"taskId":task,"rootId":root.id,"path":item.path,"error":{"code":error.code,"message":error.message}}));
-                        }
                     }
                 }
             }
+        }
+        let transfer_results = futures_util::stream::iter(transfer_jobs)
+            .map(|(item, task, total)| {
+                let client = client.clone();
+                let capabilities = capabilities.clone();
+                async move {
+                    self.execute_planned_task(root, &client, &capabilities, &item, &task, total)
+                        .await
+                }
+            })
+            .buffer_unordered(root.max_parallel_transfers.clamp(1, 8) as usize)
+            .collect::<Vec<_>>()
+            .await;
+        for result in transfer_results {
+            let (uploaded, downloaded, failed, blocked) = result?;
+            summary.uploaded += uploaded;
+            summary.downloaded += downloaded;
+            summary.failed += failed;
+            summary.blocked += blocked;
         }
         if !root.initial_sync_completed && summary.failed == 0 && summary.blocked == 0 {
             self.db.mark_initial_completed(&root.id).await?;
         }
         Ok(())
+    }
+
+    async fn ensure_sync_active(&self, root_id: &str) -> AppResult<()> {
+        if self.cancellation_for(root_id)?.load(Ordering::Acquire) {
+            return Err(AppError::new("SYNC_INTERRUPTED", "同步已按要求停止"));
+        }
+        let root = self.db.root(root_id).await?;
+        if !root.enabled {
+            return Err(AppError::new("ROOT_DISABLED", "同步项目已停用"));
+        }
+        if root.status == "PAUSED" {
+            return Err(AppError::new("SYNC_INTERRUPTED", "同步已按要求停止"));
+        }
+        Ok(())
+    }
+
+    async fn execute_planned_task(
+        &self,
+        root: &RootRecord,
+        client: &WebDavClient,
+        capabilities: &WebDavCapabilities,
+        item: &PlannedAction,
+        task_id: &str,
+        total: u64,
+    ) -> AppResult<(u64, u64, u64, u64)> {
+        self.ensure_sync_active(&root.id).await?;
+        self.db
+            .set_task(task_id, crate::domain::TaskStatus::Running, 0, None)
+            .await?;
+        self.emit(
+            "sync://progress",
+            serde_json::json!({"rootId":root.id,"taskId":task_id,"path":item.path,"operation":item.action,"bytesTransferred":0,"totalBytes":total}),
+        );
+        let started = Instant::now();
+        match self
+            .execute_item(root, client, capabilities, item, task_id)
+            .await
+        {
+            Ok(transferred) => {
+                self.db
+                    .set_task(
+                        task_id,
+                        crate::domain::TaskStatus::Succeeded,
+                        transferred,
+                        None,
+                    )
+                    .await?;
+                let history_id = self
+                    .db
+                    .add_history(HistoryEntry {
+                        root_id: &root.id,
+                        task_id: Some(task_id),
+                        path: &item.path,
+                        action: &item.action,
+                        status: "SUCCESS",
+                        bytes: transferred,
+                        duration_ms: started.elapsed().as_millis() as u64,
+                        error: None,
+                    })
+                    .await?;
+                self.emit(
+                    "sync://progress",
+                    serde_json::json!({"rootId":root.id,"taskId":task_id,"path":item.path,"operation":item.action,"bytesTransferred":transferred,"totalBytes":total}),
+                );
+                self.emit(
+                    "sync://history-updated",
+                    serde_json::json!({"rootId":root.id,"historyId":history_id}),
+                );
+                self.emit(
+                    "sync://task-completed",
+                    serde_json::json!({"taskId":task_id,"rootId":root.id,"path":item.path,"result":"SUCCESS"}),
+                );
+                let (uploaded, downloaded) = match item.action {
+                    SyncAction::UploadNew | SyncAction::UploadUpdate => (1, 0),
+                    SyncAction::DownloadNew | SyncAction::DownloadUpdate => (0, 1),
+                    _ => (0, 0),
+                };
+                Ok((uploaded, downloaded, 0, 0))
+            }
+            Err(error) => {
+                let attempts = self.db.task_attempts(task_id).await?;
+                let retry_limit = self
+                    .db
+                    .setting("retryLimit")
+                    .await?
+                    .and_then(|value| value.parse().ok())
+                    .unwrap_or(5_u32);
+                let task_status = if error.code.starts_with("BLOCKED_") {
+                    crate::domain::TaskStatus::Blocked
+                } else if error.retryable && attempts < retry_limit {
+                    crate::domain::TaskStatus::RetryWait
+                } else {
+                    crate::domain::TaskStatus::Failed
+                };
+                self.db
+                    .set_task(task_id, task_status, 0, Some((&error.code, &error.message)))
+                    .await?;
+                let history_id = self
+                    .db
+                    .add_history(HistoryEntry {
+                        root_id: &root.id,
+                        task_id: Some(task_id),
+                        path: &item.path,
+                        action: &item.action,
+                        status: if error.code.starts_with("BLOCKED_") {
+                            "BLOCKED"
+                        } else {
+                            "FAILED"
+                        },
+                        bytes: 0,
+                        duration_ms: started.elapsed().as_millis() as u64,
+                        error: Some((&error.code, &error.message)),
+                    })
+                    .await?;
+                self.emit(
+                    "sync://history-updated",
+                    serde_json::json!({"rootId":root.id,"historyId":history_id}),
+                );
+                if error.code == "DAV_CONNECTION_FAILED" {
+                    self.emit(
+                        "sync://network-status",
+                        serde_json::json!({"online":false,"checkedAt":unix_ms()}),
+                    );
+                }
+                let account_status = match error.code.as_str() {
+                    "DAV_AUTH_FAILED" => Some("AUTH_FAILED"),
+                    "DAV_CONNECTION_FAILED" => Some("OFFLINE"),
+                    _ => None,
+                };
+                if let Some(account_status) = account_status {
+                    let _ = self
+                        .db
+                        .set_account_status(&root.account_id, account_status)
+                        .await;
+                }
+                let blocked = u64::from(error.code.starts_with("BLOCKED_"));
+                let failed = u64::from(blocked == 0);
+                self.emit(
+                    "sync://task-failed",
+                    serde_json::json!({"taskId":task_id,"rootId":root.id,"path":item.path,"error":{"code":error.code,"message":error.message}}),
+                );
+                Ok((0, 0, failed, blocked))
+            }
+        }
     }
 
     async fn execute_item(
@@ -793,6 +988,8 @@ impl SyncCoordinator {
                     ));
                 }
                 ensure_remote_parent(client, &destination).await?;
+                let progress =
+                    self.transfer_progress(&root.id, task_id, &item.path, item.action, local.size);
                 if item.action == SyncAction::UploadNew {
                     put_remote_create_only(
                         client,
@@ -800,6 +997,7 @@ impl SyncCoordinator {
                         &destination,
                         capabilities,
                         &self.data_dir,
+                        Some(progress),
                     )
                     .await?;
                 } else {
@@ -817,6 +1015,7 @@ impl SyncCoordinator {
                         &remote.hash,
                         capabilities,
                         &self.data_dir,
+                        Some(progress),
                     )
                     .await?;
                 }
@@ -853,7 +1052,11 @@ impl SyncCoordinator {
                 }
                 let staging = target.with_file_name(format!(".projectsync-{}.stage", task_id));
                 let _ = tokio::fs::remove_file(&staging).await;
-                let size = client.get_to_file(&destination, &staging).await?;
+                let progress =
+                    self.transfer_progress(&root.id, task_id, &item.path, item.action, remote.size);
+                let size = client
+                    .get_to_file_with_progress(&destination, &staging, Some(progress))
+                    .await?;
                 let hash = hash_file(&staging)?;
                 if hash != remote.hash {
                     return Err(AppError::retryable(
@@ -988,7 +1191,9 @@ impl SyncCoordinator {
         if !self.db.root(root_id).await?.enabled {
             return Err(AppError::new("ROOT_DISABLED", "同步项目已停用"));
         }
-        self.db.set_root_status(root_id, "PAUSED").await
+        self.db.set_root_status(root_id, "PAUSED").await?;
+        self.cancel_root(root_id);
+        Ok(())
     }
     pub async fn resume(&self, root_id: &str) -> AppResult<()> {
         if !self.db.root(root_id).await?.enabled {
@@ -1063,6 +1268,7 @@ impl SyncCoordinator {
                         &remote.hash,
                         &capabilities,
                         &self.data_dir,
+                        None,
                     )
                     .await?;
                 } else {
@@ -1073,6 +1279,7 @@ impl SyncCoordinator {
                         &remote_path,
                         &capabilities,
                         &self.data_dir,
+                        None,
                     )
                     .await?;
                 }
@@ -1149,6 +1356,7 @@ impl SyncCoordinator {
                             &conflict_remote,
                             &capabilities,
                             &self.data_dir,
+                            None,
                         )
                         .await?;
                         let _ = verify_remote_hash(
@@ -1203,6 +1411,7 @@ impl SyncCoordinator {
                             &remote_path,
                             &capabilities,
                             &self.data_dir,
+                            None,
                         )
                         .await?;
                         let observed =
@@ -1338,6 +1547,7 @@ async fn put_remote_create_only(
     destination: &str,
     capabilities: &WebDavCapabilities,
     data_dir: &Path,
+    progress: Option<TransferProgress>,
 ) -> AppResult<()> {
     if !capabilities.safe_create_only {
         return Err(AppError::new(
@@ -1346,6 +1556,11 @@ async fn put_remote_create_only(
         ));
     }
     if capabilities.supports_if_none_match {
+        if let Some(progress) = progress.clone() {
+            return client
+                .put_file_with_progress(source, destination, PutCondition::CreateOnly, progress)
+                .await;
+        }
         return client
             .put_file(source, destination, PutCondition::CreateOnly)
             .await;
@@ -1360,6 +1575,7 @@ async fn put_remote_create_only(
             PutCondition::CreateOnly,
             None,
             data_dir,
+            progress,
         )
         .await;
     }
@@ -1377,6 +1593,7 @@ async fn put_remote_update(
     expected_hash: &str,
     capabilities: &WebDavCapabilities,
     data_dir: &Path,
+    progress: Option<TransferProgress>,
 ) -> AppResult<()> {
     if !capabilities.safe_update_existing {
         return Err(AppError::new(
@@ -1391,6 +1608,16 @@ async fn put_remote_update(
                 "远端文件缺少可用于条件更新的 ETag",
             )
         })?;
+        if let Some(progress) = progress.clone() {
+            return client
+                .put_file_with_progress(
+                    source,
+                    destination,
+                    PutCondition::IfMatch(etag.to_owned()),
+                    progress,
+                )
+                .await;
+        }
         return client
             .put_file(source, destination, PutCondition::IfMatch(etag.to_owned()))
             .await;
@@ -1405,6 +1632,7 @@ async fn put_remote_update(
             PutCondition::Unconditional,
             Some(expected_hash),
             data_dir,
+            progress,
         )
         .await;
     }
@@ -1422,6 +1650,7 @@ async fn put_remote_with_lock(
     condition: PutCondition,
     expected_hash: Option<&str>,
     data_dir: &Path,
+    progress: Option<TransferProgress>,
 ) -> AppResult<()> {
     let token = client.lock_exclusive(lock_parent, "infinity").await?;
     let result = async {
@@ -1448,9 +1677,21 @@ async fn put_remote_with_lock(
                 ));
             }
         }
-        client
-            .put_file_with_lock_token(source, destination, condition, &token)
-            .await
+        if let Some(progress) = progress {
+            client
+                .put_file_with_lock_token_and_progress(
+                    source,
+                    destination,
+                    condition,
+                    &token,
+                    progress,
+                )
+                .await
+        } else {
+            client
+                .put_file_with_lock_token(source, destination, condition, &token)
+                .await
+        }
     }
     .await;
     let unlock_result = client.unlock(lock_parent, &token).await;
@@ -1575,6 +1816,10 @@ async fn scan_remote(
 ) -> AppResult<Vec<RemoteEntry>> {
     let root_path = normalize_remote_path(root_path)?;
     let rule_engine = RuleEngine::compile(rules)?;
+    let cache_by_path = cache
+        .iter()
+        .map(|entry| (entry.path_key.clone(), entry))
+        .collect::<HashMap<_, _>>();
     let mut directories = vec![root_path.clone()];
     let mut visited = BTreeSet::new();
     let mut entries = Vec::new();
@@ -1617,18 +1862,10 @@ async fn scan_remote(
                     format!("远端路径在 Windows 上大小写冲突：{previous} / {relative}"),
                 ));
             }
-            let cached = cache.iter().find(|old| {
-                old.path_key == key
-                    && old.remote_etag.as_deref() == prop.etag.as_deref()
-                    && old.remote_size == prop.size
-                    && old.remote_hash.is_some()
-                    && !prop
-                        .etag
-                        .as_deref()
-                        .unwrap_or_default()
-                        .trim_start()
-                        .starts_with("W/")
-            });
+            let cached = cache_by_path
+                .get(&key)
+                .copied()
+                .filter(|old| can_reuse_remote_hash(old, prop.etag.as_deref(), prop.size));
             let (hash, size) = if let Some(old) = cached {
                 (old.remote_hash.clone().unwrap_or_default(), prop.size)
             } else {
@@ -1655,6 +1892,57 @@ async fn scan_remote(
         }
     }
     Ok(entries)
+}
+
+fn can_reuse_remote_hash(
+    old: &crate::domain::BaselineEntry,
+    current_etag: Option<&str>,
+    current_size: u64,
+) -> bool {
+    let Some(current_etag) = current_etag else {
+        return false;
+    };
+    old.remote_hash.is_some()
+        && old.remote_size == current_size
+        && old.remote_etag.as_deref() == Some(current_etag)
+        && !current_etag.trim_start().starts_with("W/")
+}
+
+#[cfg(test)]
+mod remote_hash_cache_tests {
+    use super::can_reuse_remote_hash;
+    use crate::domain::BaselineEntry;
+
+    fn baseline(etag: Option<&str>) -> BaselineEntry {
+        BaselineEntry {
+            relative_path: "file.txt".to_owned(),
+            path_key: "file.txt".to_owned(),
+            baseline_state: "PRESENT".to_owned(),
+            sync_state: "CLEAN".to_owned(),
+            base_hash: Some("base".to_owned()),
+            base_size: 4,
+            base_mtime_ms: 0,
+            local_exists: true,
+            local_hash: Some("hash".to_owned()),
+            remote_exists: true,
+            remote_hash: Some("hash".to_owned()),
+            remote_etag: etag.map(str::to_owned),
+            local_size: 4,
+            remote_size: 4,
+            local_mtime_ns: 0,
+            remote_mtime_ms: 0,
+        }
+    }
+
+    #[test]
+    fn requires_a_matching_strong_etag_and_size_to_reuse_remote_hash() {
+        let cached = baseline(Some("\"v1\""));
+        assert!(can_reuse_remote_hash(&cached, Some("\"v1\""), 4));
+        assert!(!can_reuse_remote_hash(&baseline(None), None, 4));
+        assert!(!can_reuse_remote_hash(&cached, Some("W/\"v1\""), 4));
+        assert!(!can_reuse_remote_hash(&cached, Some("\"v2\""), 4));
+        assert!(!can_reuse_remote_hash(&cached, Some("\"v1\""), 5));
+    }
 }
 
 fn build_plan(

@@ -9,7 +9,7 @@ use reqwest::{
     Method, Response, StatusCode,
 };
 use serde::Serialize;
-use std::{path::Path, str::FromStr};
+use std::{path::Path, str::FromStr, sync::Arc};
 use tokio::{fs::File, io::AsyncWriteExt};
 use tokio_util::io::ReaderStream;
 use url::Url;
@@ -222,6 +222,16 @@ impl WebDavClient {
     }
 
     pub async fn get_to_file(&self, path: &str, destination: &Path) -> AppResult<u64> {
+        self.get_to_file_with_progress(path, destination, None)
+            .await
+    }
+
+    pub async fn get_to_file_with_progress(
+        &self,
+        path: &str,
+        destination: &Path,
+        progress: Option<Arc<dyn Fn(u64) + Send + Sync>>,
+    ) -> AppResult<u64> {
         let response = self
             .send(Method::GET, self.url_for(path)?, HeaderMap::new(), None)
             .await?;
@@ -240,6 +250,9 @@ impl WebDavClient {
                 .await
                 .map_err(|e| AppError::new("LOCAL_STAGING_FAILED", e.to_string()))?;
             total = total.saturating_add(chunk.len() as u64);
+            if let Some(progress) = &progress {
+                progress(total);
+            }
         }
         file.flush()
             .await
@@ -263,7 +276,18 @@ impl WebDavClient {
         destination: &str,
         condition: PutCondition,
     ) -> AppResult<()> {
-        self.put_file_inner(source, destination, condition, None)
+        self.put_file_inner(source, destination, condition, None, None)
+            .await
+    }
+
+    pub async fn put_file_with_progress(
+        &self,
+        source: &Path,
+        destination: &str,
+        condition: PutCondition,
+        progress: Arc<dyn Fn(u64) + Send + Sync>,
+    ) -> AppResult<()> {
+        self.put_file_inner(source, destination, condition, None, Some(progress))
             .await
     }
 
@@ -274,8 +298,26 @@ impl WebDavClient {
         condition: PutCondition,
         lock_token: &str,
     ) -> AppResult<()> {
-        self.put_file_inner(source, destination, condition, Some(lock_token))
+        self.put_file_inner(source, destination, condition, Some(lock_token), None)
             .await
+    }
+
+    pub async fn put_file_with_lock_token_and_progress(
+        &self,
+        source: &Path,
+        destination: &str,
+        condition: PutCondition,
+        lock_token: &str,
+        progress: Arc<dyn Fn(u64) + Send + Sync>,
+    ) -> AppResult<()> {
+        self.put_file_inner(
+            source,
+            destination,
+            condition,
+            Some(lock_token),
+            Some(progress),
+        )
+        .await
     }
 
     async fn put_file_inner(
@@ -284,6 +326,7 @@ impl WebDavClient {
         destination: &str,
         condition: PutCondition,
         lock_token: Option<&str>,
+        progress: Option<Arc<dyn Fn(u64) + Send + Sync>>,
     ) -> AppResult<()> {
         let meta = tokio::fs::metadata(source)
             .await
@@ -291,7 +334,16 @@ impl WebDavClient {
         let file = tokio::fs::File::open(source)
             .await
             .map_err(|e| AppError::new("LOCAL_FILE_READ", e.to_string()))?;
-        let stream = ReaderStream::new(file);
+        let mut transferred = 0_u64;
+        let stream = ReaderStream::new(file).map(move |chunk| {
+            if let Ok(bytes) = &chunk {
+                transferred = transferred.saturating_add(bytes.len() as u64);
+                if let Some(progress) = &progress {
+                    progress(transferred);
+                }
+            }
+            chunk
+        });
         let body = reqwest::Body::wrap_stream(stream);
         let mut headers = HeaderMap::new();
         headers.insert(

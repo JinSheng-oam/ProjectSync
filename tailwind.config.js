@@ -9,17 +9,17 @@ export default {
     extend: {
       colors: {
         indigo: {
-          50: '#f5f4ff',
-          100: '#e9e8ff',
-          200: '#d4d2ff',
-          300: '#b8b5ff',
-          400: '#9995fb',
-          500: '#7673eb',
-          600: '#6562dd',
-          700: '#5350bf',
-          800: '#413f96',
-          900: '#32316b',
-          950: '#211f4c',
+          50: '#f5f7ff',
+          100: '#ebf0fe',
+          200: '#dbe4fd',
+          300: '#c0cffc',
+          400: '#9cb1f9',
+          500: '#6366f1',
+          600: '#4f46e5',
+          700: '#4338ca',
+          800: '#3730a3',
+          900: '#312e81',
+          950: '#1e1b4b',
         },
         aerospace: {
           canvas: 'rgb(var(--color-canvas) / <alpha-value>)',
@@ -31,11 +31,11 @@ export default {
           borderLight: 'rgb(var(--color-border-light) / <alpha-value>)',
         },
         telemetry: {
-          emerald: '#10b981',
-          indigo: '#7673eb',
-          coral: '#f87966',
-          amber: '#f59e0b',
-          crimson: '#ef4444',
+          emerald: '#059669',
+          indigo: '#4f46e5',
+          coral: '#d94635',
+          amber: '#d97706',
+          crimson: '#dc2626',
         }
       },
       fontFamily: {
@@ -66,12 +66,12 @@ export default {
         ]
       },
       boxShadow: {
-        'soft-sm': '0 1px 3px 0 rgba(53, 48, 103, 0.06), 0 1px 2px -1px rgba(53, 48, 103, 0.05)',
-        'soft-md': '0 4px 12px 0 rgba(53, 48, 103, 0.07)',
-        'soft-lg': '0 8px 24px 0 rgba(53, 48, 103, 0.1)',
-        'glow-indigo': '0 0 16px rgba(118, 115, 235, 0.16)',
-        'soft-coral': '0 4px 12px rgba(248, 121, 102, 0.18)',
-        'glow-amber': '0 0 16px rgba(245, 158, 11, 0.15)',
+        'soft-sm': '0 1px 3px 0 rgba(15, 23, 42, 0.05), 0 1px 2px -1px rgba(15, 23, 42, 0.04)',
+        'soft-md': '0 4px 12px 0 rgba(15, 23, 42, 0.06)',
+        'soft-lg': '0 8px 24px 0 rgba(15, 23, 42, 0.08)',
+        'glow-indigo': '0 0 16px rgba(79, 70, 229, 0.2)',
+        'soft-coral': '0 4px 12px rgba(217, 70, 53, 0.2)',
+        'glow-amber': '0 0 16px rgba(217, 119, 6, 0.18)',
       }
     },
   },

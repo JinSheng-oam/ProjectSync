@@ -5,31 +5,31 @@
 @layer base {
   :root {
     color-scheme: light;
-    --color-canvas: 247 246 255;       /* soft indigo canvas */
-    --color-rail: 252 251 255;         /* lavender white */
-    --color-surface: 255 255 255;      /* white #ffffff */
-    --color-elevated: 244 243 255;     /* pale indigo */
-    --color-muted: 232 230 249;        /* muted lavender */
-    --color-border: 226 224 244;       /* soft lavender border */
-    --color-border-light: 210 207 236; /* stronger lavender border */
+    --color-canvas: 248 250 252;       /* slate-50 #f8fafc */
+    --color-rail: 255 255 255;         /* pure white */
+    --color-surface: 255 255 255;      /* pure white */
+    --color-elevated: 241 245 249;     /* slate-100 #f1f5f9 */
+    --color-muted: 226 232 240;        /* slate-200 #e2e8f0 */
+    --color-border: 226 232 240;       /* slate-200 #e2e8f0 */
+    --color-border-light: 203 213 225; /* slate-300 #cbd5e1 */
   }
 
   .dark {
     color-scheme: dark;
-    --color-canvas: 18 18 42;
-    --color-rail: 23 23 51;
-    --color-surface: 30 30 64;
-    --color-elevated: 38 38 77;
-    --color-muted: 49 49 94;
-    --color-border: 58 58 105;
-    --color-border-light: 76 76 126;
+    --color-canvas: 15 23 42;          /* slate-900 #0f172a */
+    --color-rail: 11 17 32;            /* deep slate #0b1120 */
+    --color-surface: 22 30 46;         /* slate-850 #161e2e */
+    --color-elevated: 30 41 59;        /* slate-800 #1e293b */
+    --color-muted: 51 65 85;           /* slate-700 #334155 */
+    --color-border: 45 55 72;          /* #2d3748 */
+    --color-border-light: 71 85 105;   /* slate-600 #475569 */
   }
 
   body {
     margin: 0;
     padding: 0;
     background-color: rgb(var(--color-canvas));
-    color: #323253;
+    color: #1e293b;
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI Variable Text", "Segoe UI", system-ui, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei UI", "Microsoft YaHei", "Source Han Sans SC", "Noto Sans SC", sans-serif;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
@@ -39,7 +39,7 @@
 
   h1, h2, h3, h4, h5, h6 {
     text-wrap: balance;
-    letter-spacing: -0.01em;
+    letter-spacing: -0.015em;
   }
 
   p {
@@ -47,21 +47,21 @@
   }
 
   .dark body {
-    color: #f3f1ff;
+    color: #f1f5f9;
   }
 
-  /* Selection and input colors */
+  /* Accessible high-contrast selection */
   ::selection {
-    background-color: rgba(118, 115, 235, 0.2);
-    color: #5c59d6;
+    background-color: rgba(79, 70, 229, 0.2);
+    color: #3730a3;
   }
 
   .dark ::selection {
-    background-color: rgba(151, 148, 255, 0.3);
-    color: #d8d6ff;
+    background-color: rgba(99, 102, 241, 0.35);
+    color: #e0e7ff;
   }
 
-  /* Soft indigo scrollbars */
+  /* Refined engineering scrollbars */
   ::-webkit-scrollbar {
     width: 6px;
     height: 6px;
@@ -72,53 +72,59 @@
   }
 
   ::-webkit-scrollbar-thumb {
-    background: #d2cfea;
+    background: #cbd5e1;
     border-radius: 3px;
   }
 
   .dark ::-webkit-scrollbar-thumb {
-    background: #3a3a69;
+    background: #334155;
   }
 
   ::-webkit-scrollbar-thumb:hover {
-    background: #aaa6d2;
+    background: #94a3b8;
   }
 
   .dark ::-webkit-scrollbar-thumb:hover {
-    background: #4c4c7e;
+    background: #475569;
   }
 
-  /* Tabular numbers for all numbers and tables */
+  /* Tabular numbers for engineering telemetry */
   table, code, .font-mono {
     font-variant-numeric: tabular-nums;
   }
 
   /* Custom Caret */
   input, textarea {
-    caret-color: #7673eb;
+    caret-color: #4f46e5;
   }
 }
 
 .app-shell {
   background-color: rgb(var(--color-canvas));
   background-image:
-    radial-gradient(ellipse at 8% 105%, rgba(166, 159, 255, 0.25), transparent 62%),
-    radial-gradient(ellipse at 84% -8%, rgba(201, 198, 255, 0.34), transparent 58%),
-    linear-gradient(132deg, #fdfcff 0%, #f8f7ff 48%, #f0efff 100%);
+    radial-gradient(ellipse at 50% -10%, rgba(224, 231, 255, 0.4), transparent 60%),
+    linear-gradient(180deg, #f8fafc 0%, #f1f5f9 100%);
 }
 
 .app-sidebar {
-  background-image: radial-gradient(ellipse at 0% 100%, rgba(151, 143, 255, 0.24), transparent 70%);
-  backdrop-filter: blur(18px);
+  background-color: rgb(var(--color-rail));
 }
 
 .dark .app-shell {
+  background-color: rgb(var(--color-canvas));
   background-image:
-    radial-gradient(ellipse at 8% 105%, rgba(91, 82, 185, 0.2), transparent 62%),
-    radial-gradient(ellipse at 84% -8%, rgba(81, 77, 167, 0.18), transparent 58%),
-    linear-gradient(132deg, #151530 0%, #12122a 48%, #181632 100%);
+    radial-gradient(ellipse at 50% -10%, rgba(30, 41, 59, 0.45), transparent 60%),
+    linear-gradient(180deg, #0b1120 0%, #0f172a 100%);
 }
 
 .dark .app-sidebar {
-  background-image: radial-gradient(ellipse at 0% 100%, rgba(89, 81, 177, 0.22), transparent 70%);
+  background-color: rgb(var(--color-rail));
 }
+
+.project-card {
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.project-card:hover {
+  transform: translateY(-1px);
+}
+

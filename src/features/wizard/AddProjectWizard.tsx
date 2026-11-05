@@ -177,7 +177,7 @@ export function AddProjectWizard({
       maxWidth="max-w-3xl"
     >
       {/* Step Indicator Stepper */}
-      <div className="flex items-center justify-between pb-4 border-b border-aerospace-border">
+      <div className="flex items-center justify-between pb-4 border-b border-slate-200 dark:border-slate-800">
         {[
           { step: 1, title: 'WebDAV 节点' },
           { step: 2, title: '项目名称与目录' },
@@ -189,10 +189,10 @@ export function AddProjectWizard({
             <span
               className={`w-6 h-6 rounded-full flex items-center justify-center font-mono text-xs font-semibold ${
                 currentStep === item.step
-                  ? 'bg-indigo-500 text-white shadow-glow-indigo'
+                  ? 'bg-indigo-600 text-white shadow-soft-sm'
                   : currentStep > item.step
-                  ? 'bg-emerald-100 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-400 border border-emerald-300 dark:border-emerald-700'
-                  : 'bg-slate-200 dark:bg-slate-800 text-slate-500'
+                  ? 'bg-emerald-50 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-700'
+                  : 'bg-slate-100 dark:bg-slate-800 text-slate-500'
               }`}
             >
               {currentStep > item.step ? '✓' : item.step}
@@ -200,7 +200,7 @@ export function AddProjectWizard({
             <span
               className={`text-xs ${
                 currentStep === item.step
-                  ? 'text-indigo-600 dark:text-indigo-300 font-semibold'
+                  ? 'text-indigo-700 dark:text-indigo-300 font-semibold'
                   : currentStep > item.step
                   ? 'text-slate-700 dark:text-slate-300'
                   : 'text-slate-400 dark:text-slate-500'
@@ -226,10 +226,10 @@ export function AddProjectWizard({
                 <div
                   key={acc.id}
                   onClick={() => setSelectedAccountId(acc.id)}
-                  className={`p-3 rounded-lg border cursor-pointer transition-colors flex items-center justify-between ${
+                  className={`p-3.5 rounded-xl border cursor-pointer transition-colors flex items-center justify-between ${
                     selectedAccountId === acc.id
-                      ? 'bg-indigo-50/50 dark:bg-aerospace-elevated border-indigo-500 text-slate-900 dark:text-slate-100 shadow-soft-sm'
-                      : 'bg-white dark:bg-aerospace-canvas border-slate-200 dark:border-aerospace-border hover:border-slate-400 dark:hover:border-slate-600 text-slate-700 dark:text-slate-300'
+                      ? 'bg-indigo-50/70 dark:bg-indigo-950/40 border-indigo-500 text-slate-900 dark:text-slate-100 shadow-soft-sm'
+                      : 'bg-white dark:bg-slate-800/70 border-slate-200 dark:border-slate-700 hover:border-slate-300 dark:hover:border-slate-600 text-slate-700 dark:text-slate-300'
                   }`}
                 >
                   <div className="flex items-center gap-3">
@@ -240,7 +240,7 @@ export function AddProjectWizard({
                     </div>
                   </div>
                   <div className="text-right">
-                    <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-emerald-50 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800">
+                    <span className="text-[11px] font-mono px-2 py-0.5 rounded-md bg-emerald-50 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800">
                       探测通过
                     </span>
                   </div>
@@ -250,8 +250,8 @@ export function AddProjectWizard({
           </div>
 
           {selectedAccount?.capabilities && (
-            <div className="bg-slate-50 dark:bg-slate-900/60 p-3 rounded-lg border border-slate-200 dark:border-slate-800 text-xs space-y-1 text-slate-600 dark:text-slate-400">
-              <div className="text-slate-800 dark:text-slate-300 font-semibold flex items-center gap-1.5">
+            <div className="bg-slate-50 dark:bg-slate-800/50 p-3 rounded-xl border border-slate-200 dark:border-slate-700 text-xs space-y-1 text-slate-600 dark:text-slate-400">
+              <div className="text-slate-900 dark:text-slate-100 font-semibold flex items-center gap-1.5">
                 <ShieldCheck className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
                 WebDAV 特性检测:
               </div>
@@ -279,7 +279,7 @@ export function AddProjectWizard({
                   setProjectName(e.target.value);
                   setProjectNameCustomized(true);
                 }}
-                className="w-full bg-white dark:bg-aerospace-canvas border border-slate-300 dark:border-aerospace-border rounded-lg px-3 py-2.5 text-sm text-slate-900 dark:text-slate-100 focus:outline-none focus:border-indigo-500 font-medium"
+                className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-2 text-xs text-slate-900 dark:text-slate-100 focus:outline-none focus:border-indigo-500 font-medium"
                 placeholder="输入项目名称"
               />
               <p className="text-[11px] text-slate-500 dark:text-slate-400">默认使用目录名，可手动修改。</p>
@@ -293,7 +293,7 @@ export function AddProjectWizard({
                   type="text"
                   value={localPath}
                   onChange={(e) => handleLocalPathChange(e.target.value)}
-                  className="min-w-0 flex-1 bg-white dark:bg-aerospace-canvas border border-slate-300 dark:border-aerospace-border rounded-lg px-3 py-2.5 text-xs font-mono text-slate-900 dark:text-slate-100 focus:outline-none focus:border-indigo-500"
+                  className="min-w-0 flex-1 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-2 text-xs font-mono text-slate-900 dark:text-slate-100 focus:outline-none focus:border-indigo-500"
                   placeholder="C:/Users/Example/Projects/MyApp"
                 />
                 <Button
@@ -311,15 +311,15 @@ export function AddProjectWizard({
             </div>
           </div>
 
-          <div className="bg-slate-50 dark:bg-aerospace-canvas p-4 rounded-xl border border-slate-200 dark:border-aerospace-border space-y-2">
-            <div className="text-xs font-semibold text-slate-800 dark:text-slate-200 flex items-center gap-1.5">
+          <div className="bg-slate-50 dark:bg-slate-800/50 p-4 rounded-xl border border-slate-200 dark:border-slate-700 space-y-2">
+            <div className="text-xs font-semibold text-slate-900 dark:text-slate-100 flex items-center gap-1.5">
               <HardDrive className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
               本地目录环境检查
             </div>
             <div className="text-xs space-y-1 text-slate-600 dark:text-slate-400">
-              <div className="text-emerald-600 dark:text-emerald-400">✓ 路径存在且具有完整读写权限</div>
-              <div className="text-emerald-600 dark:text-emerald-400">✓ 路径未处于 WebDAV 挂载盘内（排除死循环递归）</div>
-              <div className="text-emerald-600 dark:text-emerald-400">✓ 大小写保留映射正常</div>
+              <div className="text-emerald-700 dark:text-emerald-300">✓ 路径存在且具有完整读写权限</div>
+              <div className="text-emerald-700 dark:text-emerald-300">✓ 路径未处于 WebDAV 挂载盘内（排除死循环递归）</div>
+              <div className="text-emerald-700 dark:text-emerald-300">✓ 大小写保留映射正常</div>
             </div>
           </div>
         </div>
@@ -337,7 +337,7 @@ export function AddProjectWizard({
                 setRemotePath(e.target.value);
                 setRemotePathCustomized(true);
               }}
-              className="w-full bg-white dark:bg-aerospace-canvas border border-slate-300 dark:border-aerospace-border rounded-lg px-3 py-2 text-xs font-mono text-slate-900 dark:text-slate-100 focus:outline-none focus:border-indigo-500"
+              className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-2 text-xs font-mono text-slate-900 dark:text-slate-100 focus:outline-none focus:border-indigo-500"
               placeholder="/projects/MyDevApp"
             />
             <p className="text-[11px] text-slate-500 dark:text-slate-400">
@@ -345,15 +345,15 @@ export function AddProjectWizard({
             </p>
           </div>
 
-          <div className="border border-slate-200 dark:border-aerospace-border rounded-xl p-3.5 bg-slate-50 dark:bg-aerospace-canvas space-y-2">
-            <div className="flex items-center justify-between text-xs font-semibold text-slate-800 dark:text-slate-200">
+          <div className="border border-slate-200 dark:border-slate-700 rounded-xl p-3.5 bg-slate-50 dark:bg-slate-800/50 space-y-2">
+            <div className="flex items-center justify-between text-xs font-semibold text-slate-900 dark:text-slate-100">
               <span className="flex items-center gap-1.5">
                 <Cloud className="w-4 h-4 text-indigo-600 dark:text-indigo-400" />
                 远端目录浏览
               </span>
               <div className="flex items-center gap-2">
-                <code className="text-[10px] text-slate-500">{remoteBrowsePath}</code>
-                <button type="button" onClick={() => { setRemoteBrowsePath(parentRemoteDirectory(remoteBrowsePath)); setRemoteEntries([]); setRemoteBrowseLoaded(false); setRemoteBrowseError(null); }} disabled={remoteBrowsePath === '/'} className="p-1 rounded hover:bg-slate-200 dark:hover:bg-slate-800 disabled:opacity-40" aria-label="上级目录">
+                <code className="text-[11px] text-slate-600 dark:text-slate-400">{remoteBrowsePath}</code>
+                <button type="button" onClick={() => { setRemoteBrowsePath(parentRemoteDirectory(remoteBrowsePath)); setRemoteEntries([]); setRemoteBrowseLoaded(false); setRemoteBrowseError(null); }} disabled={remoteBrowsePath === '/'} className="p-1 rounded hover:bg-slate-200 dark:hover:bg-slate-700 disabled:opacity-40" aria-label="上级目录">
                   <ArrowUp className="w-3.5 h-3.5" />
                 </button>
                 <Button variant="secondary" size="sm" onClick={handleBrowseRemote} disabled={loadingRemote || !selectedAccountId} className="gap-1">
@@ -367,9 +367,9 @@ export function AddProjectWizard({
               </div>
             )}
             {remoteBrowseError && <div role="alert" className="text-[11px] text-rose-600 dark:text-rose-400">{remoteBrowseError}</div>}
-            <div className="bg-slate-100 dark:bg-slate-900/80 border border-slate-200 dark:border-transparent rounded-lg p-2.5 font-mono text-xs text-slate-700 dark:text-slate-300 space-y-1 max-h-40 overflow-y-auto">
+            <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg p-2.5 font-mono text-xs text-slate-700 dark:text-slate-300 space-y-1 max-h-40 overflow-y-auto">
               {remoteEntries.length === 0 ? <div className="text-slate-500">{remoteBrowseLoaded ? '此目录没有可浏览的子项；若目标目录尚不存在，创建同步项目时会自动发送 MKCOL 创建。' : '选择“浏览”读取此目录。点击文件夹可将其设为目标路径。'}</div> : remoteEntries.map((entry) => (
-                <button key={entry.path} type="button" disabled={!entry.isCollection} onClick={() => { setRemotePath(entry.path); setRemotePathCustomized(true); setRemoteBrowsePath(entry.path); setRemoteEntries([]); setRemoteBrowseLoaded(false); setRemoteBrowseError(null); }} className="w-full text-left rounded px-2 py-1 hover:bg-white dark:hover:bg-slate-800 disabled:opacity-50">
+                <button key={entry.path} type="button" disabled={!entry.isCollection} onClick={() => { setRemotePath(entry.path); setRemotePathCustomized(true); setRemoteBrowsePath(entry.path); setRemoteEntries([]); setRemoteBrowseLoaded(false); setRemoteBrowseError(null); }} className="w-full text-left rounded px-2 py-1 hover:bg-slate-100 dark:hover:bg-slate-800 disabled:opacity-50">
                   {entry.isCollection ? '📁' : '📄'} {entry.name || '/'}{entry.isCollection ? '/' : ''}
                 </button>
               ))}
@@ -394,7 +394,7 @@ export function AddProjectWizard({
             <select
               value={newRuleType}
               onChange={(e) => setNewRuleType(e.target.value as 'INCLUDE' | 'EXCLUDE')}
-              className="bg-white dark:bg-aerospace-canvas border border-slate-300 dark:border-aerospace-border rounded-lg px-2 py-1.5 text-xs text-slate-800 dark:text-slate-200 focus:outline-none focus:border-indigo-500"
+              className="bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-2.5 py-1.5 text-xs text-slate-800 dark:text-slate-200 focus:outline-none focus:border-indigo-500"
             >
               <option value="INCLUDE">包含 (INCLUDE)</option>
               <option value="EXCLUDE">排除 (EXCLUDE)</option>
@@ -404,7 +404,7 @@ export function AddProjectWizard({
               value={newRulePattern}
               onChange={(e) => setNewRulePattern(e.target.value)}
               placeholder="Glob 表达式: 如 docs/**, *.md, **/.git/**"
-              className="flex-1 bg-white dark:bg-aerospace-canvas border border-slate-300 dark:border-aerospace-border rounded-lg px-3 py-1.5 text-xs font-mono text-slate-900 dark:text-slate-100 focus:outline-none focus:border-indigo-500"
+              className="flex-1 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-1.5 text-xs font-mono text-slate-900 dark:text-slate-100 focus:outline-none focus:border-indigo-500"
             />
             <Button variant="secondary" size="sm" onClick={handleAddRule} className="gap-1">
               <Plus className="w-3.5 h-3.5" />
@@ -413,26 +413,26 @@ export function AddProjectWizard({
           </div>
 
           {/* Rules List */}
-          <div className="border border-slate-200 dark:border-aerospace-border rounded-xl bg-white dark:bg-aerospace-canvas overflow-hidden max-h-56 overflow-y-auto">
-            <div className="divide-y divide-slate-100 dark:divide-aerospace-border">
+          <div className="border border-slate-200 dark:border-slate-700 rounded-xl bg-white dark:bg-slate-800 overflow-hidden max-h-56 overflow-y-auto">
+            <div className="divide-y divide-slate-100 dark:divide-slate-700">
               {rules.map((rule) => (
                 <div key={rule.id} className="p-2.5 flex items-center justify-between text-xs font-mono">
                   <div className="flex items-center gap-2">
                     <span
-                      className={`px-1.5 py-0.5 rounded text-[10px] font-semibold ${
+                      className={`px-1.5 py-0.5 rounded text-[11px] font-semibold ${
                         rule.ruleType === 'INCLUDE'
-                          ? 'bg-indigo-50 dark:bg-indigo-950 text-indigo-700 dark:text-indigo-400 border border-indigo-200 dark:border-indigo-800'
-                          : 'bg-rose-50 dark:bg-rose-950 text-rose-700 dark:text-rose-400 border border-rose-200 dark:border-rose-800'
+                          ? 'bg-indigo-50 dark:bg-indigo-950 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800'
+                          : 'bg-rose-50 dark:bg-rose-950 text-rose-700 dark:text-rose-300 border border-rose-200 dark:border-rose-800'
                       }`}
                     >
                       {rule.ruleType}
                     </span>
-                    <span className="text-slate-800 dark:text-slate-200">{rule.pattern}</span>
+                    <span className="text-slate-900 dark:text-slate-100">{rule.pattern}</span>
                   </div>
                   <button
                     type="button"
                     onClick={() => handleRemoveRule(rule.id)}
-                    className="text-slate-400 hover:text-rose-500 dark:text-slate-500 dark:hover:text-rose-400 p-1 rounded transition-colors"
+                    className="text-slate-400 hover:text-rose-600 dark:text-slate-400 dark:hover:text-rose-400 p-1 rounded transition-colors"
                   >
                     <Trash2 className="w-3.5 h-3.5" />
                   </button>
@@ -448,52 +448,52 @@ export function AddProjectWizard({
         <div className="space-y-4 py-2">
           {loadingPreview ? (
             <div className="py-12 text-center text-xs text-slate-500 dark:text-slate-400 space-y-2">
-              <div className="w-6 h-6 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin mx-auto" />
+              <div className="w-6 h-6 border-2 border-indigo-600 border-t-transparent rounded-full animate-spin mx-auto" />
               <div>正在扫描本地与远端文件元数据，计算增量差异...</div>
             </div>
           ) : previewData ? (
             <div className="space-y-4">
               <div className="grid grid-cols-4 gap-2 text-center">
-                <div className="bg-indigo-50 dark:bg-indigo-950/40 border border-indigo-200 dark:border-indigo-800 p-2.5 rounded-lg">
-                  <div className="text-[10px] text-indigo-700 dark:text-indigo-400 font-medium">待上传</div>
-                  <div className="text-lg font-bold text-indigo-800 dark:text-indigo-300 font-mono">{previewData.uploadsCount} 项</div>
+                <div className="bg-indigo-50 dark:bg-indigo-950/40 border border-indigo-200 dark:border-indigo-800 p-2.5 rounded-xl">
+                  <div className="text-[11px] text-indigo-700 dark:text-indigo-300 font-medium">待上传</div>
+                  <div className="text-lg font-bold text-indigo-900 dark:text-indigo-200 font-mono tabular-nums">{previewData.uploadsCount} 项</div>
                 </div>
-                <div className="bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800 p-2.5 rounded-lg">
-                  <div className="text-[10px] text-emerald-700 dark:text-emerald-400 font-medium">内容一致</div>
-                  <div className="text-lg font-bold text-emerald-800 dark:text-emerald-300 font-mono">{previewData.identicalCount} 项</div>
+                <div className="bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800 p-2.5 rounded-xl">
+                  <div className="text-[11px] text-emerald-700 dark:text-emerald-300 font-medium">内容一致</div>
+                  <div className="text-lg font-bold text-emerald-900 dark:text-emerald-200 font-mono tabular-nums">{previewData.identicalCount} 项</div>
                 </div>
-                <div className="bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800 p-2.5 rounded-lg">
-                  <div className="text-[10px] text-amber-700 dark:text-amber-400 font-medium">检测到冲突</div>
-                  <div className="text-lg font-bold text-amber-800 dark:text-amber-300 font-mono">{previewData.conflictsCount} 项</div>
+                <div className="bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800 p-2.5 rounded-xl">
+                  <div className="text-[11px] text-amber-800 dark:text-amber-300 font-medium">检测到冲突</div>
+                  <div className="text-lg font-bold text-amber-900 dark:text-amber-200 font-mono tabular-nums">{previewData.conflictsCount} 项</div>
                 </div>
-                <div className="bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-2.5 rounded-lg">
-                  <div className="text-[10px] text-slate-500 dark:text-slate-400 font-medium">预计上传大小</div>
-                  <div className="text-lg font-bold text-slate-800 dark:text-slate-200 font-mono">
+                <div className="bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 p-2.5 rounded-xl">
+                  <div className="text-[11px] text-slate-600 dark:text-slate-400 font-medium">预计上传大小</div>
+                  <div className="text-lg font-bold text-slate-900 dark:text-slate-100 font-mono tabular-nums">
                     {(previewData.totalUploadBytes / (1024 * 1024)).toFixed(1)} MB
                   </div>
                 </div>
               </div>
 
               {/* Sample Operations Table */}
-              <div className="border border-slate-200 dark:border-aerospace-border rounded-xl bg-white dark:bg-aerospace-canvas overflow-hidden">
-                <div className="px-3 py-2 bg-slate-50 dark:bg-aerospace-rail border-b border-slate-200 dark:border-aerospace-border text-[11px] font-semibold text-slate-700 dark:text-slate-300 flex justify-between">
+              <div className="border border-slate-200 dark:border-slate-700 rounded-xl bg-white dark:bg-slate-800 overflow-hidden">
+                <div className="px-3 py-2 bg-slate-50 dark:bg-slate-800/80 border-b border-slate-200 dark:border-slate-700 text-[11px] font-semibold text-slate-700 dark:text-slate-300 flex justify-between">
                   <span>初始同步计划</span>
                   <span className="text-slate-500 font-mono">共 {previewData.items.length} 个动作</span>
                 </div>
-                <div className="divide-y divide-slate-100 dark:divide-aerospace-border max-h-48 overflow-y-auto">
+                <div className="divide-y divide-slate-100 dark:divide-slate-700 max-h-48 overflow-y-auto">
                   {previewData.items.map((item, idx) => (
                     <div key={idx} className="p-2 flex items-center justify-between text-xs">
                       <div className="flex items-center gap-2 truncate max-w-[360px]">
                         <span
-                          className={`px-1.5 py-0.2 rounded text-[10px] font-mono ${
+                          className={`px-1.5 py-0.5 rounded text-[11px] font-mono ${
                             item.action.startsWith('Upload')
-                              ? 'bg-indigo-50 dark:bg-indigo-950 text-indigo-700 dark:text-indigo-400 border border-indigo-200 dark:border-indigo-800'
-                              : 'bg-amber-50 dark:bg-amber-950 text-amber-700 dark:text-amber-400 border border-amber-200 dark:border-amber-800'
+                              ? 'bg-indigo-50 dark:bg-indigo-950 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800'
+                              : 'bg-amber-50 dark:bg-amber-950 text-amber-800 dark:text-amber-300 border border-amber-200 dark:border-amber-800'
                           }`}
                         >
                           {item.action}
                         </span>
-                        <span className="text-slate-800 dark:text-slate-200 truncate font-mono">{item.relativePath}</span>
+                        <span className="text-slate-900 dark:text-slate-100 truncate font-mono">{item.relativePath}</span>
                       </div>
                       <span className="text-[11px] text-slate-500 dark:text-slate-400">{item.reason}</span>
                     </div>
@@ -501,14 +501,14 @@ export function AddProjectWizard({
                 </div>
               </div>
 
-              <div className="bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-600/50 rounded-lg p-3 text-xs text-amber-800 dark:text-amber-300 flex items-center gap-2">
+              <div className="bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-700/60 rounded-xl p-3 text-xs text-amber-800 dark:text-amber-300 flex items-center gap-2">
                 <AlertTriangle className="w-4 h-4 text-amber-600 dark:text-amber-400 shrink-0" />
                 <span>
                   初始同步提示：确认后将写入同步基准，并启动双向监控。
                 </span>
               </div>
               {createError && (
-                <div role="alert" className="rounded-lg border border-rose-200 bg-rose-50 p-3 text-xs text-rose-800 dark:border-rose-900 dark:bg-rose-950/30 dark:text-rose-300">
+                <div role="alert" className="rounded-xl border border-rose-200 bg-rose-50 p-3 text-xs text-rose-800 dark:border-rose-900 dark:bg-rose-950/30 dark:text-rose-300">
                   创建同步项目失败：{createError}
                 </div>
               )}
@@ -519,7 +519,7 @@ export function AddProjectWizard({
               )}
             </div>
           ) : previewError ? (
-            <div role="alert" className="flex items-start gap-3 rounded-lg border border-rose-200 bg-rose-50 p-4 text-xs text-rose-800 dark:border-rose-900 dark:bg-rose-950/30 dark:text-rose-300">
+            <div role="alert" className="flex items-start gap-3 rounded-xl border border-rose-200 bg-rose-50 p-4 text-xs text-rose-800 dark:border-rose-900 dark:bg-rose-950/30 dark:text-rose-300">
               <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
               <div className="min-w-0 flex-1 space-y-1">
                 <div className="font-semibold">无法生成初始同步预览</div>
@@ -536,7 +536,7 @@ export function AddProjectWizard({
       )}
 
       {/* Wizard Footer Controls */}
-      <div className="flex items-center justify-between pt-4 border-t border-aerospace-border">
+      <div className="flex items-center justify-between pt-4 border-t border-slate-200 dark:border-slate-800">
         {currentStep > 1 ? (
           <Button
             variant="secondary"

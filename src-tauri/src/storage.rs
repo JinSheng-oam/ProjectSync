@@ -926,6 +926,7 @@ fn root_from_row(r: &sqlx::sqlite::SqliteRow) -> AppResult<RootRecord> {
         status: r.get("sync_status"),
         poll_interval_seconds: r.get::<i64, _>("poll_interval_seconds").max(10) as u32,
         debounce_ms: r.get::<i64, _>("debounce_ms").max(100) as u32,
+        max_parallel_transfers: r.get::<i64, _>("max_parallel_transfers").clamp(1, 8) as u32,
         last_sync_at: r.get("last_sync_at"),
         initial_sync_completed: r.get::<i64, _>("initial_sync_completed") != 0,
         initial_sync_confirmed: r.get::<i64, _>("initial_sync_confirmed") != 0,

@@ -85,11 +85,11 @@ export function App() {
         />
 
         {/* Scrollable View Container */}
-        <main className="flex-1 overflow-y-auto p-7 bg-transparent">
+        <main className="flex-1 overflow-y-auto p-6 bg-transparent">
           {loading ? (
-            <div className="h-full flex items-center justify-center font-mono text-xs text-slate-400">
+            <div className="h-full flex items-center justify-center font-mono text-xs text-slate-500">
               <div className="flex items-center gap-2">
-                <span className="w-3 h-3 border-2 border-indigo-400 border-t-transparent rounded-full animate-spin" />
+                <span className="w-3.5 h-3.5 border-2 border-indigo-600 border-t-transparent rounded-full animate-spin" />
                 正在加载本地 SQLite 状态与调度任务队列...
               </div>
             </div>

@@ -101,10 +101,6 @@ export function WebDavManager({ accounts, onRefresh }: WebDavManagerProps) {
         await api.createWebDavAccount({ name, url, username, password, tlsVerify });
       }
       setIsModalOpen(false);
-      setEditingAccountId(null);
-      setName('');
-      setPassword('');
-      setTestResult(null);
       onRefresh();
     } catch (err: unknown) {
       alert((err as Error).message);
@@ -116,15 +112,15 @@ export function WebDavManager({ accounts, onRefresh }: WebDavManagerProps) {
   return (
     <div className="space-y-6 max-w-7xl mx-auto">
       {/* Header */}
-      <div className="bg-aerospace-surface border border-aerospace-border rounded-xl p-5 shadow-soft-sm flex items-center justify-between">
+      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 shadow-soft-sm flex items-center justify-between transition-colors">
         <div className="flex items-center gap-3.5">
-          <div className="w-10 h-10 rounded-lg bg-emerald-100 dark:bg-emerald-500/20 border border-emerald-300 dark:border-emerald-500/40 flex items-center justify-center text-emerald-600 dark:text-emerald-400 shrink-0">
+          <div className="w-10 h-10 rounded-xl bg-emerald-50 dark:bg-emerald-950/60 border border-emerald-200 dark:border-emerald-800 flex items-center justify-center text-emerald-600 dark:text-emerald-400 shrink-0">
             <Server className="w-5 h-5" />
           </div>
           <div>
             <h2 className="text-base font-semibold text-slate-900 dark:text-slate-100 flex items-center gap-2">
               <span>WebDAV 存储节点</span>
-              <span className="text-xs px-2 py-0.5 rounded bg-emerald-100 dark:bg-emerald-950 text-emerald-800 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-800 font-medium">
+              <span className="text-xs px-2 py-0.5 rounded-md bg-emerald-50 dark:bg-emerald-950 text-emerald-800 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800 font-medium">
                 标准 WebDAV 兼容
               </span>
             </h2>
@@ -136,7 +132,7 @@ export function WebDavManager({ accounts, onRefresh }: WebDavManagerProps) {
 
         <Button variant="primary" size="md" onClick={openCreateAccount} className="gap-1.5">
           <Plus className="w-4 h-4" />
-          添加 WebDAV 节点
+          <span>添加 WebDAV 节点</span>
         </Button>
       </div>
 
@@ -145,11 +141,11 @@ export function WebDavManager({ accounts, onRefresh }: WebDavManagerProps) {
         {accounts.map((acc) => (
           <div
             key={acc.id}
-            className="bg-aerospace-surface border border-aerospace-border rounded-xl p-5 shadow-soft-sm space-y-4 hover:border-slate-400 dark:hover:border-slate-600 transition-colors"
+            className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 shadow-soft-sm space-y-4 hover:border-slate-300 dark:hover:border-slate-700 transition-colors"
           >
             <div className="flex items-start justify-between">
               <div className="flex items-center gap-3">
-                <div className="w-9 h-9 rounded-lg bg-aerospace-elevated border border-aerospace-borderLight flex items-center justify-center text-indigo-600 dark:text-indigo-400">
+                <div className="w-9 h-9 rounded-xl bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 flex items-center justify-center text-indigo-600 dark:text-indigo-400">
                   <Server className="w-5 h-5" />
                 </div>
                 <div>
@@ -158,31 +154,31 @@ export function WebDavManager({ accounts, onRefresh }: WebDavManagerProps) {
                 </div>
               </div>
               <div className="flex items-center gap-2">
-                <span className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-xs font-medium border ${acc.status === 'ONLINE' ? 'bg-emerald-100 dark:bg-emerald-950 text-emerald-800 dark:text-emerald-400 border-emerald-200 dark:border-emerald-800' : 'bg-slate-100 dark:bg-slate-900 text-slate-600 dark:text-slate-400 border-slate-200 dark:border-slate-800'}`}>
-                  <span className={`w-1.5 h-1.5 rounded-full ${acc.status === 'ONLINE' ? 'bg-emerald-500 animate-pulse' : 'bg-slate-400'}`} />
+                <span className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-xs font-medium border ${acc.status === 'ONLINE' ? 'bg-emerald-50 dark:bg-emerald-950/80 text-emerald-800 dark:text-emerald-300 border-emerald-200 dark:border-emerald-800' : 'bg-slate-100 dark:bg-slate-900 text-slate-600 dark:text-slate-400 border-slate-200 dark:border-slate-800'}`}>
+                  <span className={`w-1.5 h-1.5 rounded-full ${acc.status === 'ONLINE' ? 'bg-emerald-500' : 'bg-slate-400'}`} />
                   {acc.status === 'ONLINE' ? '在线' : acc.status === 'AUTH_FAILED' ? '认证失败' : acc.status === 'OFFLINE' ? '离线' : '未探测'}
                 </span>
-                <button type="button" onClick={() => openEditAccount(acc)} aria-label={`编辑 ${acc.name}`} className="rounded p-1.5 text-slate-400 hover:bg-indigo-50 hover:text-indigo-700 dark:hover:bg-indigo-950/40 dark:hover:text-indigo-300">
+                <button type="button" onClick={() => openEditAccount(acc)} aria-label={`编辑 ${acc.name}`} className="rounded p-1.5 text-slate-400 hover:bg-indigo-50 hover:text-indigo-700 dark:hover:bg-indigo-950/40 dark:hover:text-indigo-300 transition-colors">
                   <Pencil className="w-3.5 h-3.5" />
                 </button>
-                <button type="button" disabled={deletingId === acc.id} onClick={() => handleDeleteAccount(acc.id, acc.name)} aria-label={`删除 ${acc.name}`} className="rounded p-1.5 text-slate-400 hover:bg-rose-50 hover:text-rose-600 dark:hover:bg-rose-950/40 dark:hover:text-rose-400 disabled:opacity-50">
+                <button type="button" disabled={deletingId === acc.id} onClick={() => handleDeleteAccount(acc.id, acc.name)} aria-label={`删除 ${acc.name}`} className="rounded p-1.5 text-slate-400 hover:bg-rose-50 hover:text-rose-600 dark:hover:bg-rose-950/40 dark:hover:text-rose-400 disabled:opacity-50 transition-colors">
                   <Trash2 className="w-3.5 h-3.5" />
                 </button>
               </div>
             </div>
 
-            <div className="bg-slate-50 dark:bg-aerospace-canvas p-3 rounded-lg border border-slate-200 dark:border-aerospace-border text-xs space-y-1 text-slate-600 dark:text-slate-400">
+            <div className="bg-slate-50 dark:bg-slate-800/50 p-3 rounded-xl border border-slate-200 dark:border-slate-700 text-xs space-y-1 text-slate-600 dark:text-slate-400">
               <div className="flex justify-between">
                 <span>用户名:</span>
                 <span className="font-mono text-slate-900 dark:text-slate-200">{acc.username}</span>
               </div>
               <div className="flex justify-between">
                 <span>凭据安全引用:</span>
-                <span className="font-mono text-indigo-700 dark:text-indigo-400 truncate max-w-[200px]">{acc.credentialRef}</span>
+                <span className="font-mono text-indigo-700 dark:text-indigo-300 truncate max-w-[200px]">{acc.credentialRef}</span>
               </div>
               <div className="flex justify-between">
                 <span>TLS 证书校验:</span>
-                <span className={acc.tlsVerify ? 'text-emerald-600 dark:text-emerald-400 font-medium' : 'text-slate-400 dark:text-slate-500'}>
+                <span className={acc.tlsVerify ? 'text-emerald-700 dark:text-emerald-300 font-medium' : 'text-slate-500'}>
                   {acc.tlsVerify ? '已开启' : '关闭 (HTTP)'}
                 </span>
               </div>
@@ -190,35 +186,35 @@ export function WebDavManager({ accounts, onRefresh }: WebDavManagerProps) {
 
             {/* Verified Capabilities Badges */}
             {acc.capabilities && (
-              <div className="space-y-2 pt-2 border-t border-aerospace-border">
-                <div className="text-[11px] font-semibold text-slate-800 dark:text-slate-300 flex items-center gap-1.5">
+              <div className="space-y-2 pt-2 border-t border-slate-100 dark:border-slate-800">
+                <div className="text-xs font-semibold text-slate-800 dark:text-slate-200 flex items-center gap-1.5">
                   <ShieldCheck className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
                   <span>服务端兼容性探测结果 (Runtime Profile)</span>
                 </div>
                 <div className="grid grid-cols-2 gap-2 text-[11px] font-mono text-slate-600 dark:text-slate-400">
-                  <div className="bg-slate-100 dark:bg-slate-900/80 p-2 rounded border border-slate-200 dark:border-slate-800 flex justify-between">
+                  <div className="bg-slate-50 dark:bg-slate-800/60 p-2 rounded-lg border border-slate-200 dark:border-slate-700 flex justify-between">
                     <span>ETag 强校验:</span>
-                    <span className="text-emerald-600 dark:text-emerald-400 font-bold">{acc.capabilities.etagType}</span>
+                    <span className="text-emerald-700 dark:text-emerald-300 font-bold">{acc.capabilities.etagType}</span>
                   </div>
-                  <div className="bg-slate-100 dark:bg-slate-900/80 p-2 rounded border border-slate-200 dark:border-slate-800 flex justify-between">
+                  <div className="bg-slate-50 dark:bg-slate-800/60 p-2 rounded-lg border border-slate-200 dark:border-slate-700 flex justify-between">
                     <span>If-Match 保护:</span>
-                    <span className="text-emerald-600 dark:text-emerald-400 font-bold">
+                    <span className="text-emerald-700 dark:text-emerald-300 font-bold">
                       {acc.capabilities.supportsIfMatch ? '支持' : '不支持'}
                     </span>
                   </div>
-                  <div className="bg-slate-100 dark:bg-slate-900/80 p-2 rounded border border-slate-200 dark:border-slate-800 flex justify-between">
+                  <div className="bg-slate-50 dark:bg-slate-800/60 p-2 rounded-lg border border-slate-200 dark:border-slate-700 flex justify-between">
                     <span>独占锁写保护:</span>
-                    <span className={acc.capabilities.supportsLock ? 'text-emerald-600 dark:text-emerald-400 font-bold' : 'text-slate-500 dark:text-slate-500 font-bold'}>
+                    <span className={acc.capabilities.supportsLock ? 'text-emerald-700 dark:text-emerald-300 font-bold' : 'text-slate-500 font-bold'}>
                       {acc.capabilities.supportsLock ? '实测通过' : '未验证'}
                     </span>
                   </div>
-                  <div className="bg-slate-100 dark:bg-slate-900/80 p-2 rounded border border-slate-200 dark:border-slate-800 flex justify-between">
+                  <div className="bg-slate-50 dark:bg-slate-800/60 p-2 rounded-lg border border-slate-200 dark:border-slate-700 flex justify-between">
                     <span>PROPFIND Depth 1:</span>
-                    <span className="text-emerald-600 dark:text-emerald-400 font-bold">通过</span>
+                    <span className="text-emerald-700 dark:text-emerald-300 font-bold">通过</span>
                   </div>
-                  <div className="bg-slate-100 dark:bg-slate-900/80 p-2 rounded border border-slate-200 dark:border-slate-800 flex justify-between">
+                  <div className="bg-slate-50 dark:bg-slate-800/60 p-2 rounded-lg border border-slate-200 dark:border-slate-700 flex justify-between">
                     <span>吞吐带宽:</span>
-                    <span className="text-indigo-700 dark:text-indigo-400 font-bold">
+                    <span className="text-indigo-700 dark:text-indigo-300 font-bold">
                       {typeof acc.capabilities.maxUploadSpeedMbs === 'number' ? `~${acc.capabilities.maxUploadSpeedMbs} MB/s` : '未测量'}
                     </span>
                   </div>
@@ -245,7 +241,7 @@ export function WebDavManager({ accounts, onRefresh }: WebDavManagerProps) {
               value={name}
               onChange={(e) => setName(e.target.value)}
               placeholder="例如: Home-NAS-WebDAV"
-              className="w-full bg-white dark:bg-aerospace-canvas border border-slate-300 dark:border-aerospace-border rounded-lg px-3 py-2 text-xs text-slate-900 dark:text-slate-100 font-medium focus:outline-none focus:border-indigo-500"
+              className="w-full bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-2 text-xs text-slate-900 dark:text-slate-100 font-medium focus:outline-none focus:border-indigo-500"
             />
           </div>
 
@@ -256,7 +252,7 @@ export function WebDavManager({ accounts, onRefresh }: WebDavManagerProps) {
               value={url}
               onChange={(e) => setUrl(e.target.value)}
               placeholder="https://dav.example.com/webdav"
-              className="w-full bg-white dark:bg-aerospace-canvas border border-slate-300 dark:border-aerospace-border rounded-lg px-3 py-2 text-xs font-mono text-slate-900 dark:text-slate-100 focus:outline-none focus:border-indigo-500"
+              className="w-full bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-2 text-xs font-mono text-slate-900 dark:text-slate-100 focus:outline-none focus:border-indigo-500"
             />
           </div>
 
@@ -268,7 +264,7 @@ export function WebDavManager({ accounts, onRefresh }: WebDavManagerProps) {
                 value={username}
                 onChange={(e) => setUsername(e.target.value)}
                 placeholder="admin"
-                className="w-full bg-white dark:bg-aerospace-canvas border border-slate-300 dark:border-aerospace-border rounded-lg px-3 py-2 text-xs font-mono text-slate-900 dark:text-slate-100 focus:outline-none focus:border-indigo-500"
+                className="w-full bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-2 text-xs font-mono text-slate-900 dark:text-slate-100 focus:outline-none focus:border-indigo-500"
               />
             </div>
 
@@ -279,7 +275,7 @@ export function WebDavManager({ accounts, onRefresh }: WebDavManagerProps) {
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 placeholder={editingAccountId ? '留空则保留当前密码' : '••••••••'}
-                className="w-full bg-white dark:bg-aerospace-canvas border border-slate-300 dark:border-aerospace-border rounded-lg px-3 py-2 text-xs font-mono text-slate-900 dark:text-slate-100 focus:outline-none focus:border-indigo-500"
+                className="w-full bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-2 text-xs font-mono text-slate-900 dark:text-slate-100 focus:outline-none focus:border-indigo-500"
               />
             </div>
           </div>
@@ -338,7 +334,7 @@ export function WebDavManager({ accounts, onRefresh }: WebDavManagerProps) {
             </div>
           )}
 
-          <div className="flex items-center justify-end gap-3 pt-3 border-t border-aerospace-border">
+          <div className="flex items-center justify-end gap-3 pt-3 border-t border-slate-200 dark:border-slate-800">
             <Button variant="ghost" size="md" onClick={() => setIsModalOpen(false)}>
               取消
             </Button>
@@ -347,7 +343,6 @@ export function WebDavManager({ accounts, onRefresh }: WebDavManagerProps) {
               size="md"
               onClick={handleSaveAccount}
               disabled={saving}
-              className="bg-telemetry-indigo hover:bg-[#6562dd]"
             >
               {saving ? '正在保存…' : editingAccountId ? '保存修改' : '保存 WebDAV 节点'}
             </Button>

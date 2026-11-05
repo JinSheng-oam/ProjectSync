@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import {
   SyncRootDto,
   WebDavAccountDto,
@@ -37,6 +37,8 @@ export function useSyncStore() {
   const [isWizardOpen, setIsWizardOpen] = useState(false);
   const [loading, setLoading] = useState(true);
   const [bannerAlert, setBannerAlert] = useState<string | null>(null);
+  const refreshInFlight = useRef(false);
+  const progressByTaskId = useRef(new Map<string, number>());
 
   useEffect(() => {
     if (typeof document !== 'undefined') {
@@ -55,54 +57,132 @@ export function useSyncStore() {
 
   // Load all data
   const refreshAll = useCallback(async () => {
+    if (refreshInFlight.current) return;
+    refreshInFlight.current = true;
     try {
-      const [rList, aList, cList, tList, hList] = await Promise.all([
+      const results = await Promise.allSettled([
         api.listSyncRoots(),
         api.listWebDavAccounts(),
         api.listConflicts(),
         api.getPendingTasks(),
         api.querySyncHistory(),
       ]);
-      setRoots(rList);
-      setAccounts(aList);
-      setConflicts(cList);
-      setTasks(tList);
-      setHistory(hList);
+      const [rootsResult, accountsResult, conflictsResult, tasksResult, historyResult] = results;
+      if (rootsResult.status === 'fulfilled') setRoots(rootsResult.value);
+      if (accountsResult.status === 'fulfilled') setAccounts(accountsResult.value);
+      if (conflictsResult.status === 'fulfilled') setConflicts(conflictsResult.value);
+      if (tasksResult.status === 'fulfilled') {
+        const activeIds = new Set(tasksResult.value.map((task) => task.id));
+        for (const taskId of progressByTaskId.current.keys()) {
+          if (!activeIds.has(taskId)) progressByTaskId.current.delete(taskId);
+        }
+        setTasks(tasksResult.value.map((task) => ({
+          ...task,
+          bytesTransferred: progressByTaskId.current.get(task.id) ?? task.bytesTransferred,
+        })));
+      }
+      if (historyResult.status === 'fulfilled') setHistory(historyResult.value);
+      const failed = results.find((result) => result.status === 'rejected');
+      if (failed?.status === 'rejected') console.error('Some ProjectSync data could not be refreshed', failed.reason);
     } catch (err: unknown) {
       console.error('Failed to refresh data', err);
     } finally {
       setLoading(false);
+      refreshInFlight.current = false;
     }
   }, []);
 
   useEffect(() => {
-    refreshAll();
-    const interval = setInterval(refreshAll, 6000);
+    void refreshAll();
+    const interval = setInterval(() => {
+      if (document.visibilityState === 'visible') void refreshAll();
+    }, 6000);
     return () => clearInterval(interval);
   }, [refreshAll]);
+
+  useEffect(() => {
+    if (!api.isTauri) return;
+    let mounted = true;
+    let unlisten: (() => void) | undefined;
+    void import('@tauri-apps/api/event')
+      .then(({ listen }) => listen<{
+        rootId: string;
+        taskId: string;
+        path: string;
+        operation: TaskDto['action'];
+        bytesTransferred: number;
+        totalBytes: number;
+      }>('sync://progress', ({ payload }) => {
+        progressByTaskId.current.set(payload.taskId, payload.bytesTransferred);
+        setTasks((current) => {
+          const existing = current.find((task) => task.id === payload.taskId);
+          if (existing) {
+            return current.map((task) => task.id === payload.taskId
+              ? { ...task, bytesTransferred: payload.bytesTransferred, totalBytes: payload.totalBytes }
+              : task);
+          }
+          return [{
+            id: payload.taskId,
+            rootId: payload.rootId,
+            path: payload.path,
+            action: payload.operation,
+            status: 'Running',
+            bytesTransferred: payload.bytesTransferred,
+            totalBytes: payload.totalBytes,
+            retries: 0,
+            createdAt: Date.now(),
+            updatedAt: Date.now(),
+          }, ...current];
+        });
+      }))
+      .then((stopListening) => {
+        if (mounted) unlisten = stopListening;
+        else stopListening();
+      })
+      .catch((error: unknown) => console.error('Failed to subscribe to transfer progress', error));
+    return () => {
+      mounted = false;
+      unlisten?.();
+    };
+  }, []);
 
   const handleSyncNow = async (rootId: string) => {
     setRoots((prev) =>
       prev.map((r) => (r.id === rootId ? { ...r, status: 'SYNCING' } : r))
     );
-    await api.syncNow(rootId);
-    await refreshAll();
+    try {
+      await api.syncNow(rootId);
+    } catch (error: unknown) {
+      setBannerAlert(`立即同步失败：${error instanceof Error ? error.message : String(error)}`);
+    } finally {
+      await refreshAll();
+    }
   };
 
   const handlePauseSync = async (rootId: string) => {
     setRoots((prev) =>
       prev.map((r) => (r.id === rootId ? { ...r, status: 'PAUSED' } : r))
     );
-    await api.pauseSync(rootId);
-    await refreshAll();
+    try {
+      await api.pauseSync(rootId);
+    } catch (error: unknown) {
+      setBannerAlert(`暂停同步失败：${error instanceof Error ? error.message : String(error)}`);
+    } finally {
+      await refreshAll();
+    }
   };
 
   const handleResumeSync = async (rootId: string) => {
     setRoots((prev) =>
       prev.map((r) => (r.id === rootId ? { ...r, status: 'IDLE' } : r))
     );
-    await api.resumeSync(rootId);
-    await refreshAll();
+    try {
+      await api.resumeSync(rootId);
+    } catch (error: unknown) {
+      setBannerAlert(`恢复同步失败：${error instanceof Error ? error.message : String(error)}`);
+    } finally {
+      await refreshAll();
+    }
   };
 
   const handleEnableSync = async (rootId: string) => {

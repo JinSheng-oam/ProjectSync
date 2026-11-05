@@ -86,40 +86,40 @@ export function SettingsView() {
 
   return (
     <div className="space-y-6 max-w-4xl mx-auto">
-      <div className="bg-aerospace-surface border border-aerospace-border rounded-xl p-5 shadow-soft-sm flex items-center justify-between">
+      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 shadow-soft-sm flex items-center justify-between transition-colors">
         <div className="flex items-center gap-3.5">
-          <div className="w-10 h-10 rounded-lg bg-indigo-100 dark:bg-indigo-500/20 border border-indigo-200 dark:border-indigo-500/40 flex items-center justify-center text-indigo-600 dark:text-indigo-400 shrink-0">
+          <div className="w-10 h-10 rounded-xl bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 flex items-center justify-center text-indigo-600 dark:text-indigo-400 shrink-0">
             <Settings className="w-5 h-5" />
           </div>
           <div>
-            <h2 className="text-base font-semibold text-slate-900 dark:text-slate-100">常规设置</h2>
-            <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">设备身份、启动方式和同步调度参数</p>
+            <h2 className="text-base font-semibold text-slate-900 dark:text-slate-100">系统配置与引擎参数</h2>
+            <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">设备身份、开机自启行为与底层同步调度防抖参数</p>
           </div>
         </div>
         <Button variant="primary" size="md" onClick={handleSave} disabled={saving} className="gap-2">
           {saved ? <Check className="w-4 h-4 text-emerald-300" /> : null}
-          {saving ? '正在保存…' : saved ? '已保存' : '保存设置'}
+          <span>{saving ? '正在保存…' : saved ? '已保存' : '保存设置'}</span>
         </Button>
       </div>
 
-      {error && <div role="alert" className="rounded-lg border border-rose-300 bg-rose-50 p-3 text-xs text-rose-700 dark:border-rose-800 dark:bg-rose-950/30 dark:text-rose-300">{error}</div>}
+      {error && <div role="alert" className="rounded-xl border border-rose-300 bg-rose-50 p-3 text-xs text-rose-800 dark:border-rose-800 dark:bg-rose-950/40 dark:text-rose-300">{error}</div>}
 
-      <section className="bg-aerospace-surface border border-aerospace-border rounded-xl p-5 shadow-soft-sm space-y-4">
-        <h3 className="text-sm font-semibold text-slate-800 dark:text-slate-200 flex items-center gap-2">
+      <section className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 shadow-soft-sm space-y-4 transition-colors">
+        <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100 flex items-center gap-2">
           <FolderSync className="w-4 h-4 text-indigo-600 dark:text-indigo-400" />
           <span>设备与启动</span>
         </h3>
         <div className="space-y-1.5">
           <label className="text-xs text-slate-700 dark:text-slate-300 font-medium" htmlFor="device-name">设备名称</label>
-          <input id="device-name" value={deviceName} maxLength={64} onChange={(event) => setDeviceName(event.target.value)} className="w-full bg-white dark:bg-aerospace-canvas border border-slate-300 dark:border-aerospace-border rounded-lg px-3 py-2 text-xs text-slate-900 dark:text-slate-100" />
+          <input id="device-name" value={deviceName} maxLength={64} onChange={(event) => setDeviceName(event.target.value)} className="w-full bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-2 text-xs text-slate-900 dark:text-slate-100 focus:outline-none focus:border-indigo-500" />
         </div>
-        <ToggleRow title="登录 Windows 后自动启动" description="将 ProjectSync 注册到当前用户的启动项" checked={autostart} onChange={setAutostart} />
-        <ToggleRow title="启动后最小化到托盘" description="开机启动时在后台继续监听和轮询" checked={startMinimized} onChange={setStartMinimized} />
+        <ToggleRow title="登录 Windows 后自动启动" description="将 ProjectSync 注册到当前用户的系统启动项" checked={autostart} onChange={setAutostart} />
+        <ToggleRow title="启动后最小化到托盘" description="开机启动时在系统托盘静默常驻，继续监听并按周期轮询" checked={startMinimized} onChange={setStartMinimized} />
       </section>
 
       {api.isTauri && (
         <div className="flex flex-col items-end gap-2">
-          {backupMessage && <span role="status" className="text-[11px] text-emerald-700 dark:text-emerald-300">{backupMessage}</span>}
+          {backupMessage && <span role="status" className="text-xs text-emerald-700 dark:text-emerald-300 font-medium">{backupMessage}</span>}
           <div className="flex gap-2">
             <Button variant="secondary" size="sm" onClick={handleBackupDatabase}>备份状态数据库</Button>
             <Button variant="secondary" size="sm" onClick={handleExportDiagnostics}>导出脱敏诊断包</Button>
@@ -127,17 +127,17 @@ export function SettingsView() {
         </div>
       )}
 
-      <section className="bg-aerospace-surface border border-aerospace-border rounded-xl p-5 shadow-soft-sm space-y-4">
-        <h3 className="text-sm font-semibold text-slate-800 dark:text-slate-200 flex items-center gap-2">
+      <section className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 shadow-soft-sm space-y-4 transition-colors">
+        <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100 flex items-center gap-2">
           <Shield className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
-          <span>同步默认值与重试</span>
+          <span>同步默认值与重试机制</span>
         </h3>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
           <NumberField label="新项目远端轮询周期（秒）" value={defaultPollInterval} min={10} max={86400} onChange={setDefaultPollInterval} />
           <NumberField label="本地变更防抖时间（毫秒）" value={defaultDebounce} min={100} max={30000} onChange={setDefaultDebounce} />
           <NumberField label="网络错误最多重试次数" value={retryLimit} min={1} max={20} onChange={setRetryLimit} />
         </div>
-        <p className="text-[11px] text-slate-500 dark:text-slate-400">网络重试使用 2 秒起步的指数退避，最长等待 300 秒。同步项目可单独覆盖轮询和防抖参数。</p>
+        <p className="text-[11px] text-slate-500 dark:text-slate-400">网络重试使用 2 秒起步的指数退避，最长等待 300 秒。每个同步项目可单独覆盖轮询与防抖参数。</p>
       </section>
     </div>
   );
@@ -145,12 +145,12 @@ export function SettingsView() {
 
 function ToggleRow(props: { title: string; description: string; checked: boolean; onChange: (value: boolean) => void }) {
   return (
-    <label className="flex items-center justify-between p-3 rounded-lg bg-slate-50 dark:bg-aerospace-canvas border border-slate-200 dark:border-aerospace-border cursor-pointer">
+    <label className="flex items-center justify-between p-3.5 rounded-xl bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700/80 cursor-pointer hover:bg-slate-100/70 dark:hover:bg-slate-800/80 transition-colors">
       <div>
-        <div className="text-xs text-slate-900 dark:text-slate-200 font-medium">{props.title}</div>
-        <div className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">{props.description}</div>
+        <div className="text-xs text-slate-900 dark:text-slate-100 font-medium">{props.title}</div>
+        <div className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">{props.description}</div>
       </div>
-      <input type="checkbox" checked={props.checked} onChange={(event) => props.onChange(event.target.checked)} className="rounded bg-white dark:bg-slate-900 border-slate-300 dark:border-slate-700 text-indigo-600 focus:ring-0" />
+      <input type="checkbox" checked={props.checked} onChange={(event) => props.onChange(event.target.checked)} className="rounded w-4 h-4 bg-white dark:bg-slate-900 border-slate-300 dark:border-slate-600 text-indigo-600 focus:ring-0 cursor-pointer" />
     </label>
   );
 }
@@ -159,7 +159,7 @@ function NumberField(props: { label: string; value: number; min: number; max: nu
   return (
     <div className="space-y-1.5">
       <label className="text-slate-700 dark:text-slate-300 font-medium">{props.label}</label>
-      <input type="number" min={props.min} max={props.max} value={props.value} onChange={(event) => props.onChange(Number(event.target.value))} className="w-full bg-white dark:bg-aerospace-canvas border border-slate-300 dark:border-aerospace-border rounded-lg px-3 py-2 text-slate-900 dark:text-slate-100" />
+      <input type="number" min={props.min} max={props.max} value={props.value} onChange={(event) => props.onChange(Number(event.target.value))} className="w-full bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-2 text-slate-900 dark:text-slate-100 font-mono text-xs focus:outline-none focus:border-indigo-500" />
     </div>
   );
 }

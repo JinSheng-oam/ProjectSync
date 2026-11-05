@@ -477,6 +477,7 @@ pub struct RootRecord {
     pub status: String,
     pub poll_interval_seconds: u32,
     pub debounce_ms: u32,
+    pub max_parallel_transfers: u32,
     pub last_sync_at: Option<i64>,
     pub initial_sync_completed: bool,
     pub initial_sync_confirmed: bool,

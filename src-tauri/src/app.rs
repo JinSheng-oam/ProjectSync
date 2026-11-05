@@ -5,7 +5,7 @@ use crate::{
 };
 use notify::{RecommendedWatcher, RecursiveMode, Watcher};
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     path::PathBuf,
     sync::{Arc, Mutex},
     time::Duration,
@@ -117,6 +117,7 @@ impl AppState {
             return;
         };
         let state = self.clone();
+        let pending_watch_syncs = Arc::new(Mutex::new(HashSet::<String>::new()));
         tauri::async_runtime::spawn(async move {
             let mut debounce: HashMap<String, JoinHandle<()>> = HashMap::new();
             let mut last_poll: HashMap<String, Instant> = HashMap::new();
@@ -126,10 +127,33 @@ impl AppState {
                     Some(root_id)=receiver.recv()=>{
                         if let Some(previous)=debounce.remove(&root_id){previous.abort();}
                         let delayed=state.clone();let id=root_id.clone();
+                        let pending_watch_syncs = pending_watch_syncs.clone();
                         let handle=tokio::spawn(async move {
                             let wait=delayed.db.root(&id).await.map(|r|r.debounce_ms).unwrap_or(1200);
                             tokio::time::sleep(Duration::from_millis(wait as u64)).await;
-                            if let Err(error)=delayed.sync.sync_now(&id).await {tracing::debug!(root_id=%id,error=%error,"watcher sync pass did not complete");}
+                            let pending = pending_watch_syncs.clone();
+                            tokio::spawn(async move {
+                                let inserted = pending
+                                    .lock()
+                                    .map(|mut roots| roots.insert(id.clone()))
+                                    .unwrap_or(false);
+                                if !inserted {
+                                    return;
+                                }
+                                loop {
+                                    match delayed.sync.sync_now_if_idle(&id).await {
+                                        Ok(Some(_)) => break,
+                                        Ok(None) => tokio::time::sleep(Duration::from_secs(1)).await,
+                                        Err(error) => {
+                                            tracing::debug!(root_id=%id,error=%error,"watcher sync pass did not complete");
+                                            break;
+                                        }
+                                    }
+                                }
+                                if let Ok(mut roots) = pending.lock() {
+                                    roots.remove(&id);
+                                }
+                            });
                         });
                         debounce.insert(root_id,handle);
                     }
@@ -139,7 +163,7 @@ impl AppState {
                         for root in roots.into_iter().filter(|root|root.enabled){
                             let retry_due=state.db.has_due_retry(&root.id).await.unwrap_or(false);
                             let due=retry_due||last_poll.get(&root.id).map(|last|now.duration_since(*last)>=Duration::from_secs(root.poll_interval_seconds.max(10) as u64)).unwrap_or(true);
-                            if due {last_poll.insert(root.id.clone(),now);let sync=state.sync.clone();let id=root.id.clone();tokio::spawn(async move{if let Err(error)=sync.sync_now(&id).await{tracing::debug!(root_id=%id,error=%error,"scheduled sync pass did not complete");}});}
+                            if due {last_poll.insert(root.id.clone(),now);let sync=state.sync.clone();let id=root.id.clone();tokio::spawn(async move{if let Err(error)=sync.sync_now_if_idle(&id).await{tracing::debug!(root_id=%id,error=%error,"scheduled sync pass did not complete");}});}
                             if let Err(error)=state.install_watcher(&root){tracing::warn!(root_id=%root.id,error=%error,"local watcher unavailable; periodic scans remain active");}
                         }
                     }

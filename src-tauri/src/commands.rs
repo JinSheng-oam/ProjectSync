@@ -280,6 +280,7 @@ pub async fn update_sync_root(
 pub async fn delete_sync_root(state: State<'_, AppState>, root_id: String) -> ApiResult<()> {
     api(async {
         state.db.delete_root(&root_id).await?;
+        state.sync.cancel_root(&root_id);
         state.remove_watcher(&root_id);
         Ok(())
     }
@@ -308,6 +309,7 @@ pub async fn enable_sync_root(state: State<'_, AppState>, root_id: String) -> Ap
 pub async fn disable_sync_root(state: State<'_, AppState>, root_id: String) -> ApiResult<()> {
     api(async {
         state.db.set_root_enabled(&root_id, false).await?;
+        state.sync.cancel_root(&root_id);
         state.remove_watcher(&root_id);
         Ok(())
     }
