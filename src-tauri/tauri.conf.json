@@ -15,9 +15,10 @@
         "label": "main",
         "title": "ProjectSync",
         "width": 1440,
-        "height": 920,
+        "height": 900,
         "minWidth": 1100,
         "minHeight": 720,
+        "center": true,
         "visible": true
       }
     ],
@@ -28,6 +29,7 @@
   },
   "bundle": {
     "active": true,
+    "icon": ["icons/icon.ico"],
     "targets": ["nsis", "msi"],
     "shortDescription": "Safe bidirectional project file sync over WebDAV",
     "category": "Utility"

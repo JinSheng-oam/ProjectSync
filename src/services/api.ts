@@ -114,7 +114,7 @@ class MockEngine {
         timestamp: Date.now(),
       });
     } else if (resolution === 'KeepLocal') {
-      message = `已应用 KEEP_LOCAL 策略：本地版本已成功上传覆盖远程（已通过 ETag 前置条件校验）。`;
+      message = `已应用 KEEP_LOCAL 策略：本地版本已上传覆盖远程，并通过服务端条件写入或独占锁保护。`;
       this.history.unshift({
         id: `hist_${Date.now()}`,
         rootId: item.rootId,

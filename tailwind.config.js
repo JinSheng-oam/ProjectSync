@@ -8,6 +8,19 @@ export default {
   theme: {
     extend: {
       colors: {
+        indigo: {
+          50: '#f5f4ff',
+          100: '#e9e8ff',
+          200: '#d4d2ff',
+          300: '#b8b5ff',
+          400: '#9995fb',
+          500: '#7673eb',
+          600: '#6562dd',
+          700: '#5350bf',
+          800: '#413f96',
+          900: '#32316b',
+          950: '#211f4c',
+        },
         aerospace: {
           canvas: 'rgb(var(--color-canvas) / <alpha-value>)',
           rail: 'rgb(var(--color-rail) / <alpha-value>)',
@@ -19,10 +32,10 @@ export default {
         },
         telemetry: {
           emerald: '#10b981',
-          cyan: '#06b6d4',
+          indigo: '#7673eb',
+          coral: '#f87966',
           amber: '#f59e0b',
           crimson: '#ef4444',
-          indigo: '#6366f1',
         }
       },
       fontFamily: {
@@ -53,10 +66,11 @@ export default {
         ]
       },
       boxShadow: {
-        'soft-sm': '0 1px 2px 0 rgba(0, 0, 0, 0.08)',
-        'soft-md': '0 4px 12px 0 rgba(0, 0, 0, 0.08)',
-        'soft-lg': '0 8px 24px 0 rgba(0, 0, 0, 0.12)',
-        'glow-cyan': '0 0 16px rgba(6, 182, 212, 0.15)',
+        'soft-sm': '0 1px 3px 0 rgba(53, 48, 103, 0.06), 0 1px 2px -1px rgba(53, 48, 103, 0.05)',
+        'soft-md': '0 4px 12px 0 rgba(53, 48, 103, 0.07)',
+        'soft-lg': '0 8px 24px 0 rgba(53, 48, 103, 0.1)',
+        'glow-indigo': '0 0 16px rgba(118, 115, 235, 0.16)',
+        'soft-coral': '0 4px 12px rgba(248, 121, 102, 0.18)',
         'glow-amber': '0 0 16px rgba(245, 158, 11, 0.15)',
       }
     },

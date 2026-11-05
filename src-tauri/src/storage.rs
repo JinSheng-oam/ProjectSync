@@ -213,9 +213,10 @@ impl Database {
         sqlx::query("UPDATE webdav_accounts SET capability_json=?,connection_status=?,last_connected_at=?,updated_at=? WHERE id=?")
             .bind(&value).bind(status).bind(now).bind(now).bind(account_id).execute(&self.pool).await?;
         let id = uuid::Uuid::new_v4().to_string();
-        sqlx::query("INSERT INTO server_capability_probes(id,account_id,probed_at,propfind_ok,etag_observed,if_match_put_safe,if_none_match_safe,safe_update_existing,safe_create_only,safe_delete,move_no_overwrite_safe,report_json) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)")
+        sqlx::query("INSERT INTO server_capability_probes(id,account_id,probed_at,propfind_ok,etag_observed,if_match_put_safe,if_none_match_safe,lock_exclusion_safe,safe_update_existing,safe_create_only,safe_delete,move_no_overwrite_safe,report_json) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)")
             .bind(id).bind(account_id).bind(now).bind(capabilities.propfind_depth1_supported as i64).bind((capabilities.etag_type != "None") as i64)
             .bind(capabilities.supports_if_match as i64).bind(capabilities.supports_if_none_match as i64)
+            .bind(capabilities.supports_lock as i64)
             .bind(capabilities.safe_update_existing as i64).bind(capabilities.safe_create_only as i64).bind(capabilities.safe_delete as i64)
             .bind(capabilities.safe_move_no_overwrite as i64).bind(&value).execute(&self.pool).await?;
         Ok(())

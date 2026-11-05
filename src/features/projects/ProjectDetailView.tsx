@@ -154,7 +154,7 @@ export function ProjectDetailView({
           >
             <ArrowLeft className="w-5 h-5" />
           </button>
-          <div className="w-9 h-9 rounded-lg bg-aerospace-elevated border border-aerospace-border flex items-center justify-center text-cyan-600 dark:text-cyan-400">
+          <div className="w-9 h-9 rounded-lg bg-aerospace-elevated border border-aerospace-border flex items-center justify-center text-indigo-600 dark:text-indigo-400">
             <Folder className="w-5 h-5" />
           </div>
           <div>
@@ -219,7 +219,7 @@ export function ProjectDetailView({
               onClick={() => setActiveTab(tab.id as typeof activeTab)}
               className={`flex items-center gap-2 px-4 py-2.5 border-b-2 transition-all ${
                 isActive
-                  ? 'border-cyan-600 dark:border-cyan-400 text-cyan-800 dark:text-cyan-300 font-semibold bg-cyan-50/50 dark:bg-aerospace-elevated/40'
+                  ? 'border-indigo-600 dark:border-indigo-400 text-indigo-800 dark:text-indigo-300 font-semibold bg-indigo-50/50 dark:bg-aerospace-elevated/40'
                   : 'border-transparent text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800/30'
               }`}
             >
@@ -248,7 +248,7 @@ export function ProjectDetailView({
 
             <div className="bg-aerospace-surface border border-aerospace-border rounded-xl p-4 space-y-3 shadow-soft-sm">
               <div className="text-xs font-semibold text-slate-800 dark:text-slate-200 flex items-center gap-2">
-                <Cloud className="w-4 h-4 text-cyan-600 dark:text-cyan-400" />
+                <Cloud className="w-4 h-4 text-indigo-600 dark:text-indigo-400" />
                 <span>远端 WebDAV 路径</span>
               </div>
               <PathDisplay path={root.remotePath} />
@@ -271,7 +271,7 @@ export function ProjectDetailView({
               </div>
               <div className="bg-slate-50 dark:bg-aerospace-canvas p-3 rounded-lg border border-slate-200 dark:border-aerospace-border">
                 <div className="text-slate-500 dark:text-slate-400">并发覆写防护</div>
-                <div className="text-cyan-600 dark:text-cyan-400 font-bold font-mono mt-1">ETag + If-Match</div>
+                <div className="text-indigo-600 dark:text-indigo-400 font-bold font-mono mt-1">If-Match / WebDAV LOCK</div>
               </div>
               <div className="bg-slate-50 dark:bg-aerospace-canvas p-3 rounded-lg border border-slate-200 dark:border-aerospace-border">
                 <div className="text-slate-500 dark:text-slate-400">本地数据持久化</div>
@@ -305,7 +305,7 @@ export function ProjectDetailView({
               <select
                 value={newRuleType}
                 onChange={(e) => setNewRuleType(e.target.value as 'INCLUDE' | 'EXCLUDE')}
-                className="bg-white dark:bg-aerospace-canvas border border-slate-300 dark:border-aerospace-border rounded-lg px-2.5 py-1.5 text-xs font-mono text-slate-800 dark:text-slate-200 focus:outline-none focus:border-cyan-500"
+                className="bg-white dark:bg-aerospace-canvas border border-slate-300 dark:border-aerospace-border rounded-lg px-2.5 py-1.5 text-xs font-mono text-slate-800 dark:text-slate-200 focus:outline-none focus:border-indigo-500"
               >
                 <option value="INCLUDE">INCLUDE</option>
                 <option value="EXCLUDE">EXCLUDE</option>
@@ -315,10 +315,10 @@ export function ProjectDetailView({
                 value={newRulePattern}
                 onChange={(e) => setNewRulePattern(e.target.value)}
                 placeholder="Glob 表达式 (例如: docs/**, config/*.toml)"
-                className="flex-1 bg-white dark:bg-aerospace-canvas border border-slate-300 dark:border-aerospace-border rounded-lg px-3 py-1.5 text-xs font-mono text-slate-900 dark:text-slate-100 focus:outline-none focus:border-cyan-500"
+                className="flex-1 bg-white dark:bg-aerospace-canvas border border-slate-300 dark:border-aerospace-border rounded-lg px-3 py-1.5 text-xs font-mono text-slate-900 dark:text-slate-100 focus:outline-none focus:border-indigo-500"
               />
               <Button variant="secondary" size="sm" onClick={handleAddRule} className="gap-1">
-                <Plus className="w-3.5 h-3.5 text-cyan-600 dark:text-cyan-400" />
+                <Plus className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400" />
                 新增规则
               </Button>
             </div>
@@ -343,7 +343,7 @@ export function ProjectDetailView({
                         <span
                           className={`px-1.5 py-0.5 rounded text-[10px] font-semibold ${
                             rule.ruleType === 'INCLUDE'
-                              ? 'bg-cyan-100 dark:bg-cyan-950 text-cyan-800 dark:text-cyan-400 border border-cyan-200 dark:border-cyan-800'
+                              ? 'bg-indigo-100 dark:bg-indigo-950 text-indigo-800 dark:text-indigo-400 border border-indigo-200 dark:border-indigo-800'
                               : 'bg-rose-100 dark:bg-rose-950 text-rose-800 dark:text-rose-400 border border-rose-200 dark:border-rose-800'
                           }`}
                         >
@@ -399,7 +399,7 @@ export function ProjectDetailView({
                           ? 'bg-emerald-100 dark:bg-emerald-950 text-emerald-800 dark:text-emerald-400'
                           : file.status === 'CONFLICT'
                           ? 'bg-amber-100 dark:bg-amber-950 text-amber-800 dark:text-amber-400'
-                          : 'bg-cyan-100 dark:bg-cyan-950 text-cyan-800 dark:text-cyan-400'
+                          : 'bg-indigo-100 dark:bg-indigo-950 text-indigo-800 dark:text-indigo-400'
                       }`}
                     >
                       {file.status}
@@ -442,7 +442,7 @@ export function ProjectDetailView({
                   <td className="py-2 px-3 text-slate-400 dark:text-slate-500">
                     {new Date(item.timestamp).toLocaleTimeString()}
                   </td>
-                  <td className="py-2 px-3 text-cyan-700 dark:text-cyan-400 font-semibold">{item.action}</td>
+                  <td className="py-2 px-3 text-indigo-700 dark:text-indigo-400 font-semibold">{item.action}</td>
                   <td className="py-2 px-3 text-slate-800 dark:text-slate-200">{item.relativePath}</td>
                   <td className="py-2 px-3">
                     <span

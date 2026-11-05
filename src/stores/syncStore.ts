@@ -24,7 +24,7 @@ export function useSyncStore() {
       const saved = localStorage.getItem('projectsync-theme');
       if (saved === 'light' || saved === 'dark') return saved;
     }
-    return 'dark';
+    return 'light';
   });
 
   const [currentNav, setCurrentNav] = useState<ActiveNav>('overview');

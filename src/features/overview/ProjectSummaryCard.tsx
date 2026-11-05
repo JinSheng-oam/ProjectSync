@@ -35,17 +35,17 @@ export function ProjectSummaryCard({
   return (
     <div
       onClick={() => onOpenDetail(root.id)}
-      className="bg-aerospace-surface border border-aerospace-border hover:border-slate-400 dark:hover:border-slate-600 rounded-xl p-5 shadow-soft-sm transition-all cursor-pointer group hover:bg-aerospace-surface/90"
+      className="bg-white/50 dark:bg-aerospace-surface/60 backdrop-blur-xl border border-white/70 dark:border-aerospace-border hover:border-indigo-300 dark:hover:border-indigo-700 rounded-2xl p-6 shadow-soft-sm transition-all cursor-pointer group hover:bg-white/70 dark:hover:bg-aerospace-surface/80"
     >
       {/* Top Header of Card */}
       <div className="flex items-start justify-between gap-4">
         <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-lg bg-aerospace-elevated border border-aerospace-borderLight flex items-center justify-center text-cyan-600 dark:text-cyan-400 group-hover:scale-105 transition-transform shadow-soft-sm">
-            <Folder className="w-5 h-5 text-cyan-600 dark:text-cyan-400" />
+          <div className="w-10 h-10 rounded-lg bg-aerospace-elevated border border-aerospace-borderLight flex items-center justify-center text-indigo-600 dark:text-indigo-400 group-hover:scale-105 transition-transform shadow-soft-sm">
+            <Folder className="w-5 h-5 text-indigo-600 dark:text-indigo-400" />
           </div>
           <div>
             <div className="flex items-center gap-2">
-              <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100 group-hover:text-cyan-600 dark:group-hover:text-cyan-300 transition-colors">
+              <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100 group-hover:text-indigo-600 dark:group-hover:text-indigo-300 transition-colors">
                 {root.name}
               </h3>
               <code className="text-[10px] font-mono text-slate-600 dark:text-slate-400 bg-slate-100 dark:bg-slate-900/90 px-1.5 py-0.5 rounded border border-slate-200 dark:border-slate-800">
@@ -62,7 +62,7 @@ export function ProjectSummaryCard({
               {root.pendingChanges ? (
                 <>
                   <span>•</span>
-                  <span className="text-cyan-600 dark:text-cyan-400 font-medium">
+                  <span className="text-indigo-600 dark:text-indigo-400 font-medium">
                     <span className="font-mono">{root.pendingChanges}</span> 项待同步
                   </span>
                 </>
@@ -78,7 +78,7 @@ export function ProjectSummaryCard({
 
       {/* Path Display Lanes */}
       <div className="mt-4 pt-3 border-t border-aerospace-border/80 grid grid-cols-1 md:grid-cols-2 gap-2 text-xs">
-        <div className="bg-slate-50 dark:bg-aerospace-canvas/80 p-2.5 rounded-lg border border-slate-200 dark:border-aerospace-border flex items-center gap-2 min-w-0">
+        <div className="bg-white/45 dark:bg-aerospace-canvas/60 p-3 rounded-xl border border-white/60 dark:border-aerospace-border flex items-center gap-2 min-w-0">
           <HardDrive className="w-4 h-4 text-slate-500 dark:text-slate-400 shrink-0" />
           <div className="min-w-0 flex-1">
             <div className="text-[10px] text-slate-500 dark:text-slate-400">本地路径</div>
@@ -86,8 +86,8 @@ export function ProjectSummaryCard({
           </div>
         </div>
 
-        <div className="bg-slate-50 dark:bg-aerospace-canvas/80 p-2.5 rounded-lg border border-slate-200 dark:border-aerospace-border flex items-center gap-2 min-w-0">
-          <Cloud className="w-4 h-4 text-cyan-600 dark:text-cyan-400 shrink-0" />
+        <div className="bg-white/45 dark:bg-aerospace-canvas/60 p-3 rounded-xl border border-white/60 dark:border-aerospace-border flex items-center gap-2 min-w-0">
+          <Cloud className="w-4 h-4 text-indigo-600 dark:text-indigo-400 shrink-0" />
           <div className="min-w-0 flex-1">
             <div className="text-[10px] text-slate-500 dark:text-slate-400">远端 WebDAV 路径</div>
             <PathDisplay path={root.remotePath} />
@@ -155,7 +155,7 @@ export function ProjectSummaryCard({
             variant="ghost"
             size="sm"
             onClick={() => onOpenDetail(root.id)}
-            className="gap-1 text-slate-600 dark:text-slate-400 hover:text-cyan-600 dark:hover:text-cyan-300"
+            className="gap-1 text-slate-600 dark:text-slate-400 hover:text-indigo-600 dark:hover:text-indigo-300"
           >
             <span>配置与文件</span>
             <ChevronRight className="w-3.5 h-3.5" />

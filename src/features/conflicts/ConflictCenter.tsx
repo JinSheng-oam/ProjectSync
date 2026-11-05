@@ -147,13 +147,13 @@ export function ConflictCenter({ conflicts, onResolve }: ConflictCenterProps) {
               {/* Three-Way Comparison Grid: Local Version vs WebDAV Remote Version */}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 {/* Local Version Box */}
-                <div className="bg-slate-50/70 dark:bg-aerospace-canvas border border-cyan-200 dark:border-cyan-800/60 rounded-xl p-4 space-y-3 relative overflow-hidden">
+                <div className="bg-slate-50/70 dark:bg-aerospace-canvas border border-indigo-200 dark:border-indigo-800/60 rounded-xl p-4 space-y-3 relative overflow-hidden">
                   <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2 text-cyan-700 dark:text-cyan-400 text-xs font-semibold">
+                    <div className="flex items-center gap-2 text-indigo-700 dark:text-indigo-400 text-xs font-semibold">
                       <HardDrive className="w-4 h-4" />
                       <span>本地版本</span>
                     </div>
-                    <span className="text-[10px] px-1.5 py-0.5 bg-cyan-100 dark:bg-cyan-950 text-cyan-800 dark:text-cyan-300 border border-cyan-200 dark:border-cyan-800 rounded font-medium">
+                    <span className="text-[10px] px-1.5 py-0.5 bg-indigo-100 dark:bg-indigo-950 text-indigo-800 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800 rounded font-medium">
                       本机修改
                     </span>
                   </div>
@@ -175,7 +175,7 @@ export function ConflictCenter({ conflicts, onResolve }: ConflictCenterProps) {
                     </div>
                     <div className="space-y-1 pt-1">
                       <span className="text-slate-500 text-[10px]">BLAKE3 内容哈希:</span>
-                      <code className="block bg-white dark:bg-slate-900 p-1.5 rounded border border-slate-200 dark:border-slate-800 text-[10px] font-mono text-cyan-700 dark:text-cyan-300 truncate select-all">
+                      <code className="block bg-white dark:bg-slate-900 p-1.5 rounded border border-slate-200 dark:border-slate-800 text-[10px] font-mono text-indigo-700 dark:text-indigo-300 truncate select-all">
                         {activeConflict.localVersion.blake3Hash}
                       </code>
                     </div>
@@ -253,10 +253,10 @@ export function ConflictCenter({ conflicts, onResolve }: ConflictCenterProps) {
                         description: `系统将保留两端内容：下载远端文件并自动重命名为 ${activeConflict.relativePath}.conflict-${new Date().toISOString().slice(0, 10)}.md，本地现有文件原样保留，不会丢失任何数据。`,
                       })
                     }
-                    className="p-3.5 rounded-xl border border-cyan-300 dark:border-cyan-500/50 bg-cyan-50/60 dark:bg-cyan-950/20 hover:bg-cyan-100/60 dark:hover:bg-cyan-950/40 cursor-pointer transition-all space-y-1.5 shadow-sm"
+                    className="p-3.5 rounded-xl border border-indigo-300 dark:border-indigo-500/50 bg-indigo-50/60 dark:bg-indigo-950/20 hover:bg-indigo-100/60 dark:hover:bg-indigo-950/40 cursor-pointer transition-all space-y-1.5 shadow-sm"
                   >
-                    <div className="text-xs font-semibold text-cyan-800 dark:text-cyan-300 flex items-center gap-1.5">
-                      <Copy className="w-4 h-4 text-cyan-600 dark:text-cyan-400" />
+                    <div className="text-xs font-semibold text-indigo-800 dark:text-indigo-300 flex items-center gap-1.5">
+                      <Copy className="w-4 h-4 text-indigo-600 dark:text-indigo-400" />
                       <span>保留双端版本 (推荐)</span>
                     </div>
                     <p className="text-[11px] text-slate-700 dark:text-slate-300 leading-normal">
@@ -271,7 +271,7 @@ export function ConflictCenter({ conflicts, onResolve }: ConflictCenterProps) {
                         id: activeConflict.id,
                         resolution: 'KeepLocal',
                         title: '确认以本地版本为准（覆盖远端）',
-                        description: `本地版本将上传并覆盖 WebDAV 远端的对应文件。该操作会使用 If-Match 进行 ETag 校验，确保不影响后续新变更。`,
+                        description: `本地版本将上传并覆盖 WebDAV 远端的对应文件。写入前会重新核对远端版本，并使用服务端已验证的 If-Match 或独占锁保护；发现变化时会停止覆盖。`,
                       })
                     }
                     className="p-3.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-aerospace-canvas/60 hover:bg-slate-50 dark:hover:bg-slate-800/50 cursor-pointer transition-all space-y-1.5 shadow-soft-sm"
@@ -281,7 +281,7 @@ export function ConflictCenter({ conflicts, onResolve }: ConflictCenterProps) {
                       <span>以本地为准 (覆盖远端)</span>
                     </div>
                     <p className="text-[11px] text-slate-500 dark:text-slate-400 leading-normal">
-                      以本地修改为准，上传覆盖 WebDAV 远端内容。需通过 ETag 前置条件校验。
+                      以本地修改为准，上传覆盖 WebDAV 远端内容。写入前会核对远端版本，并使用已验证的条件写入或独占锁保护。
                     </p>
                   </div>
 
@@ -344,7 +344,7 @@ export function ConflictCenter({ conflicts, onResolve }: ConflictCenterProps) {
                 size="md"
                 onClick={handleApplyResolution}
                 disabled={processing}
-                className="bg-cyan-600 hover:bg-cyan-500 text-white"
+                className="bg-telemetry-indigo hover:bg-[#6562dd] text-white"
               >
                 {processing ? '正在处理...' : '确认解决'}
               </Button>

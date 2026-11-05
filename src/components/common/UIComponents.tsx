@@ -6,7 +6,7 @@ export function StatusBadge({ status, pulse = false }: { status: SyncRootStatus 
   switch (status) {
     case 'SYNCING':
       return (
-        <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded text-xs font-medium bg-cyan-50 dark:bg-cyan-950/80 text-cyan-700 dark:text-cyan-400 border border-cyan-200 dark:border-cyan-800/60 shadow-soft-sm">
+        <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded text-xs font-medium bg-indigo-50 dark:bg-indigo-950/80 text-indigo-700 dark:text-indigo-400 border border-indigo-200 dark:border-indigo-800/60 shadow-soft-sm">
           <RefreshCw className={`w-3 h-3 ${pulse ? 'animate-spin' : ''}`} />
           同步中
         </span>
@@ -105,7 +105,7 @@ export function Button({
   type = 'button',
 }: {
   children: React.ReactNode;
-  variant?: 'primary' | 'secondary' | 'danger' | 'ghost' | 'accent';
+  variant?: 'primary' | 'secondary' | 'danger' | 'ghost' | 'accent' | 'coral';
   size?: 'sm' | 'md' | 'lg';
   disabled?: boolean;
   className?: string;
@@ -113,7 +113,7 @@ export function Button({
   type?: 'button' | 'submit' | 'reset';
 }) {
   const baseClasses =
-    'inline-flex items-center justify-center font-medium transition-all rounded select-none focus:outline-none focus-visible:ring-2 focus-visible:ring-cyan-500 disabled:opacity-50 disabled:cursor-not-allowed';
+    'inline-flex items-center justify-center font-medium transition-all rounded-xl select-none focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed';
 
   const sizeClasses = {
     sm: 'text-xs px-2.5 py-1 gap-1.5',
@@ -123,7 +123,7 @@ export function Button({
 
   const variantClasses = {
     primary:
-      'bg-cyan-600 hover:bg-cyan-500 text-white shadow-soft-sm hover:shadow-glow-cyan active:bg-cyan-700 font-semibold',
+      'bg-telemetry-indigo hover:bg-[#6562dd] text-white shadow-soft-sm hover:shadow-glow-indigo active:bg-[#5c59d6] font-semibold',
     secondary:
       'bg-aerospace-elevated hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 border border-aerospace-border hover:border-slate-400 dark:hover:border-slate-500 active:bg-slate-300 dark:active:bg-slate-800 shadow-soft-sm',
     danger:
@@ -132,6 +132,8 @@ export function Button({
       'bg-transparent hover:bg-slate-100 dark:hover:bg-slate-800/70 text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white',
     accent:
       'bg-emerald-600 hover:bg-emerald-500 text-white shadow-soft-sm active:bg-emerald-700 font-semibold',
+    coral:
+      'bg-telemetry-coral hover:bg-[#ed6d5d] text-white shadow-soft-sm active:bg-[#e45e50] font-semibold',
   }[variant];
 
   return (
@@ -166,7 +168,7 @@ export function Modal({
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/50 dark:bg-black/80 backdrop-blur-sm animate-in fade-in duration-150">
       <div
-        className={`bg-aerospace-surface border border-aerospace-borderLight rounded-xl shadow-soft-lg w-full ${maxWidth} flex flex-col max-h-[90vh] overflow-hidden`}
+        className={`bg-aerospace-surface border border-aerospace-borderLight rounded-2xl shadow-soft-lg w-full ${maxWidth} flex flex-col max-h-[90vh] overflow-hidden`}
         role="dialog"
       >
         <div className="flex items-center justify-between px-6 py-4 border-b border-aerospace-border bg-aerospace-rail/60">

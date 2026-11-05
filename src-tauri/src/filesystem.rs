@@ -55,13 +55,19 @@ impl RuleEngine {
     }
 
     pub fn includes(&self, path: &str) -> bool {
+        !self.is_excluded(path, false) && (!self.has_include || self.includes.is_match(path))
+    }
+
+    fn is_excluded(&self, path: &str, is_directory: bool) -> bool {
         if path
             .split('/')
             .any(|part| part.eq_ignore_ascii_case(".projectsync"))
         {
-            return false;
+            return true;
         }
-        !self.excludes.is_match(path) && (!self.has_include || self.includes.is_match(path))
+        let path = path.trim_matches('/');
+        self.excludes.is_match(path)
+            || (is_directory && self.excludes.is_match(&format!("{path}/")))
     }
 }
 
@@ -100,7 +106,22 @@ pub fn scan_local_cached(
             if entry.depth() == 0 {
                 return true;
             }
-            if entry.file_type().is_symlink() {
+            let file_type = entry.file_type();
+            let relative = match entry.path().strip_prefix(&root) {
+                Ok(relative) => relative
+                    .components()
+                    .map(|part| part.as_os_str().to_string_lossy())
+                    .collect::<Vec<_>>()
+                    .join("/"),
+                Err(_) => {
+                    scan_incomplete.set(true);
+                    return false;
+                }
+            };
+            if rule_engine.is_excluded(&relative, file_type.is_dir() || file_type.is_symlink()) {
+                return false;
+            }
+            if file_type.is_symlink() {
                 scan_incomplete.set(true);
                 return false;
             }

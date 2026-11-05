@@ -47,7 +47,7 @@ export function SyncHistoryView({ history }: { history: HistoryItemDto[] }) {
       {/* Top Banner */}
       <div className="bg-aerospace-surface border border-aerospace-border rounded-xl p-5 shadow-soft-sm flex items-center justify-between">
         <div className="flex items-center gap-3.5">
-          <div className="w-10 h-10 rounded-lg bg-cyan-100 dark:bg-cyan-500/20 border border-cyan-200 dark:border-cyan-500/40 flex items-center justify-center text-cyan-600 dark:text-cyan-400 shrink-0">
+          <div className="w-10 h-10 rounded-lg bg-indigo-100 dark:bg-indigo-500/20 border border-indigo-200 dark:border-indigo-500/40 flex items-center justify-center text-indigo-600 dark:text-indigo-400 shrink-0">
             <History className="w-5 h-5" />
           </div>
           <div>
@@ -64,7 +64,7 @@ export function SyncHistoryView({ history }: { history: HistoryItemDto[] }) {
           onClick={handleExportCSV}
           className="gap-2"
         >
-          <Download className="w-4 h-4 text-cyan-600 dark:text-cyan-400" />
+          <Download className="w-4 h-4 text-indigo-600 dark:text-indigo-400" />
           导出 CSV
         </Button>
       </div>
@@ -79,7 +79,7 @@ export function SyncHistoryView({ history }: { history: HistoryItemDto[] }) {
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
               placeholder="按文件名、项目名过滤..."
-              className="w-full bg-white dark:bg-aerospace-canvas border border-slate-300 dark:border-aerospace-border rounded-lg pl-9 pr-3 py-1.5 text-xs text-slate-900 dark:text-slate-100 focus:outline-none focus:border-cyan-500"
+              className="w-full bg-white dark:bg-aerospace-canvas border border-slate-300 dark:border-aerospace-border rounded-lg pl-9 pr-3 py-1.5 text-xs text-slate-900 dark:text-slate-100 focus:outline-none focus:border-indigo-500"
             />
           </div>
         </div>
@@ -89,7 +89,7 @@ export function SyncHistoryView({ history }: { history: HistoryItemDto[] }) {
           <select
             value={actionFilter}
             onChange={(e) => setActionFilter(e.target.value)}
-            className="bg-white dark:bg-aerospace-canvas border border-slate-300 dark:border-aerospace-border rounded-lg px-2.5 py-1.5 text-slate-800 dark:text-slate-300 focus:outline-none focus:border-cyan-500 font-mono"
+            className="bg-white dark:bg-aerospace-canvas border border-slate-300 dark:border-aerospace-border rounded-lg px-2.5 py-1.5 text-slate-800 dark:text-slate-300 focus:outline-none focus:border-indigo-500 font-mono"
           >
             <option value="ALL">全部动作</option>
             <option value="UploadUpdate">UploadUpdate</option>
@@ -101,7 +101,7 @@ export function SyncHistoryView({ history }: { history: HistoryItemDto[] }) {
           <select
             value={statusFilter}
             onChange={(e) => setStatusFilter(e.target.value)}
-            className="bg-white dark:bg-aerospace-canvas border border-slate-300 dark:border-aerospace-border rounded-lg px-2.5 py-1.5 text-slate-800 dark:text-slate-300 focus:outline-none focus:border-cyan-500"
+            className="bg-white dark:bg-aerospace-canvas border border-slate-300 dark:border-aerospace-border rounded-lg px-2.5 py-1.5 text-slate-800 dark:text-slate-300 focus:outline-none focus:border-indigo-500"
           >
             <option value="ALL">全部状态</option>
             <option value="SUCCESS">成功</option>
@@ -142,7 +142,7 @@ export function SyncHistoryView({ history }: { history: HistoryItemDto[] }) {
                     <span
                       className={`px-1.5 py-0.5 rounded text-[10px] font-semibold ${
                         item.action.startsWith('Upload')
-                          ? 'bg-cyan-100 dark:bg-cyan-950 text-cyan-800 dark:text-cyan-400 border border-cyan-200 dark:border-cyan-800'
+                          ? 'bg-indigo-100 dark:bg-indigo-950 text-indigo-800 dark:text-indigo-400 border border-indigo-200 dark:border-indigo-800'
                           : item.action === 'CreateConflictCopy'
                           ? 'bg-amber-100 dark:bg-amber-950 text-amber-800 dark:text-amber-300 border border-amber-200 dark:border-amber-800'
                           : 'bg-indigo-100 dark:bg-indigo-950 text-indigo-800 dark:text-indigo-400 border border-indigo-200 dark:border-indigo-800'

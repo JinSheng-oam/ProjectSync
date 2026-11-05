@@ -194,7 +194,11 @@ pub async fn browse_remote_directory(
     api(async {
         let path = normalize_remote_path(&path)?;
         let (_, client) = state.sync.client_for(&account_id).await?;
-        let entries = client.propfind(&path, 1).await?;
+        let entries = match client.propfind(&path, 1).await {
+            Ok(entries) => entries,
+            Err(error) if error.code == "DAV_NOT_FOUND" => return Ok(Vec::new()),
+            Err(error) => return Err(error),
+        };
         entries
             .into_iter()
             .map(|entry| {
@@ -240,8 +244,16 @@ pub async fn create_sync_root(
                 data.rules,
             )
             .await?;
-        state.install_watcher(&root)?;
-        let _ = state.sync.sync_now(&root.id).await?;
+        if let Err(error) = state.install_watcher(&root) {
+            tracing::warn!(root_id=%root.id,error=%error,"local watcher unavailable; periodic scans remain active");
+        }
+        let sync = state.sync.clone();
+        let root_id = root.id.clone();
+        tauri::async_runtime::spawn(async move {
+            if let Err(error) = sync.sync_now(&root_id).await {
+                tracing::warn!(root_id=%root_id,error=%error,"initial sync did not complete");
+            }
+        });
         Ok(root)
     }
     .await)

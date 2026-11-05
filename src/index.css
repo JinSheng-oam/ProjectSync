@@ -5,31 +5,31 @@
 @layer base {
   :root {
     color-scheme: light;
-    --color-canvas: 248 250 252;       /* slate-50 #f8fafc */
-    --color-rail: 255 255 255;         /* white #ffffff */
+    --color-canvas: 247 246 255;       /* soft indigo canvas */
+    --color-rail: 252 251 255;         /* lavender white */
     --color-surface: 255 255 255;      /* white #ffffff */
-    --color-elevated: 241 245 249;     /* slate-100 #f1f5f9 */
-    --color-muted: 226 232 240;        /* slate-200 #e2e8f0 */
-    --color-border: 226 232 240;       /* slate-200 #e2e8f0 */
-    --color-border-light: 203 213 225; /* slate-300 #cbd5e1 */
+    --color-elevated: 244 243 255;     /* pale indigo */
+    --color-muted: 232 230 249;        /* muted lavender */
+    --color-border: 226 224 244;       /* soft lavender border */
+    --color-border-light: 210 207 236; /* stronger lavender border */
   }
 
   .dark {
     color-scheme: dark;
-    --color-canvas: 9 13 22;          /* #090d16 */
-    --color-rail: 13 19 34;           /* #0d1322 */
-    --color-surface: 18 26 45;        /* #121a2d */
-    --color-elevated: 23 34 59;       /* #17223b */
-    --color-muted: 30 45 74;          /* #1e2d4a */
-    --color-border: 31 46 77;         /* #1f2e4d */
-    --color-border-light: 42 61 102;  /* #2a3d66 */
+    --color-canvas: 18 18 42;
+    --color-rail: 23 23 51;
+    --color-surface: 30 30 64;
+    --color-elevated: 38 38 77;
+    --color-muted: 49 49 94;
+    --color-border: 58 58 105;
+    --color-border-light: 76 76 126;
   }
 
   body {
     margin: 0;
     padding: 0;
     background-color: rgb(var(--color-canvas));
-    color: #334155;
+    color: #323253;
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI Variable Text", "Segoe UI", system-ui, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei UI", "Microsoft YaHei", "Source Han Sans SC", "Noto Sans SC", sans-serif;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
@@ -47,21 +47,21 @@
   }
 
   .dark body {
-    color: #f1f5f9;
+    color: #f3f1ff;
   }
 
-  /* Browser surface theming per Impeccable craft-floor requirement */
+  /* Selection and input colors */
   ::selection {
-    background-color: rgba(6, 182, 212, 0.25);
-    color: #0891b2;
+    background-color: rgba(118, 115, 235, 0.2);
+    color: #5c59d6;
   }
 
   .dark ::selection {
-    background-color: rgba(6, 182, 212, 0.35);
-    color: #a5f3fc;
+    background-color: rgba(151, 148, 255, 0.3);
+    color: #d8d6ff;
   }
 
-  /* Custom Aerospace Scrollbars */
+  /* Soft indigo scrollbars */
   ::-webkit-scrollbar {
     width: 6px;
     height: 6px;
@@ -72,20 +72,20 @@
   }
 
   ::-webkit-scrollbar-thumb {
-    background: #cbd5e1;
+    background: #d2cfea;
     border-radius: 3px;
   }
 
   .dark ::-webkit-scrollbar-thumb {
-    background: #1f2e4d;
+    background: #3a3a69;
   }
 
   ::-webkit-scrollbar-thumb:hover {
-    background: #94a3b8;
+    background: #aaa6d2;
   }
 
   .dark ::-webkit-scrollbar-thumb:hover {
-    background: #2a3d66;
+    background: #4c4c7e;
   }
 
   /* Tabular numbers for all numbers and tables */
@@ -95,6 +95,30 @@
 
   /* Custom Caret */
   input, textarea {
-    caret-color: #06b6d4;
+    caret-color: #7673eb;
   }
+}
+
+.app-shell {
+  background-color: rgb(var(--color-canvas));
+  background-image:
+    radial-gradient(ellipse at 8% 105%, rgba(166, 159, 255, 0.25), transparent 62%),
+    radial-gradient(ellipse at 84% -8%, rgba(201, 198, 255, 0.34), transparent 58%),
+    linear-gradient(132deg, #fdfcff 0%, #f8f7ff 48%, #f0efff 100%);
+}
+
+.app-sidebar {
+  background-image: radial-gradient(ellipse at 0% 100%, rgba(151, 143, 255, 0.24), transparent 70%);
+  backdrop-filter: blur(18px);
+}
+
+.dark .app-shell {
+  background-image:
+    radial-gradient(ellipse at 8% 105%, rgba(91, 82, 185, 0.2), transparent 62%),
+    radial-gradient(ellipse at 84% -8%, rgba(81, 77, 167, 0.18), transparent 58%),
+    linear-gradient(132deg, #151530 0%, #12122a 48%, #181632 100%);
+}
+
+.dark .app-sidebar {
+  background-image: radial-gradient(ellipse at 0% 100%, rgba(89, 81, 177, 0.22), transparent 70%);
 }

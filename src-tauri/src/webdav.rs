@@ -16,6 +16,7 @@ use url::Url;
 use zeroize::Zeroizing;
 
 const PROPFIND_BODY: &str = r#"<?xml version="1.0" encoding="utf-8" ?><d:propfind xmlns:d="DAV:"><d:prop><d:resourcetype/><d:getcontentlength/><d:getlastmodified/><d:getetag/></d:prop></d:propfind>"#;
+const EXCLUSIVE_LOCK_BODY: &str = r#"<?xml version="1.0" encoding="utf-8"?><d:lockinfo xmlns:d="DAV:"><d:lockscope><d:exclusive/></d:lockscope><d:locktype><d:write/></d:locktype><d:owner>ProjectSync</d:owner></d:lockinfo>"#;
 
 #[derive(Debug, Clone, Serialize)]
 pub struct DavEntry {
@@ -262,6 +263,28 @@ impl WebDavClient {
         destination: &str,
         condition: PutCondition,
     ) -> AppResult<()> {
+        self.put_file_inner(source, destination, condition, None)
+            .await
+    }
+
+    pub async fn put_file_with_lock_token(
+        &self,
+        source: &Path,
+        destination: &str,
+        condition: PutCondition,
+        lock_token: &str,
+    ) -> AppResult<()> {
+        self.put_file_inner(source, destination, condition, Some(lock_token))
+            .await
+    }
+
+    async fn put_file_inner(
+        &self,
+        source: &Path,
+        destination: &str,
+        condition: PutCondition,
+        lock_token: Option<&str>,
+    ) -> AppResult<()> {
         let meta = tokio::fs::metadata(source)
             .await
             .map_err(|e| AppError::new("LOCAL_FILE_READ", e.to_string()))?;
@@ -291,6 +314,14 @@ impl WebDavClient {
                 );
             }
             PutCondition::Unconditional => {}
+        }
+        if let Some(token) = lock_token {
+            headers.insert(
+                HeaderName::from_static("if"),
+                HeaderValue::from_str(&format!("(<{token}>)")).map_err(|_| {
+                    AppError::new("DAV_LOCK_TOKEN_INVALID", "WebDAV 锁令牌格式无效")
+                })?,
+            );
         }
         let response = self
             .send(Method::PUT, self.url_for(destination)?, headers, Some(body))
@@ -364,6 +395,19 @@ impl WebDavClient {
     }
 
     pub async fn delete(&self, path: &str, if_match: Option<&str>) -> AppResult<()> {
+        self.delete_inner(path, if_match, None).await
+    }
+
+    async fn delete_with_lock_token(&self, path: &str, lock_token: &str) -> AppResult<()> {
+        self.delete_inner(path, None, Some(lock_token)).await
+    }
+
+    async fn delete_inner(
+        &self,
+        path: &str,
+        if_match: Option<&str>,
+        lock_token: Option<&str>,
+    ) -> AppResult<()> {
         let mut headers = HeaderMap::new();
         if let Some(etag) = if_match {
             headers.insert(
@@ -372,10 +416,218 @@ impl WebDavClient {
                     .map_err(|_| AppError::new("DAV_ETAG_INVALID", "远端 ETag 格式无效"))?,
             );
         }
+        if let Some(token) = lock_token {
+            headers.insert(
+                HeaderName::from_static("if"),
+                HeaderValue::from_str(&format!("(<{token}>)")).map_err(|_| {
+                    AppError::new("DAV_LOCK_TOKEN_INVALID", "WebDAV 锁令牌格式无效")
+                })?,
+            );
+        }
         let response = self
             .send(Method::DELETE, self.url_for(path)?, headers, None)
             .await?;
         Self::check_status(response.status(), "DELETE")
+    }
+
+    pub async fn lock_exclusive(&self, path: &str, depth: &str) -> AppResult<String> {
+        if depth != "0" && depth != "infinity" {
+            return Err(AppError::new("DAV_LOCK_DEPTH_INVALID", "WebDAV 锁深度无效"));
+        }
+        let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(30);
+        loop {
+            let mut headers = HeaderMap::new();
+            headers.insert(
+                HeaderName::from_static("depth"),
+                HeaderValue::from_static(if depth == "0" { "0" } else { "infinity" }),
+            );
+            headers.insert(
+                HeaderName::from_static("timeout"),
+                HeaderValue::from_static("Second-600"),
+            );
+            headers.insert(
+                CONTENT_TYPE,
+                HeaderValue::from_static("application/xml; charset=utf-8"),
+            );
+            let response = self
+                .send(
+                    Method::from_bytes(b"LOCK")
+                        .map_err(|e| AppError::new("DAV_CLIENT_INIT_FAILED", e.to_string()))?,
+                    self.url_for(path)?,
+                    headers,
+                    Some(EXCLUSIVE_LOCK_BODY.into()),
+                )
+                .await?;
+            if response.status() == StatusCode::LOCKED && tokio::time::Instant::now() < deadline {
+                tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+                continue;
+            }
+            Self::check_status(response.status(), "LOCK")?;
+            let token = response
+                .headers()
+                .get("lock-token")
+                .and_then(|value| value.to_str().ok())
+                .map(|value| value.trim().trim_start_matches('<').trim_end_matches('>'))
+                .filter(|value| !value.is_empty())
+                .ok_or_else(|| AppError::new("DAV_LOCK_TOKEN_MISSING", "WebDAV 未返回锁令牌"))?;
+            return Ok(token.to_owned());
+        }
+    }
+
+    pub async fn unlock(&self, path: &str, lock_token: &str) -> AppResult<()> {
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            HeaderName::from_static("lock-token"),
+            HeaderValue::from_str(&format!("<{lock_token}>"))
+                .map_err(|_| AppError::new("DAV_LOCK_TOKEN_INVALID", "WebDAV 锁令牌格式无效"))?,
+        );
+        let response = self
+            .send(
+                Method::from_bytes(b"UNLOCK")
+                    .map_err(|e| AppError::new("DAV_CLIENT_INIT_FAILED", e.to_string()))?,
+                self.url_for(path)?,
+                headers,
+                None,
+            )
+            .await?;
+        Self::check_status(response.status(), "UNLOCK")
+    }
+
+    pub async fn probe_lock_exclusion_in(&self, parent: &str) -> AppResult<bool> {
+        let parent = normalize_remote_path(parent)?;
+        let token = match self.lock_exclusive(&parent, "infinity").await {
+            Ok(token) => token,
+            Err(error)
+                if matches!(
+                    error.code.as_str(),
+                    "DAV_UNSUPPORTED" | "DAV_PERMISSION_DENIED" | "DAV_LOCKED"
+                ) =>
+            {
+                return Ok(false)
+            }
+            Err(error) => return Err(error),
+        };
+
+        let suffix = uuid::Uuid::new_v4().simple().to_string();
+        let probe_path = format!(
+            "{}/.projectsync-lock-probe-{suffix}",
+            parent.trim_end_matches('/')
+        );
+        let probe_file = temp_file(b"projectsync exclusive lock probe")?;
+
+        let unprotected_error = self
+            .put_file(&probe_file, &probe_path, PutCondition::Unconditional)
+            .await
+            .err();
+        let unprotected_rejected = unprotected_error.as_ref().is_some_and(|error| {
+            matches!(
+                error.code.as_str(),
+                "DAV_LOCKED" | "DAV_PRECONDITION_FAILED"
+            )
+        });
+        let protected_write = self
+            .put_file_with_lock_token(
+                &probe_file,
+                &probe_path,
+                PutCondition::Unconditional,
+                &token,
+            )
+            .await
+            .is_ok();
+        let protected_contents = if protected_write {
+            self.get_bytes(&probe_path).await.ok()
+        } else {
+            None
+        };
+        let protection_verified = unprotected_rejected
+            && protected_contents.as_deref() == Some(b"projectsync exclusive lock probe");
+
+        let _ = self.delete_with_lock_token(&probe_path, &token).await;
+        let unlock_result = self.unlock(&parent, &token).await;
+        let _ = self.delete(&probe_path, None).await;
+        let _ = tokio::fs::remove_file(probe_file).await;
+        unlock_result?;
+
+        Ok(protection_verified)
+    }
+
+    pub async fn probe_create_only_in(&self, parent: &str) -> AppResult<bool> {
+        let parent = normalize_remote_path(parent)?;
+        let probe_path = format!(
+            "{}/.projectsync-probe-{}",
+            parent.trim_end_matches('/'),
+            uuid::Uuid::new_v4().simple()
+        );
+        let probe_file = format!("{probe_path}/a.bin");
+        let new_probe_file = format!("{probe_path}/new.bin");
+        let a = temp_file(b"projectsync target create-only probe A")?;
+        let b = temp_file(b"projectsync target create-only probe B")?;
+        let mut created_directory = false;
+
+        let result = async {
+            let response = self
+                .send(
+                    Method::from_bytes(b"MKCOL")
+                        .map_err(|e| AppError::new("DAV_CLIENT_INIT_FAILED", e.to_string()))?,
+                    self.url_for(&probe_path)?,
+                    HeaderMap::new(),
+                    None,
+                )
+                .await?;
+            let status = response.status();
+            if status == StatusCode::METHOD_NOT_ALLOWED || status == StatusCode::CONFLICT {
+                return Ok(false);
+            }
+            Self::check_status(status, "MKCOL")?;
+            created_directory = true;
+
+            self.put_file(&a, &probe_file, PutCondition::Unconditional)
+                .await?;
+            let before = self.get_bytes(&probe_file).await?;
+            if before.as_slice() != b"projectsync target create-only probe A" {
+                return Ok(false);
+            }
+
+            let rejected = self
+                .put_file(&b, &probe_file, PutCondition::CreateOnly)
+                .await
+                .err()
+                .is_some_and(|error| error.code == "DAV_PRECONDITION_FAILED");
+            let after = self.get_bytes(&probe_file).await?;
+            if !rejected || after.as_slice() != b"projectsync target create-only probe A" {
+                return Ok(false);
+            }
+
+            if self
+                .put_file(&b, &new_probe_file, PutCondition::CreateOnly)
+                .await
+                .is_err()
+            {
+                return Ok(false);
+            }
+            let new_contents = self.get_bytes(&new_probe_file).await?;
+            Ok(new_contents.as_slice() == b"projectsync target create-only probe B")
+        }
+        .await;
+
+        let cleanup = if created_directory {
+            self.delete(&probe_path, None).await
+        } else {
+            Ok(())
+        };
+        let _ = tokio::fs::remove_file(a).await;
+        let _ = tokio::fs::remove_file(b).await;
+        if let Err(error) = cleanup {
+            if error.code != "DAV_NOT_FOUND" {
+                tracing::warn!(path=%probe_path,error=%error,"unable to clean target create-only probe");
+                return Err(AppError::new(
+                    "DAV_PROBE_CLEANUP_FAILED",
+                    format!("无法清理远端安全能力探测目录：{}", error.message),
+                ));
+            }
+        }
+
+        result
     }
 
     pub async fn test_connection(&self) -> AppResult<WebDavCapabilities> {
@@ -478,19 +730,18 @@ impl WebDavClient {
 
                 let move_source = format!("{probe_path}/move-source.bin");
                 let move_dest = format!("{probe_path}/move-dest.bin");
-                if safe_create_only
+                if self
+                    .put_file(&a, &move_source, PutCondition::Unconditional)
+                    .await
+                    .is_ok()
                     && self
-                        .put_file(&a, &move_source, PutCondition::CreateOnly)
-                        .await
-                        .is_ok()
-                    && self
-                        .put_file(&b, &move_dest, PutCondition::CreateOnly)
+                        .put_file(&b, &move_dest, PutCondition::Unconditional)
                         .await
                         .is_ok()
                 {
-                    // MOVE with Overwrite:F is safe only when it rejects an occupied destination and preserves both files.
+                    // MOVE with Overwrite:F must reject an occupied destination and preserve both files.
                     let before_dest = self.get_bytes(&move_dest).await.ok();
-                    let no_overwrite = self
+                    safe_move_no_overwrite = self
                         .move_resource(&move_source, &move_dest, false, None)
                         .await
                         .err()
@@ -498,25 +749,22 @@ impl WebDavClient {
                         && before_dest.as_deref() == Some(b"projectsync capability probe B")
                         && self.get_bytes(&move_source).await.as_deref().ok()
                             == Some(b"projectsync capability probe A".as_slice());
-                    let third = format!("{probe_path}/c.bin");
-                    safe_move_no_overwrite = no_overwrite
-                        && self
-                            .move_resource(
-                                &move_source,
-                                &third,
-                                false,
-                                Some("\"projectsync-invalid-etag\""),
-                            )
-                            .await
-                            .err()
-                            .is_some_and(|e| e.code == "DAV_PRECONDITION_FAILED")
-                        && self.get_bytes(&move_source).await.as_deref().ok()
-                            == Some(b"projectsync capability probe A".as_slice());
                 }
             }
             let _ = tokio::fs::remove_file(a).await;
             let _ = tokio::fs::remove_file(b).await;
         }
+        let lock_exclusion_safe = self
+            .probe_lock_exclusion_in(&probe_path)
+            .await
+            .unwrap_or(false);
+        let native_if_none_match = safe_create_only;
+        let native_if_match = safe_update_existing || safe_delete;
+        if lock_exclusion_safe {
+            safe_create_only = true;
+            safe_update_existing = true;
+        }
+        safe_move_no_overwrite &= native_if_match;
         let probe_cleanup_warning = if created {
             self.delete(&probe_path, None)
                 .await
@@ -525,14 +773,14 @@ impl WebDavClient {
         } else {
             None
         };
-        let supports_if_match = safe_update_existing || safe_delete;
-        let supports_if_none_match = safe_create_only;
+        let supports_if_match = native_if_match;
+        let supports_if_none_match = native_if_none_match;
         Ok(WebDavCapabilities {
             server_header,
             etag_type,
             supports_if_match,
             supports_if_none_match,
-            supports_lock: false,
+            supports_lock: lock_exclusion_safe,
             propfind_depth1_supported,
             safe_create_only,
             safe_update_existing,

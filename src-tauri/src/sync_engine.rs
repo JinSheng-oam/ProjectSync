@@ -114,7 +114,7 @@ impl SyncCoordinator {
         let remote_path = normalize_remote_path(&remote_path)?;
         let _ = RuleEngine::compile(&rules)?;
         let (account, client) = self.client_for(&account_id).await?;
-        let capabilities = account.capabilities.unwrap_or_else(unsafe_capabilities);
+        let mut capabilities = account.capabilities.unwrap_or_else(unsafe_capabilities);
         let manifest_path = format!(
             "{}/.projectsync/root.json",
             remote_path.trim_end_matches('/')
@@ -126,9 +126,51 @@ impl SyncCoordinator {
                 remote_path.trim_end_matches('/')
             ))
             .await?;
+        if capabilities.supports_lock && !capabilities.supports_if_none_match {
+            let metadata_path = format!("{}/.projectsync", remote_path.trim_end_matches('/'));
+            if !client.probe_lock_exclusion_in(&metadata_path).await? {
+                return Err(AppError::new(
+                    "BLOCKED_SERVER_CAPABILITY",
+                    "目标 WebDAV 目录未通过独占锁写保护验证；请检查该目录的 LOCK/写入权限",
+                ));
+            }
+            capabilities.safe_create_only = true;
+            capabilities.safe_update_existing = true;
+            capabilities.tested_at = unix_ms();
+            self.db
+                .save_capabilities(&account_id, &capabilities, "ONLINE")
+                .await?;
+        }
         let remote_project_id = match client.get_bytes(&manifest_path).await {
             Ok(bytes) => parse_manifest(&bytes)?.remote_project_id,
             Err(error) if error.code == "DAV_NOT_FOUND" => {
+                if !capabilities.safe_create_only {
+                    let metadata_path =
+                        format!("{}/.projectsync", remote_path.trim_end_matches('/'));
+                    let native_create_only = client.probe_create_only_in(&metadata_path).await?;
+                    let lock_protected_writes = if native_create_only {
+                        false
+                    } else {
+                        client.probe_lock_exclusion_in(&metadata_path).await?
+                    };
+                    if !native_create_only && !lock_protected_writes {
+                        return Err(AppError::new(
+                            "BLOCKED_SERVER_CAPABILITY",
+                            "目标 WebDAV 目录未通过安全新建验证；服务器需支持 If-None-Match: *，或支持并强制执行 WebDAV 独占锁",
+                        ));
+                    }
+                    capabilities.safe_create_only = true;
+                    if native_create_only {
+                        capabilities.supports_if_none_match = true;
+                    } else {
+                        capabilities.supports_lock = true;
+                        capabilities.safe_update_existing = true;
+                    }
+                    capabilities.tested_at = unix_ms();
+                    self.db
+                        .save_capabilities(&account_id, &capabilities, "ONLINE")
+                        .await?;
+                }
                 let id = uuid::Uuid::new_v4().to_string();
                 let manifest = RootManifest {
                     schema_version: 1,
@@ -139,30 +181,53 @@ impl SyncCoordinator {
                     .join("staging")
                     .join(format!("manifest-{}.json", uuid::Uuid::new_v4()));
                 fs::create_dir_all(path.parent().unwrap_or(&self.data_dir))?;
-                tokio::fs::write(
-                    &path,
-                    serde_json::to_vec_pretty(&manifest)
-                        .map_err(|e| AppError::new("SERIALIZATION_ERROR", e.to_string()))?,
-                )
-                .await?;
-                let create = if capabilities.safe_create_only {
-                    PutCondition::CreateOnly
-                } else {
-                    let _ = tokio::fs::remove_file(&path).await;
-                    return Err(AppError::new(
-                        "BLOCKED_SERVER_CAPABILITY",
-                        "WebDAV 尚未验证 create-only，无法安全创建项目标识",
-                    ));
-                };
-                match client.put_file(&path, &manifest_path, create).await {
-                    Ok(()) => {}
-                    Err(write_error) if write_error.code == "DAV_PRECONDITION_FAILED" => {}
-                    Err(write_error) => {
-                        let _ = tokio::fs::remove_file(&path).await;
-                        return Err(write_error);
+                let bytes = serde_json::to_vec_pretty(&manifest)
+                    .map_err(|e| AppError::new("SERIALIZATION_ERROR", e.to_string()))?;
+                tokio::fs::write(&path, bytes).await?;
+                let create_result = if capabilities.supports_if_none_match {
+                    match client
+                        .put_file(&path, &manifest_path, PutCondition::CreateOnly)
+                        .await
+                    {
+                        Ok(()) => Ok(()),
+                        Err(write_error) if write_error.code == "DAV_PRECONDITION_FAILED" => Ok(()),
+                        Err(write_error) => Err(write_error),
                     }
-                }
+                } else if capabilities.supports_lock {
+                    let metadata_path =
+                        format!("{}/.projectsync", remote_path.trim_end_matches('/'));
+                    match client.lock_exclusive(&metadata_path, "infinity").await {
+                        Ok(lock_token) => {
+                            let result = async {
+                                match client.get_bytes(&manifest_path).await {
+                                    Ok(_) => Ok(()),
+                                    Err(error) if error.code == "DAV_NOT_FOUND" => {
+                                        client
+                                            .put_file_with_lock_token(
+                                                &path,
+                                                &manifest_path,
+                                                PutCondition::CreateOnly,
+                                                &lock_token,
+                                            )
+                                            .await
+                                    }
+                                    Err(error) => Err(error),
+                                }
+                            }
+                            .await;
+                            let unlock_result = client.unlock(&metadata_path, &lock_token).await;
+                            result.and(unlock_result)
+                        }
+                        Err(error) => Err(error),
+                    }
+                } else {
+                    Err(AppError::new(
+                        "BLOCKED_SERVER_CAPABILITY",
+                        "服务端没有安全新建能力",
+                    ))
+                };
                 let _ = tokio::fs::remove_file(&path).await;
+                create_result?;
                 parse_manifest(&client.get_bytes(&manifest_path).await?)?.remote_project_id
             }
             Err(error) => return Err(error),
@@ -433,14 +498,15 @@ impl SyncCoordinator {
                                     remote_file_path(&root.remote_path, local_path)
                                 {
                                     if ensure_remote_parent(&client, &remote_copy).await.is_ok()
-                                        && client
-                                            .put_file(
-                                                &source,
-                                                &remote_copy,
-                                                PutCondition::CreateOnly,
-                                            )
-                                            .await
-                                            .is_ok()
+                                        && put_remote_create_only(
+                                            &client,
+                                            &source,
+                                            &remote_copy,
+                                            &capabilities,
+                                            &self.data_dir,
+                                        )
+                                        .await
+                                        .is_ok()
                                     {
                                         let source_hash = item
                                             .local
@@ -726,32 +792,34 @@ impl SyncCoordinator {
                         "上传期间本地文件发生变化",
                     ));
                 }
-                if item.action == SyncAction::UploadNew && !capabilities.safe_create_only {
-                    return Err(AppError::new(
-                        "BLOCKED_SERVER_CAPABILITY",
-                        "服务端没有验证 create-only 写入能力",
-                    ));
-                }
-                let condition = if item.action == SyncAction::UploadNew {
-                    PutCondition::CreateOnly
-                } else {
-                    if !capabilities.safe_update_existing {
-                        return Err(AppError::new(
-                            "BLOCKED_SERVER_CAPABILITY",
-                            "服务端没有验证 If-Match 更新保护",
-                        ));
-                    }
-                    PutCondition::IfMatch(item.expected_remote_etag.clone().ok_or_else(|| {
-                        AppError::new(
-                            "BLOCKED_SERVER_CAPABILITY",
-                            "远端文件缺少可用于条件更新的 ETag",
-                        )
-                    })?)
-                };
                 ensure_remote_parent(client, &destination).await?;
-                client
-                    .put_file(&local.absolute_path, &destination, condition)
+                if item.action == SyncAction::UploadNew {
+                    put_remote_create_only(
+                        client,
+                        &local.absolute_path,
+                        &destination,
+                        capabilities,
+                        &self.data_dir,
+                    )
                     .await?;
+                } else {
+                    let remote = item
+                        .remote
+                        .as_ref()
+                        .ok_or_else(|| AppError::new("DAV_NOT_FOUND", "待更新的远端文件不存在"))?;
+                    put_remote_update(
+                        client,
+                        &local.absolute_path,
+                        &destination,
+                        item.expected_remote_etag
+                            .as_deref()
+                            .or(remote.etag.as_deref()),
+                        &remote.hash,
+                        capabilities,
+                        &self.data_dir,
+                    )
+                    .await?;
+                }
                 let observed =
                     verify_remote_hash(client, &destination, &self.data_dir, &local.hash).await?;
                 if hash_file(&local.absolute_path)? != local.hash {
@@ -984,32 +1052,29 @@ impl SyncCoordinator {
                     return Err(AppError::new("LOCAL_NOT_FOUND", "本地冲突版本不存在"));
                 }
                 if current_remote.is_some() {
-                    if !capabilities.safe_update_existing {
-                        return Err(AppError::new(
-                            "BLOCKED_SERVER_CAPABILITY",
-                            "服务端未验证条件更新，无法应用 KEEP_LOCAL",
-                        ));
-                    }
-                    let etag = current_remote
-                        .as_ref()
-                        .and_then(|r| r.etag.clone())
-                        .ok_or_else(|| {
-                            AppError::new("BLOCKED_SERVER_CAPABILITY", "远端缺少 ETag")
-                        })?;
-                    client
-                        .put_file(&local_path, &remote_path, PutCondition::IfMatch(etag))
-                        .await?;
+                    let remote = current_remote.as_ref().ok_or_else(|| {
+                        AppError::new("DAV_NOT_FOUND", "冲突中的远端文件已不存在")
+                    })?;
+                    put_remote_update(
+                        &client,
+                        &local_path,
+                        &remote_path,
+                        remote.etag.as_deref(),
+                        &remote.hash,
+                        &capabilities,
+                        &self.data_dir,
+                    )
+                    .await?;
                 } else {
-                    if !capabilities.safe_create_only {
-                        return Err(AppError::new(
-                            "BLOCKED_SERVER_CAPABILITY",
-                            "服务端未验证 create-only，无法恢复远端文件",
-                        ));
-                    }
                     ensure_remote_parent(&client, &remote_path).await?;
-                    client
-                        .put_file(&local_path, &remote_path, PutCondition::CreateOnly)
-                        .await?;
+                    put_remote_create_only(
+                        &client,
+                        &local_path,
+                        &remote_path,
+                        &capabilities,
+                        &self.data_dir,
+                    )
+                    .await?;
                 }
                 let hash = hash_file(&local_path)?;
                 let observed =
@@ -1078,9 +1143,14 @@ impl SyncCoordinator {
                     if capabilities.safe_create_only {
                         let conflict_remote = remote_file_path(&root.remote_path, &conflict_path)?;
                         ensure_remote_parent(&client, &conflict_remote).await?;
-                        client
-                            .put_file(&conflict_target, &conflict_remote, PutCondition::CreateOnly)
-                            .await?;
+                        put_remote_create_only(
+                            &client,
+                            &conflict_target,
+                            &conflict_remote,
+                            &capabilities,
+                            &self.data_dir,
+                        )
+                        .await?;
                         let _ = verify_remote_hash(
                             &client,
                             &conflict_remote,
@@ -1126,16 +1196,15 @@ impl SyncCoordinator {
                             )
                             .await?;
                     } else {
-                        if !capabilities.safe_create_only {
-                            return Err(AppError::new(
-                                "BLOCKED_SERVER_CAPABILITY",
-                                "远端文件已删除且服务端未验证 create-only；本地冲突副本已保留",
-                            ));
-                        }
                         ensure_remote_parent(&client, &remote_path).await?;
-                        client
-                            .put_file(&target, &remote_path, PutCondition::CreateOnly)
-                            .await?;
+                        put_remote_create_only(
+                            &client,
+                            &target,
+                            &remote_path,
+                            &capabilities,
+                            &self.data_dir,
+                        )
+                        .await?;
                         let observed =
                             verify_remote_hash(&client, &remote_path, &self.data_dir, local_hash)
                                 .await?;
@@ -1261,6 +1330,171 @@ async fn ensure_remote_parent(client: &WebDavClient, path: &str) -> AppResult<()
         .map(|(p, _)| if p.is_empty() { "/" } else { p })
         .unwrap_or("/");
     client.ensure_collection(parent).await
+}
+
+async fn put_remote_create_only(
+    client: &WebDavClient,
+    source: &Path,
+    destination: &str,
+    capabilities: &WebDavCapabilities,
+    data_dir: &Path,
+) -> AppResult<()> {
+    if !capabilities.safe_create_only {
+        return Err(AppError::new(
+            "BLOCKED_SERVER_CAPABILITY",
+            "服务端没有经过验证的安全新建能力",
+        ));
+    }
+    if capabilities.supports_if_none_match {
+        return client
+            .put_file(source, destination, PutCondition::CreateOnly)
+            .await;
+    }
+    if capabilities.supports_lock {
+        let parent = remote_parent_path(destination);
+        return put_remote_with_lock(
+            client,
+            source,
+            destination,
+            &parent,
+            PutCondition::CreateOnly,
+            None,
+            data_dir,
+        )
+        .await;
+    }
+    Err(AppError::new(
+        "BLOCKED_SERVER_CAPABILITY",
+        "服务端没有可用于安全新建的 If-None-Match 或 WebDAV 独占锁",
+    ))
+}
+
+async fn put_remote_update(
+    client: &WebDavClient,
+    source: &Path,
+    destination: &str,
+    expected_etag: Option<&str>,
+    expected_hash: &str,
+    capabilities: &WebDavCapabilities,
+    data_dir: &Path,
+) -> AppResult<()> {
+    if !capabilities.safe_update_existing {
+        return Err(AppError::new(
+            "BLOCKED_SERVER_CAPABILITY",
+            "服务端没有经过验证的安全更新能力",
+        ));
+    }
+    if capabilities.supports_if_match {
+        let etag = expected_etag.ok_or_else(|| {
+            AppError::new(
+                "BLOCKED_SERVER_CAPABILITY",
+                "远端文件缺少可用于条件更新的 ETag",
+            )
+        })?;
+        return client
+            .put_file(source, destination, PutCondition::IfMatch(etag.to_owned()))
+            .await;
+    }
+    if capabilities.supports_lock {
+        let parent = remote_parent_path(destination);
+        return put_remote_with_lock(
+            client,
+            source,
+            destination,
+            &parent,
+            PutCondition::Unconditional,
+            Some(expected_hash),
+            data_dir,
+        )
+        .await;
+    }
+    Err(AppError::new(
+        "BLOCKED_SERVER_CAPABILITY",
+        "服务端没有可用于安全更新的 If-Match 或 WebDAV 独占锁",
+    ))
+}
+
+async fn put_remote_with_lock(
+    client: &WebDavClient,
+    source: &Path,
+    destination: &str,
+    lock_parent: &str,
+    condition: PutCondition,
+    expected_hash: Option<&str>,
+    data_dir: &Path,
+) -> AppResult<()> {
+    let token = client.lock_exclusive(lock_parent, "infinity").await?;
+    let result = async {
+        let current_hash = remote_file_hash(client, destination, data_dir).await?;
+        match (expected_hash, current_hash.as_deref()) {
+            (None, None) => {}
+            (Some(expected), Some(current)) if expected == current => {}
+            (None, Some(_)) => {
+                return Err(AppError::retryable(
+                    "DAV_PRECONDITION_FAILED",
+                    "取得远端写锁后发现目标文件已存在，未覆盖远端内容",
+                ));
+            }
+            (Some(_), None) => {
+                return Err(AppError::retryable(
+                    "DAV_PRECONDITION_FAILED",
+                    "取得远端写锁后发现目标文件已删除，未写入远端",
+                ));
+            }
+            (Some(_), Some(_)) => {
+                return Err(AppError::retryable(
+                    "DAV_PRECONDITION_FAILED",
+                    "取得远端写锁后发现文件内容已变化，未覆盖远端内容",
+                ));
+            }
+        }
+        client
+            .put_file_with_lock_token(source, destination, condition, &token)
+            .await
+    }
+    .await;
+    let unlock_result = client.unlock(lock_parent, &token).await;
+    result?;
+    unlock_result
+}
+
+fn remote_parent_path(path: &str) -> String {
+    path.rsplit_once('/')
+        .map(|(parent, _)| if parent.is_empty() { "/" } else { parent })
+        .unwrap_or("/")
+        .to_owned()
+}
+
+async fn remote_file_hash(
+    client: &WebDavClient,
+    path: &str,
+    data_dir: &Path,
+) -> AppResult<Option<String>> {
+    let entries = match client.propfind(path, 0).await {
+        Ok(entries) => entries,
+        Err(error) if error.code == "DAV_NOT_FOUND" => return Ok(None),
+        Err(error) => return Err(error),
+    };
+    let Some(entry) = entries.iter().find(|entry| !entry.is_collection) else {
+        if entries.iter().any(|entry| entry.is_collection) {
+            return Err(AppError::new("DAV_CONFLICT", "远端目标路径已被目录占用"));
+        }
+        return Ok(None);
+    };
+    let _ = entry;
+    let staging = data_dir
+        .join("staging")
+        .join(format!("lock-check-{}.bin", uuid::Uuid::new_v4()));
+    if let Some(parent) = staging.parent() {
+        tokio::fs::create_dir_all(parent).await?;
+    }
+    let result = async {
+        client.get_to_file(path, &staging).await?;
+        hash_file(&staging)
+    }
+    .await;
+    let _ = tokio::fs::remove_file(&staging).await;
+    result.map(Some)
 }
 
 async fn verify_remote_hash(

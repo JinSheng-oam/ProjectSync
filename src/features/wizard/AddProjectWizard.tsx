@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
   Server,
   Cloud,
@@ -10,6 +10,7 @@ import {
   FolderOpen,
   ArrowUp,
   ShieldCheck,
+  LoaderCircle,
   Plus,
   Trash2,
 } from 'lucide-react';
@@ -33,12 +34,16 @@ export function AddProjectWizard({
   const [currentStep, setCurrentStep] = useState<1 | 2 | 3 | 4 | 5>(1);
 
   // Form State
-  const [projectName, setProjectName] = useState('NewSyncProject');
+  const defaultLocalPath = 'D:/Projects/MyDevApp';
+  const [projectName, setProjectName] = useState(() => localDirectoryName(defaultLocalPath));
+  const [projectNameCustomized, setProjectNameCustomized] = useState(false);
   const [selectedAccountId, setSelectedAccountId] = useState(accounts[0]?.id || '');
-  const [localPath, setLocalPath] = useState('D:/Projects/MyDevApp');
-  const [remotePath, setRemotePath] = useState('/projects/MyDevApp');
+  const [localPath, setLocalPath] = useState(defaultLocalPath);
+  const [remotePath, setRemotePath] = useState(() => defaultRemotePath(defaultLocalPath));
+  const [remotePathCustomized, setRemotePathCustomized] = useState(false);
   const [remoteBrowsePath, setRemoteBrowsePath] = useState('/projects');
   const [remoteEntries, setRemoteEntries] = useState<Awaited<ReturnType<typeof api.browseRemoteDirectory>>>([]);
+  const [remoteBrowseLoaded, setRemoteBrowseLoaded] = useState(false);
   const [loadingRemote, setLoadingRemote] = useState(false);
   const [remoteBrowseError, setRemoteBrowseError] = useState<string | null>(null);
 
@@ -58,11 +63,21 @@ export function AddProjectWizard({
 
   // Step 5 Preview State
   const [previewData, setPreviewData] = useState<InitialSyncPreviewDto | null>(null);
+  const [previewError, setPreviewError] = useState<string | null>(null);
+  const [createError, setCreateError] = useState<string | null>(null);
   const [loadingPreview, setLoadingPreview] = useState(false);
   const [submitting, setSubmitting] = useState(false);
 
+  useEffect(() => {
+    setSelectedAccountId((currentId) =>
+      accounts.some((account) => account.id === currentId) ? currentId : accounts[0]?.id || ''
+    );
+  }, [accounts]);
+
   // Load preview when entering Step 5
   const handleGoToStep5 = async () => {
+    setPreviewData(null);
+    setPreviewError(null);
     setLoadingPreview(true);
     setCurrentStep(5);
     try {
@@ -70,9 +85,16 @@ export function AddProjectWizard({
       setPreviewData(data);
     } catch (err: unknown) {
       console.error(err);
+      setPreviewError(getErrorMessage(err));
     } finally {
       setLoadingPreview(false);
     }
+  };
+
+  const handleLocalPathChange = (path: string) => {
+    setLocalPath(path);
+    if (!projectNameCustomized) setProjectName(localDirectoryName(path));
+    if (!remotePathCustomized) setRemotePath(defaultRemotePath(path));
   };
 
   const handleAddRule = () => {
@@ -94,7 +116,7 @@ export function AddProjectWizard({
   const handlePickLocalDirectory = async () => {
     try {
       const selected = await api.pickLocalDirectory();
-      if (selected) setLocalPath(selected.replace(/\\/g, '/'));
+      if (selected) handleLocalPathChange(selected.replace(/\\/g, '/'));
     } catch (error: unknown) {
       alert(error instanceof Error ? error.message : '选择本地目录失败');
     }
@@ -104,11 +126,17 @@ export function AddProjectWizard({
     if (!selectedAccountId) return;
     setLoadingRemote(true);
     setRemoteBrowseError(null);
+    setRemoteBrowseLoaded(false);
     try {
       setRemoteEntries(await api.browseRemoteDirectory(selectedAccountId, remoteBrowsePath));
+      setRemoteBrowseLoaded(true);
     } catch (error: unknown) {
-      setRemoteBrowseError(error instanceof Error ? error.message : '读取远端目录失败');
       setRemoteEntries([]);
+      if (getErrorCode(error) === 'DAV_NOT_FOUND') {
+        setRemoteBrowseLoaded(true);
+      } else {
+        setRemoteBrowseError(getErrorMessage(error));
+      }
     } finally {
       setLoadingRemote(false);
     }
@@ -119,6 +147,7 @@ export function AddProjectWizard({
   };
 
   const handleConfirmCreate = async () => {
+    setCreateError(null);
     setSubmitting(true);
     try {
       await api.createSyncRoot({
@@ -131,7 +160,7 @@ export function AddProjectWizard({
       onProjectCreated();
       onClose();
     } catch (err: unknown) {
-      alert((err as Error).message);
+      setCreateError(getErrorMessage(err));
     } finally {
       setSubmitting(false);
     }
@@ -151,7 +180,7 @@ export function AddProjectWizard({
       <div className="flex items-center justify-between pb-4 border-b border-aerospace-border">
         {[
           { step: 1, title: 'WebDAV 节点' },
-          { step: 2, title: '本地目录' },
+          { step: 2, title: '项目名称与目录' },
           { step: 3, title: '远端路径' },
           { step: 4, title: '同步规则' },
           { step: 5, title: '初始预览' },
@@ -160,7 +189,7 @@ export function AddProjectWizard({
             <span
               className={`w-6 h-6 rounded-full flex items-center justify-center font-mono text-xs font-semibold ${
                 currentStep === item.step
-                  ? 'bg-cyan-500 text-white shadow-glow-cyan'
+                  ? 'bg-indigo-500 text-white shadow-glow-indigo'
                   : currentStep > item.step
                   ? 'bg-emerald-100 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-400 border border-emerald-300 dark:border-emerald-700'
                   : 'bg-slate-200 dark:bg-slate-800 text-slate-500'
@@ -171,7 +200,7 @@ export function AddProjectWizard({
             <span
               className={`text-xs ${
                 currentStep === item.step
-                  ? 'text-cyan-600 dark:text-cyan-300 font-semibold'
+                  ? 'text-indigo-600 dark:text-indigo-300 font-semibold'
                   : currentStep > item.step
                   ? 'text-slate-700 dark:text-slate-300'
                   : 'text-slate-400 dark:text-slate-500'
@@ -186,32 +215,25 @@ export function AddProjectWizard({
       {/* Step 1: Select WebDAV Account */}
       {currentStep === 1 && (
         <div className="space-y-4 py-2">
-          <div className="space-y-1">
-            <label className="text-xs font-medium text-slate-700 dark:text-slate-300">项目显示名称</label>
-            <input
-              type="text"
-              value={projectName}
-              onChange={(e) => setProjectName(e.target.value)}
-              className="w-full bg-white dark:bg-aerospace-canvas border border-slate-300 dark:border-aerospace-border rounded-lg px-3 py-2 text-sm text-slate-900 dark:text-slate-100 focus:outline-none focus:border-cyan-500 font-medium"
-              placeholder="例如: CodeDesk-Docs"
-            />
-          </div>
-
           <div className="space-y-2">
             <label className="text-xs font-medium text-slate-700 dark:text-slate-300">选择 WebDAV 远端连接</label>
             <div className="grid grid-cols-1 gap-2.5">
-              {accounts.map((acc) => (
+              {accounts.length === 0 ? (
+                <div role="alert" className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-300">
+                  尚未配置 WebDAV 节点。请先取消向导，在“WebDAV 节点”页面添加连接。
+                </div>
+              ) : accounts.map((acc) => (
                 <div
                   key={acc.id}
                   onClick={() => setSelectedAccountId(acc.id)}
                   className={`p-3 rounded-lg border cursor-pointer transition-colors flex items-center justify-between ${
                     selectedAccountId === acc.id
-                      ? 'bg-cyan-50/50 dark:bg-aerospace-elevated border-cyan-500 text-slate-900 dark:text-slate-100 shadow-soft-sm'
+                      ? 'bg-indigo-50/50 dark:bg-aerospace-elevated border-indigo-500 text-slate-900 dark:text-slate-100 shadow-soft-sm'
                       : 'bg-white dark:bg-aerospace-canvas border-slate-200 dark:border-aerospace-border hover:border-slate-400 dark:hover:border-slate-600 text-slate-700 dark:text-slate-300'
                   }`}
                 >
                   <div className="flex items-center gap-3">
-                    <Server className="w-5 h-5 text-cyan-600 dark:text-cyan-400" />
+                    <Server className="w-5 h-5 text-indigo-600 dark:text-indigo-400" />
                     <div>
                       <div className="font-semibold text-xs">{acc.name}</div>
                       <code className="text-[11px] text-slate-500 dark:text-slate-400 font-mono">{acc.url}</code>
@@ -236,6 +258,8 @@ export function AddProjectWizard({
               <div className="font-mono text-[11px]">• 标识: {selectedAccount.capabilities.serverHeader}</div>
               <div className="font-mono text-[11px]">• ETag 强校验: {selectedAccount.capabilities.etagType}</div>
               <div className="font-mono text-[11px]">• If-Match 条件写入: {selectedAccount.capabilities.supportsIfMatch ? '支持 (并发保护)' : '不支持'}</div>
+              <div className="font-mono text-[11px]">• WebDAV 独占锁写保护: {selectedAccount.capabilities.supportsLock ? '已验证' : '未验证'}</div>
+              <div className="font-mono text-[11px]">• 安全新建: {selectedAccount.capabilities.safeCreateOnly ? (selectedAccount.capabilities.supportsIfNoneMatch ? 'If-None-Match' : '独占锁') : '未验证'}</div>
             </div>
           )}
         </div>
@@ -244,27 +268,47 @@ export function AddProjectWizard({
       {/* Step 2: Select Local Directory */}
       {currentStep === 2 && (
         <div className="space-y-4 py-2">
-          <div className="space-y-1.5">
-            <label className="text-xs font-medium text-slate-700 dark:text-slate-300">本地工作区目录</label>
-            <div className="flex gap-2">
+          <div className="grid grid-cols-1 md:grid-cols-[0.85fr_1.4fr] gap-4 items-start">
+            <div className="space-y-1.5">
+              <label htmlFor="project-name" className="text-xs font-medium text-slate-700 dark:text-slate-300">项目名称</label>
               <input
+                id="project-name"
                 type="text"
-                value={localPath}
-                onChange={(e) => setLocalPath(e.target.value)}
-                className="flex-1 bg-white dark:bg-aerospace-canvas border border-slate-300 dark:border-aerospace-border rounded-lg px-3 py-2 text-xs font-mono text-slate-900 dark:text-slate-100 focus:outline-none focus:border-cyan-500"
-                placeholder="C:/Users/Example/Projects/MyApp"
+                value={projectName}
+                onChange={(e) => {
+                  setProjectName(e.target.value);
+                  setProjectNameCustomized(true);
+                }}
+                className="w-full bg-white dark:bg-aerospace-canvas border border-slate-300 dark:border-aerospace-border rounded-lg px-3 py-2.5 text-sm text-slate-900 dark:text-slate-100 focus:outline-none focus:border-indigo-500 font-medium"
+                placeholder="输入项目名称"
               />
-              <Button
-                variant="secondary"
-                size="md"
-                onClick={handlePickLocalDirectory}
-              >
-                浏览本地文件夹...
-              </Button>
+              <p className="text-[11px] text-slate-500 dark:text-slate-400">默认使用目录名，可手动修改。</p>
             </div>
-            <p className="text-[11px] text-slate-500 dark:text-slate-400">
-              系统将监听该目录下的文件变更，并实时计算 BLAKE3 校验和。
-            </p>
+
+            <div className="space-y-1.5 min-w-0">
+              <label htmlFor="local-project-directory" className="text-xs font-medium text-slate-700 dark:text-slate-300">本地工作区目录</label>
+              <div className="flex gap-2 min-w-0">
+                <input
+                  id="local-project-directory"
+                  type="text"
+                  value={localPath}
+                  onChange={(e) => handleLocalPathChange(e.target.value)}
+                  className="min-w-0 flex-1 bg-white dark:bg-aerospace-canvas border border-slate-300 dark:border-aerospace-border rounded-lg px-3 py-2.5 text-xs font-mono text-slate-900 dark:text-slate-100 focus:outline-none focus:border-indigo-500"
+                  placeholder="C:/Users/Example/Projects/MyApp"
+                />
+                <Button
+                  variant="secondary"
+                  size="md"
+                  onClick={handlePickLocalDirectory}
+                  className="shrink-0"
+                >
+                  浏览文件夹
+                </Button>
+              </div>
+              <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                监听该目录的文件变更，并实时计算 BLAKE3 校验和。
+              </p>
+            </div>
           </div>
 
           <div className="bg-slate-50 dark:bg-aerospace-canvas p-4 rounded-xl border border-slate-200 dark:border-aerospace-border space-y-2">
@@ -289,8 +333,11 @@ export function AddProjectWizard({
             <input
               type="text"
               value={remotePath}
-              onChange={(e) => setRemotePath(e.target.value)}
-              className="w-full bg-white dark:bg-aerospace-canvas border border-slate-300 dark:border-aerospace-border rounded-lg px-3 py-2 text-xs font-mono text-slate-900 dark:text-slate-100 focus:outline-none focus:border-cyan-500"
+              onChange={(e) => {
+                setRemotePath(e.target.value);
+                setRemotePathCustomized(true);
+              }}
+              className="w-full bg-white dark:bg-aerospace-canvas border border-slate-300 dark:border-aerospace-border rounded-lg px-3 py-2 text-xs font-mono text-slate-900 dark:text-slate-100 focus:outline-none focus:border-indigo-500"
               placeholder="/projects/MyDevApp"
             />
             <p className="text-[11px] text-slate-500 dark:text-slate-400">
@@ -301,12 +348,12 @@ export function AddProjectWizard({
           <div className="border border-slate-200 dark:border-aerospace-border rounded-xl p-3.5 bg-slate-50 dark:bg-aerospace-canvas space-y-2">
             <div className="flex items-center justify-between text-xs font-semibold text-slate-800 dark:text-slate-200">
               <span className="flex items-center gap-1.5">
-                <Cloud className="w-4 h-4 text-cyan-600 dark:text-cyan-400" />
+                <Cloud className="w-4 h-4 text-indigo-600 dark:text-indigo-400" />
                 远端目录浏览
               </span>
               <div className="flex items-center gap-2">
                 <code className="text-[10px] text-slate-500">{remoteBrowsePath}</code>
-                <button type="button" onClick={() => setRemoteBrowsePath(parentRemoteDirectory(remoteBrowsePath))} disabled={remoteBrowsePath === '/'} className="p-1 rounded hover:bg-slate-200 dark:hover:bg-slate-800 disabled:opacity-40" aria-label="上级目录">
+                <button type="button" onClick={() => { setRemoteBrowsePath(parentRemoteDirectory(remoteBrowsePath)); setRemoteEntries([]); setRemoteBrowseLoaded(false); setRemoteBrowseError(null); }} disabled={remoteBrowsePath === '/'} className="p-1 rounded hover:bg-slate-200 dark:hover:bg-slate-800 disabled:opacity-40" aria-label="上级目录">
                   <ArrowUp className="w-3.5 h-3.5" />
                 </button>
                 <Button variant="secondary" size="sm" onClick={handleBrowseRemote} disabled={loadingRemote || !selectedAccountId} className="gap-1">
@@ -314,15 +361,20 @@ export function AddProjectWizard({
                 </Button>
               </div>
             </div>
+            {!selectedAccountId && (
+              <div role="alert" className="text-[11px] text-amber-700 dark:text-amber-400">
+                尚未选择 WebDAV 节点，请返回第 1 步选择连接后再浏览。
+              </div>
+            )}
             {remoteBrowseError && <div role="alert" className="text-[11px] text-rose-600 dark:text-rose-400">{remoteBrowseError}</div>}
             <div className="bg-slate-100 dark:bg-slate-900/80 border border-slate-200 dark:border-transparent rounded-lg p-2.5 font-mono text-xs text-slate-700 dark:text-slate-300 space-y-1 max-h-40 overflow-y-auto">
-              {remoteEntries.length === 0 ? <div className="text-slate-500">选择“浏览”读取此目录。点击文件夹可将其设为目标路径。</div> : remoteEntries.map((entry) => (
-                <button key={entry.path} type="button" disabled={!entry.isCollection} onClick={() => { setRemotePath(entry.path); setRemoteBrowsePath(entry.path); }} className="w-full text-left rounded px-2 py-1 hover:bg-white dark:hover:bg-slate-800 disabled:opacity-50">
+              {remoteEntries.length === 0 ? <div className="text-slate-500">{remoteBrowseLoaded ? '此目录没有可浏览的子项；若目标目录尚不存在，创建同步项目时会自动发送 MKCOL 创建。' : '选择“浏览”读取此目录。点击文件夹可将其设为目标路径。'}</div> : remoteEntries.map((entry) => (
+                <button key={entry.path} type="button" disabled={!entry.isCollection} onClick={() => { setRemotePath(entry.path); setRemotePathCustomized(true); setRemoteBrowsePath(entry.path); setRemoteEntries([]); setRemoteBrowseLoaded(false); setRemoteBrowseError(null); }} className="w-full text-left rounded px-2 py-1 hover:bg-white dark:hover:bg-slate-800 disabled:opacity-50">
                   {entry.isCollection ? '📁' : '📄'} {entry.name || '/'}{entry.isCollection ? '/' : ''}
                 </button>
               ))}
             </div>
-            <Button variant="ghost" size="sm" onClick={() => setRemotePath(remoteBrowsePath)} className="text-cyan-700 dark:text-cyan-300">使用当前远端目录：{remoteBrowsePath}</Button>
+            <Button variant="ghost" size="sm" onClick={() => { setRemotePath(remoteBrowsePath); setRemotePathCustomized(true); }} className="text-indigo-700 dark:text-indigo-300">使用当前远端目录：{remoteBrowsePath}</Button>
           </div>
         </div>
       )}
@@ -332,7 +384,7 @@ export function AddProjectWizard({
         <div className="space-y-4 py-2">
           <div className="flex items-center justify-between">
             <div className="text-xs font-medium text-slate-700 dark:text-slate-300 flex items-center gap-1.5">
-              <Filter className="w-4 h-4 text-cyan-600 dark:text-cyan-400" />
+              <Filter className="w-4 h-4 text-indigo-600 dark:text-indigo-400" />
               <span>文件过滤规则（自上而下匹配，排除规则优先）</span>
             </div>
           </div>
@@ -342,7 +394,7 @@ export function AddProjectWizard({
             <select
               value={newRuleType}
               onChange={(e) => setNewRuleType(e.target.value as 'INCLUDE' | 'EXCLUDE')}
-              className="bg-white dark:bg-aerospace-canvas border border-slate-300 dark:border-aerospace-border rounded-lg px-2 py-1.5 text-xs text-slate-800 dark:text-slate-200 focus:outline-none focus:border-cyan-500"
+              className="bg-white dark:bg-aerospace-canvas border border-slate-300 dark:border-aerospace-border rounded-lg px-2 py-1.5 text-xs text-slate-800 dark:text-slate-200 focus:outline-none focus:border-indigo-500"
             >
               <option value="INCLUDE">包含 (INCLUDE)</option>
               <option value="EXCLUDE">排除 (EXCLUDE)</option>
@@ -352,7 +404,7 @@ export function AddProjectWizard({
               value={newRulePattern}
               onChange={(e) => setNewRulePattern(e.target.value)}
               placeholder="Glob 表达式: 如 docs/**, *.md, **/.git/**"
-              className="flex-1 bg-white dark:bg-aerospace-canvas border border-slate-300 dark:border-aerospace-border rounded-lg px-3 py-1.5 text-xs font-mono text-slate-900 dark:text-slate-100 focus:outline-none focus:border-cyan-500"
+              className="flex-1 bg-white dark:bg-aerospace-canvas border border-slate-300 dark:border-aerospace-border rounded-lg px-3 py-1.5 text-xs font-mono text-slate-900 dark:text-slate-100 focus:outline-none focus:border-indigo-500"
             />
             <Button variant="secondary" size="sm" onClick={handleAddRule} className="gap-1">
               <Plus className="w-3.5 h-3.5" />
@@ -369,7 +421,7 @@ export function AddProjectWizard({
                     <span
                       className={`px-1.5 py-0.5 rounded text-[10px] font-semibold ${
                         rule.ruleType === 'INCLUDE'
-                          ? 'bg-cyan-50 dark:bg-cyan-950 text-cyan-700 dark:text-cyan-400 border border-cyan-200 dark:border-cyan-800'
+                          ? 'bg-indigo-50 dark:bg-indigo-950 text-indigo-700 dark:text-indigo-400 border border-indigo-200 dark:border-indigo-800'
                           : 'bg-rose-50 dark:bg-rose-950 text-rose-700 dark:text-rose-400 border border-rose-200 dark:border-rose-800'
                       }`}
                     >
@@ -396,15 +448,15 @@ export function AddProjectWizard({
         <div className="space-y-4 py-2">
           {loadingPreview ? (
             <div className="py-12 text-center text-xs text-slate-500 dark:text-slate-400 space-y-2">
-              <div className="w-6 h-6 border-2 border-cyan-500 border-t-transparent rounded-full animate-spin mx-auto" />
+              <div className="w-6 h-6 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin mx-auto" />
               <div>正在扫描本地与远端文件元数据，计算增量差异...</div>
             </div>
           ) : previewData ? (
             <div className="space-y-4">
               <div className="grid grid-cols-4 gap-2 text-center">
-                <div className="bg-cyan-50 dark:bg-cyan-950/40 border border-cyan-200 dark:border-cyan-800 p-2.5 rounded-lg">
-                  <div className="text-[10px] text-cyan-700 dark:text-cyan-400 font-medium">待上传</div>
-                  <div className="text-lg font-bold text-cyan-800 dark:text-cyan-300 font-mono">{previewData.uploadsCount} 项</div>
+                <div className="bg-indigo-50 dark:bg-indigo-950/40 border border-indigo-200 dark:border-indigo-800 p-2.5 rounded-lg">
+                  <div className="text-[10px] text-indigo-700 dark:text-indigo-400 font-medium">待上传</div>
+                  <div className="text-lg font-bold text-indigo-800 dark:text-indigo-300 font-mono">{previewData.uploadsCount} 项</div>
                 </div>
                 <div className="bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800 p-2.5 rounded-lg">
                   <div className="text-[10px] text-emerald-700 dark:text-emerald-400 font-medium">内容一致</div>
@@ -435,7 +487,7 @@ export function AddProjectWizard({
                         <span
                           className={`px-1.5 py-0.2 rounded text-[10px] font-mono ${
                             item.action.startsWith('Upload')
-                              ? 'bg-cyan-50 dark:bg-cyan-950 text-cyan-700 dark:text-cyan-400 border border-cyan-200 dark:border-cyan-800'
+                              ? 'bg-indigo-50 dark:bg-indigo-950 text-indigo-700 dark:text-indigo-400 border border-indigo-200 dark:border-indigo-800'
                               : 'bg-amber-50 dark:bg-amber-950 text-amber-700 dark:text-amber-400 border border-amber-200 dark:border-amber-800'
                           }`}
                         >
@@ -455,8 +507,31 @@ export function AddProjectWizard({
                   初始同步提示：确认后将写入同步基准，并启动双向监控。
                 </span>
               </div>
+              {createError && (
+                <div role="alert" className="rounded-lg border border-rose-200 bg-rose-50 p-3 text-xs text-rose-800 dark:border-rose-900 dark:bg-rose-950/30 dark:text-rose-300">
+                  创建同步项目失败：{createError}
+                </div>
+              )}
+              {submitting && (
+                <div role="status" aria-live="polite" className="text-xs text-slate-600 dark:text-slate-300">
+                  正在初始化远端目录并保存项目；完成后会返回看板，首次扫描将在后台执行。
+                </div>
+              )}
             </div>
-          ) : null}
+          ) : previewError ? (
+            <div role="alert" className="flex items-start gap-3 rounded-lg border border-rose-200 bg-rose-50 p-4 text-xs text-rose-800 dark:border-rose-900 dark:bg-rose-950/30 dark:text-rose-300">
+              <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+              <div className="min-w-0 flex-1 space-y-1">
+                <div className="font-semibold">无法生成初始同步预览</div>
+                <div className="break-words">{previewError}</div>
+                <div className="text-rose-700/80 dark:text-rose-300/80">请检查本地目录、远端路径和 WebDAV 连接后重试。</div>
+              </div>
+            </div>
+          ) : (
+            <div role="status" className="py-10 text-center text-xs text-slate-500 dark:text-slate-400">
+              尚未生成预览，请返回上一步后重新查看。
+            </div>
+          )}
         </div>
       )}
 
@@ -486,6 +561,7 @@ export function AddProjectWizard({
               variant="primary"
               size="md"
               onClick={() => setCurrentStep((prev) => (prev + 1) as 1 | 2 | 3 | 4 | 5)}
+              disabled={currentStep === 1 && !selectedAccountId}
               className="gap-1.5"
             >
               下一步
@@ -505,11 +581,12 @@ export function AddProjectWizard({
             <Button
               variant="accent"
               size="md"
-              onClick={handleConfirmCreate}
-              disabled={submitting || loadingPreview}
+              onClick={previewData ? handleConfirmCreate : handleGoToStep5}
+              disabled={submitting || loadingPreview || (!previewData && !selectedAccountId)}
               className="gap-1.5"
             >
-              {submitting ? '正在创建...' : '确认并开始同步'}
+              {submitting && <LoaderCircle className="h-3.5 w-3.5 animate-spin" />}
+              {submitting ? '正在创建...' : previewData ? '确认并开始同步' : '重新生成预览'}
             </Button>
           )}
         </div>
@@ -522,4 +599,30 @@ function parentRemoteDirectory(path: string): string {
   const normalized = path.trim().replace(/\/+$/, '') || '/';
   const separator = normalized.lastIndexOf('/');
   return separator <= 0 ? '/' : normalized.slice(0, separator);
+}
+
+function defaultRemotePath(localPath: string): string {
+  return `/projects/${localDirectoryName(localPath)}`;
+}
+
+function localDirectoryName(localPath: string): string {
+  const normalized = localPath.trim().replace(/[\\/]+$/, '');
+  const directoryName = normalized.split(/[\\/]/).pop();
+  return directoryName && !/^[a-z]:$/i.test(directoryName) ? directoryName : 'Project';
+}
+
+function getErrorMessage(error: unknown): string {
+  if (error instanceof Error && error.message) return error.message;
+  if (typeof error === 'string' && error.trim()) return error;
+  if (error && typeof error === 'object' && 'message' in error && typeof error.message === 'string') {
+    return error.message;
+  }
+  return '发生未知错误。';
+}
+
+function getErrorCode(error: unknown): string | null {
+  if (error && typeof error === 'object' && 'code' in error && typeof error.code === 'string') {
+    return error.code;
+  }
+  return null;
 }

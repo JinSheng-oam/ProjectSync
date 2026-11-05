@@ -8,6 +8,7 @@ import { WebDavManager } from './features/webdav/WebDavManager';
 import { SyncHistoryView } from './features/history/SyncHistoryView';
 import { SettingsView } from './features/settings/SettingsView';
 import { AddProjectWizard } from './features/wizard/AddProjectWizard';
+import { ProjectManagementView } from './features/projects/ProjectManagementView';
 
 export function App() {
   const {
@@ -49,7 +50,7 @@ export function App() {
 
   const navTitles = {
     overview: '工作区总览看板',
-    projects: '项目同步绑定管理',
+    projects: '项目管理',
     project_detail: '项目详情与控制台',
     webdav: 'WebDAV 远端节点管理',
     conflicts: '冲突拦截与版本裁决',
@@ -58,8 +59,8 @@ export function App() {
   };
 
   return (
-    <div className="flex h-screen w-screen overflow-hidden bg-aerospace-canvas text-slate-800 dark:text-slate-100">
-      {/* 240px Command Rail */}
+    <div className="app-shell flex h-screen w-screen overflow-hidden text-slate-800 dark:text-slate-100">
+      {/* Command Rail */}
       <CommandRail
         currentNav={currentNav}
         onNavigate={(nav) => setCurrentNav(nav)}
@@ -84,11 +85,11 @@ export function App() {
         />
 
         {/* Scrollable View Container */}
-        <main className="flex-1 overflow-y-auto p-6 bg-slate-50/50 dark:bg-gradient-to-b dark:from-aerospace-canvas dark:to-slate-950">
+        <main className="flex-1 overflow-y-auto p-7 bg-transparent">
           {loading ? (
             <div className="h-full flex items-center justify-center font-mono text-xs text-slate-400">
               <div className="flex items-center gap-2">
-                <span className="w-3 h-3 border-2 border-cyan-400 border-t-transparent rounded-full animate-spin" />
+                <span className="w-3 h-3 border-2 border-indigo-400 border-t-transparent rounded-full animate-spin" />
                 正在加载本地 SQLite 状态与调度任务队列...
               </div>
             </div>
@@ -112,19 +113,14 @@ export function App() {
               )}
 
               {currentNav === 'projects' && (
-                <OverviewDashboard
+                <ProjectManagementView
                   roots={roots}
-                  conflicts={conflicts}
-                  accounts={accounts}
-                  tasks={tasks}
-                  onNavigate={(nav) => setCurrentNav(nav)}
                   onOpenDetail={openProjectDetail}
                   onOpenWizard={() => setIsWizardOpen(true)}
                   onSyncNow={handleSyncNow}
                   onPause={handlePauseSync}
                   onResume={handleResumeSync}
                   onEnable={handleEnableSync}
-                  onRetryTask={handleRetryTask}
                 />
               )}
 
