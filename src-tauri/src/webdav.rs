@@ -905,6 +905,11 @@ fn parse_multistatus(body: &[u8], base_url: &Url, request_url: &Url) -> AppResul
                 if name == "propstat" {
                     propstat_ok = true;
                 }
+                if name == "collection" && stack.iter().any(|tag| tag == "resourcetype") {
+                    if let Some(entry) = current.as_mut() {
+                        entry.is_collection = true;
+                    }
+                }
                 stack.push(name);
             }
             Ok(Event::Empty(event)) => {
@@ -1013,5 +1018,44 @@ impl FromStr for PutCondition {
         } else {
             Err(AppError::new("DAV_REQUEST_FAILED", "未知的写入条件"))
         }
+    }
+}
+
+#[cfg(test)]
+mod browse_parser_tests {
+    use super::*;
+
+    #[test]
+    fn hacdias_multistatus_lists_decoded_children_and_both_collection_forms() {
+        let client =
+            WebDavClient::new("https://example.test/dav/", "user", "password".into(), true)
+                .unwrap();
+        let request = client.url_for("/").unwrap();
+        let xml = br#"<?xml version="1.0" encoding="utf-8"?>
+        <D:multistatus xmlns:D="DAV:">
+          <D:response><D:href>/dav/</D:href><D:propstat><D:prop><D:resourcetype><D:collection/></D:resourcetype></D:prop><D:status>HTTP/1.1 200 OK</D:status></D:propstat></D:response>
+          <D:response><D:href>/dav/projects/</D:href><D:propstat><D:prop><D:resourcetype><D:collection/></D:resourcetype></D:prop><D:status>HTTP/1.1 200 OK</D:status></D:propstat></D:response>
+          <D:response><D:href>/dav/%E6%96%87%E6%A1%A3%20files/</D:href><D:propstat><D:prop><D:resourcetype><D:collection></D:collection></D:resourcetype></D:prop><D:status>HTTP/1.1 200 OK</D:status></D:propstat></D:response>
+          <D:response><D:href>/dav/readme.txt</D:href><D:propstat><D:prop><D:resourcetype/></D:prop><D:status>HTTP/1.1 200 OK</D:status></D:propstat></D:response>
+        </D:multistatus>"#;
+        let entries = parse_multistatus(xml, &client.base_url, &request).unwrap();
+        let paths = entries
+            .iter()
+            .map(|entry| {
+                (
+                    href_to_dav_path(&client, &entry.path, "/").unwrap(),
+                    entry.is_collection,
+                )
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            paths,
+            [
+                ("/".into(), true),
+                ("/projects".into(), true),
+                ("/文档 files".into(), true),
+                ("/readme.txt".into(), false)
+            ]
+        );
     }
 }

@@ -9,8 +9,6 @@ import {
   Cloud,
   FileCode,
   ShieldCheck,
-  Plus,
-  Trash2,
   Sliders,
   History,
   FileText,
@@ -19,6 +17,8 @@ import {
 import { SyncRootDto, SyncRuleDto, SyncFileItemDto, HistoryItemDto } from '../../types/dto';
 import { StatusBadge, PathDisplay, Button } from '../../components/common/UIComponents';
 import { api } from '../../services/api';
+import { RuleEditor } from '../rules/RuleEditor';
+import { RuleImpactDto } from '../../types/dto';
 
 interface ProjectDetailViewProps {
   rootId: string;
@@ -45,8 +45,10 @@ export function ProjectDetailView({
 
   // Rules state
   const [rules, setRules] = useState<SyncRuleDto[]>([]);
-  const [newRulePattern, setNewRulePattern] = useState('');
-  const [newRuleType, setNewRuleType] = useState<'INCLUDE' | 'EXCLUDE'>('INCLUDE');
+  const [ruleImpact, setRuleImpact] = useState<RuleImpactDto | null>(null);
+  const [ruleError, setRuleError] = useState('');
+  const [ruleBusy, setRuleBusy] = useState(false);
+  const [rulesLoaded, setRulesLoaded] = useState(false);
   const [rulesDirty, setRulesDirty] = useState(false);
 
   // Files state
@@ -68,10 +70,20 @@ export function ProjectDetailView({
 
   useEffect(() => {
     if (!root) return;
-    api.getSyncRules(root.id).then(setRules);
+    let cancelled = false;
+    setRulesLoaded(false);
+    setRulesDirty(false);
+    setRuleImpact(null);
+    setRuleError('');
+    api.getSyncRules(root.id).then((loaded) => {
+      if (!cancelled) { setRules(loaded); setRulesLoaded(true); }
+    }).catch((error: unknown) => {
+      if (!cancelled) setRuleError(`无法加载规则：${ruleErrorMessage(error)}`);
+    });
     api.getFiles(root.id).then(setFiles);
     api.querySyncHistory(root.name).then(setHistoryList);
-  }, [root]);
+    return () => { cancelled = true; };
+  }, [rootId]);
 
   if (!root) {
     return (
@@ -88,31 +100,20 @@ export function ProjectDetailView({
   const isPaused = root.status === 'PAUSED';
   const isDisabled = root.status === 'DISABLED' || !root.enabled;
 
-  const handleAddRule = () => {
-    if (!newRulePattern.trim()) return;
-    setRules((prev) => [
-      ...prev,
-      {
-        id: Date.now(),
-        ruleType: newRuleType,
-        pattern: newRulePattern.trim(),
-        enabled: true,
-        priority: prev.length * 10 + 10,
-      },
-    ]);
-    setNewRulePattern('');
-    setRulesDirty(true);
+  const handleRulesChange = (next: SyncRuleDto[]) => {
+    setRules(next); setRulesDirty(true); setRuleImpact(null); setRuleError('');
   };
-
-  const handleRemoveRule = (id?: number) => {
-    if (id === undefined) return;
-    setRules((prev) => prev.filter((r) => r.id !== id));
-    setRulesDirty(true);
+  const handlePreviewRules = async () => {
+    setRuleBusy(true); setRuleError(''); setRuleImpact(null);
+    try { setRuleImpact(await api.previewRuleImpact(root.id, rules)); }
+    catch (error: unknown) { setRuleError(ruleErrorMessage(error)); }
+    finally { setRuleBusy(false); }
   };
-
   const handleSaveRules = async () => {
-    await api.replaceSyncRules(root.id, rules);
-    setRulesDirty(false);
+    setRuleBusy(true); setRuleError('');
+    try { await api.replaceSyncRules(root.id, rules); setRulesDirty(false); setRuleImpact(null); }
+    catch (error: unknown) { setRuleError(ruleErrorMessage(error)); }
+    finally { setRuleBusy(false); }
   };
 
   const handleSaveProjectSettings = async () => {
@@ -280,91 +281,21 @@ export function ProjectDetailView({
         </div>
       )}
 
-      {/* Tab 2: Rules Editor */}
       {activeTab === 'rules' && (
-        <div className="space-y-4">
-          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 space-y-4 shadow-soft-sm">
-            <div className="flex items-center justify-between">
-              <div>
-                <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100">文件过滤规则</h3>
-                <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
-                  规则独立保存在数据库中。排除规则优先级高于包含规则，避免 git 仓库或构建产物被同步。
-                </p>
-              </div>
-              {rulesDirty && (
-                <Button variant="accent" size="sm" onClick={handleSaveRules}>
-                  保存规则变更
-                </Button>
-              )}
-            </div>
-
-            {/* Add Rule Inline */}
-            <div className="flex gap-2">
-              <select
-                value={newRuleType}
-                onChange={(e) => setNewRuleType(e.target.value as 'INCLUDE' | 'EXCLUDE')}
-                className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-2.5 py-1.5 text-xs font-mono text-slate-800 dark:text-slate-200 focus:outline-none focus:border-indigo-500"
-              >
-                <option value="INCLUDE">INCLUDE</option>
-                <option value="EXCLUDE">EXCLUDE</option>
-              </select>
-              <input
-                type="text"
-                value={newRulePattern}
-                onChange={(e) => setNewRulePattern(e.target.value)}
-                placeholder="Glob 表达式 (例如: docs/**, config/*.toml)"
-                className="flex-1 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-1.5 text-xs font-mono text-slate-900 dark:text-slate-100 focus:outline-none focus:border-indigo-500"
-              />
-              <Button variant="secondary" size="sm" onClick={handleAddRule} className="gap-1">
-                <Plus className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400" />
-                新增规则
-              </Button>
-            </div>
-
-            {/* Rules Table */}
-            <div className="border border-slate-200 dark:border-slate-800 rounded-xl bg-slate-50/50 dark:bg-slate-800/40 overflow-hidden">
-              <table className="w-full text-left text-xs font-mono">
-                <thead className="bg-slate-100 dark:bg-slate-800 border-b border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-400 text-[11px]">
-                  <tr>
-                    <th className="py-2.5 px-3">优先级</th>
-                    <th className="py-2.5 px-3">类型</th>
-                    <th className="py-2.5 px-3">匹配规则</th>
-                    <th className="py-2.5 px-3">状态</th>
-                    <th className="py-2.5 px-3 text-right">操作</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100 dark:divide-slate-700/60">
-                  {rules.map((rule) => (
-                    <tr key={rule.id} className="hover:bg-slate-100/60 dark:hover:bg-slate-800/60">
-                      <td className="py-2 px-3 text-slate-500 dark:text-slate-400">{rule.priority}</td>
-                      <td className="py-2 px-3">
-                        <span
-                          className={`px-1.5 py-0.5 rounded text-[11px] font-semibold ${
-                            rule.ruleType === 'INCLUDE'
-                              ? 'bg-indigo-100 dark:bg-indigo-950 text-indigo-800 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800'
-                              : 'bg-rose-100 dark:bg-rose-950 text-rose-800 dark:text-rose-300 border border-rose-200 dark:border-rose-800'
-                          }`}
-                        >
-                          {rule.ruleType}
-                        </span>
-                      </td>
-                      <td className="py-2 px-3 text-slate-900 dark:text-slate-100 font-semibold">{rule.pattern}</td>
-                      <td className="py-2 px-3 text-emerald-700 dark:text-emerald-300 font-medium">已启用</td>
-                      <td className="py-2 px-3 text-right">
-                        <button
-                          type="button"
-                          onClick={() => handleRemoveRule(rule.id)}
-                          className="text-slate-400 hover:text-rose-600 dark:hover:text-rose-400 p-1 rounded transition-colors"
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
+        <div className="max-w-3xl space-y-4 rounded-2xl border border-slate-200 bg-white p-5 dark:border-slate-800 dark:bg-slate-900">
+          <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100">文件过滤规则</h3>
+          {rulesLoaded ? <fieldset disabled={ruleBusy}><RuleEditor rules={rules} onChange={handleRulesChange} localPath={root.localPath} /></fieldset> : !ruleError && <p className="text-xs text-slate-600 dark:text-slate-400">正在加载规则…</p>}
+          {rulesDirty && <div className="flex flex-wrap items-center gap-2 border-t border-slate-200 pt-4 dark:border-slate-800">
+            <Button variant="secondary" size="sm" onClick={handlePreviewRules} disabled={ruleBusy}>预览本地影响</Button>
+            <Button variant="accent" size="sm" onClick={handleSaveRules} disabled={ruleBusy}>保存规则变更</Button>
+            <span className="text-xs text-slate-600 dark:text-slate-400">{ruleBusy ? '正在处理…' : '有未保存的更改'}</span>
+          </div>}
+          {ruleError && <p role="alert" className="text-xs text-rose-700 dark:text-rose-300">{ruleError}</p>}
+          {ruleImpact && <div className="space-y-2 rounded-xl bg-slate-50 p-3 text-xs dark:bg-slate-800" role="status">
+            <p className="font-semibold text-slate-900 dark:text-slate-100">本地文件影响：新增 {ruleImpact.newlyIncluded.length} 项，排除 {ruleImpact.newlyExcluded.length} 项，未改变 {ruleImpact.unchanged} 项</p>
+            <p className="text-slate-600 dark:text-slate-400">仅比较当前本地文件；远端文件以同步扫描结果为准。</p>
+            {([['新增同步', ruleImpact.newlyIncluded], ['不再同步', ruleImpact.newlyExcluded]] as const).map(([label, paths]) => paths.length > 0 && <details key={label}><summary className="cursor-pointer text-slate-700 dark:text-slate-300">{label}（{paths.length}）</summary><ul className="mt-1 max-h-40 overflow-auto font-mono text-slate-600 dark:text-slate-400">{paths.map((path) => <li key={path} className="break-all">{path}</li>)}</ul></details>)}
+          </div>}
         </div>
       )}
 
@@ -532,4 +463,10 @@ export function ProjectDetailView({
       )}
     </div>
   );
+}
+
+function ruleErrorMessage(error: unknown): string {
+  if (error instanceof Error) return error.message;
+  if (typeof error === 'object' && error !== null && 'message' in error) return String(error.message);
+  return String(error || '规则操作失败，请重试');
 }

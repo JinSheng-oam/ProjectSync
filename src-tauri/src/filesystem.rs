@@ -55,7 +55,11 @@ impl RuleEngine {
     }
 
     pub fn includes(&self, path: &str) -> bool {
-        !self.is_excluded(path, false) && (!self.has_include || self.includes.is_match(path))
+        !self.is_excluded(path, false)
+            && !path
+                .match_indices('/')
+                .any(|(index, _)| self.is_excluded(&path[..index], true))
+            && (!self.has_include || self.includes.is_match(path))
     }
 
     fn is_excluded(&self, path: &str, is_directory: bool) -> bool {
@@ -430,4 +434,45 @@ pub fn copy_create_new(source: &Path, destination: &Path) -> AppResult<()> {
         ));
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod rule_tests {
+    use super::*;
+    use crate::domain::RuleType;
+
+    fn rule(kind: RuleType, pattern: &str) -> SyncRuleDto {
+        SyncRuleDto {
+            id: None,
+            rule_type: kind,
+            pattern: pattern.into(),
+            enabled: true,
+            priority: 0,
+        }
+    }
+
+    #[test]
+    fn exclusion_of_directories_applies_to_files_at_any_depth() {
+        for pattern in ["**/node_modules/**", "node_modules"] {
+            let engine = RuleEngine::compile(&[rule(RuleType::Exclude, pattern)]).unwrap();
+            assert!(!engine.includes("node_modules/package/index.js"));
+        }
+        let engine = RuleEngine::compile(&[rule(RuleType::Exclude, "**/node_modules/**")]).unwrap();
+        assert!(!engine.includes("apps/web/node_modules/package/index.js"));
+        assert!(engine.includes("apps/web/src/index.js"));
+    }
+
+    #[test]
+    fn selective_rules_include_root_and_nested_documents_but_exclude_dependencies() {
+        let engine = RuleEngine::compile(&[
+            rule(RuleType::Include, "**/*.md"),
+            rule(RuleType::Exclude, "**/node_modules/**"),
+        ])
+        .unwrap();
+        assert!(engine.includes("README.md"));
+        assert!(engine.includes("docs/guide.md"));
+        assert!(!engine.includes("src/main.rs"));
+        assert!(!engine.includes("node_modules/pkg/README.md"));
+        assert!(!engine.includes(".projectsync/state.md"));
+    }
 }

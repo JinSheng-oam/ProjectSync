@@ -1,3 +1,5 @@
+import { useState } from 'react';
+import { DiscoveredProject } from './types/dto';
 import { useSyncStore } from './stores/syncStore';
 import { CommandRail } from './components/shell/CommandRail';
 import { TopHeader } from './components/shell/TopHeader';
@@ -36,6 +38,7 @@ export function App() {
     handleResolveConflict,
   } = useSyncStore();
 
+  const [remoteProject, setRemoteProject] = useState<DiscoveredProject | null>(null);
   const handleSyncAll = () => {
     roots.forEach((r) => handleSyncNow(r.id));
   };
@@ -115,8 +118,10 @@ export function App() {
               {currentNav === 'projects' && (
                 <ProjectManagementView
                   roots={roots}
+                  accounts={accounts}
+                  onBindRemote={(project) => { setRemoteProject(project); setIsWizardOpen(true); }}
                   onOpenDetail={openProjectDetail}
-                  onOpenWizard={() => setIsWizardOpen(true)}
+                  onOpenWizard={() => { setRemoteProject(null); setIsWizardOpen(true); }}
                   onSyncNow={handleSyncNow}
                   onPause={handlePauseSync}
                   onResume={handleResumeSync}
@@ -163,7 +168,8 @@ export function App() {
       {/* 5-Step Project Wizard Modal */}
       <AddProjectWizard
         isOpen={isWizardOpen}
-        onClose={() => setIsWizardOpen(false)}
+        remoteProject={remoteProject}
+        onClose={() => { setIsWizardOpen(false); setRemoteProject(null); }}
         accounts={accounts}
         onProjectCreated={refreshAll}
       />

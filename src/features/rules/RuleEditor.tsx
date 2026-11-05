@@ -1,0 +1,641 @@
+import { useEffect, useState } from 'react';
+import {
+  Plus,
+  Trash2,
+  GitBranch,
+  Package,
+  Hammer,
+  KeyRound,
+  FileClock,
+  FileText,
+  Code2,
+  Check,
+  Search,
+  CheckCircle2,
+  XCircle,
+  AlertCircle,
+  ChevronDown,
+  ChevronUp,
+} from 'lucide-react';
+import { Button } from '../../components/common/UIComponents';
+import { SyncRuleDto, RuleType } from '../../types/dto';
+import { api } from '../../services/api';
+import { AiScope } from './AiScope';
+
+interface ExclusionGroup {
+  id: string;
+  label: string;
+  description: string;
+  icon: typeof GitBranch;
+  patterns: string[];
+}
+
+const groups: ExclusionGroup[] = [
+  {
+    id: 'repo',
+    label: '版本库',
+    description: '.git, .svn, .hg',
+    icon: GitBranch,
+    patterns: ['**/.git/**', '**/.svn/**', '**/.hg/**'],
+  },
+  {
+    id: 'deps',
+    label: '依赖与环境',
+    description: 'node_modules, venv, vendor',
+    icon: Package,
+    patterns: ['**/node_modules/**', '**/vendor/**', '**/.venv/**', '**/venv/**'],
+  },
+  {
+    id: 'build',
+    label: '构建与缓存',
+    description: 'dist, build, target, cache',
+    icon: Hammer,
+    patterns: [
+      '**/target/**',
+      '**/dist/**',
+      '**/build/**',
+      '**/__pycache__/**',
+      '**/.next/**',
+      '**/.cache/**',
+    ],
+  },
+  {
+    id: 'env',
+    label: '环境变量文件',
+    description: '.env, .env.*',
+    icon: KeyRound,
+    patterns: ['**/.env', '**/.env.*'],
+  },
+  {
+    id: 'temp',
+    label: '临时文件',
+    description: '*.tmp, *.log, .DS_Store',
+    icon: FileClock,
+    patterns: ['**/*.tmp', '**/*.log', '**/.DS_Store', '**/Thumbs.db'],
+  },
+];
+
+const contextPatterns = [
+  '**/*.md',
+  '**/*.mdc',
+  '**/*.txt',
+  '**/.cursor/rules/**',
+  '**/.windsurf/rules/**',
+  '**/.github/instructions/**',
+  '**/docs/**',
+  '**/config/**',
+  '**/prompts/**',
+];
+
+const makeRules = (type: RuleType, patterns: string[], start = 0): SyncRuleDto[] =>
+  patterns.map((pattern, index) => ({
+    id: -(start + index + 1),
+    ruleType: type,
+    pattern,
+    enabled: true,
+    priority: index * 10 + 10,
+  }));
+
+export function recommendedRules(): SyncRuleDto[] {
+  const includes = makeRules('INCLUDE', contextPatterns);
+  return [...includes, ...makeRules('EXCLUDE', groups.flatMap((group) => group.patterns), includes.length)];
+}
+
+function allProjectRules(): SyncRuleDto[] {
+  return makeRules('EXCLUDE', groups.flatMap((group) => group.patterns));
+}
+
+export function RuleEditor({
+  rules,
+  onChange,
+  localPath,
+}: {
+  rules: SyncRuleDto[];
+  onChange: (rules: SyncRuleDto[]) => void;
+  localPath: string;
+}) {
+  const [pattern, setPattern] = useState('');
+  const [type, setType] = useState<RuleType>('EXCLUDE');
+  const [message, setMessage] = useState('');
+  const [ruleFilter, setRuleFilter] = useState<'ALL' | 'INCLUDE' | 'EXCLUDE'>('ALL');
+  const [searchFilter, setSearchFilter] = useState('');
+
+  // Path diagnostics state
+  const [showDiagnostics, setShowDiagnostics] = useState(false);
+  const [checkPath, setCheckPath] = useState('');
+  const [checkResult, setCheckResult] = useState('');
+  const [checking, setChecking] = useState(false);
+
+  useEffect(() => {
+    setCheckResult('');
+  }, [rules]);
+
+  const enabledIncludes = rules.filter((rule) => rule.enabled && rule.ruleType === 'INCLUDE').length;
+  const isRecommendedMode = enabledIncludes > 0;
+
+  const applyPreset = (preset: 'context' | 'project') => {
+    if (preset === 'context' && isRecommendedMode) return;
+    if (preset === 'project' && !isRecommendedMode) return;
+    if (!window.confirm('切换预设方案将重置当前的规则列表。确定继续吗？')) return;
+    onChange(preset === 'context' ? recommendedRules() : allProjectRules());
+    setMessage('方案已切换并应用，请按需微调规则。');
+  };
+
+  const toggleGroup = (patterns: string[], checked: boolean) => {
+    const keys = new Set(patterns.map((p) => p.toLowerCase()));
+    if (!checked) {
+      onChange(rules.filter((rule) => !(rule.ruleType === 'EXCLUDE' && keys.has(rule.pattern.toLowerCase()))));
+      return;
+    }
+    const existing = new Set(
+      rules
+        .filter((rule) => rule.ruleType === 'EXCLUDE' && rule.enabled)
+        .map((rule) => rule.pattern.toLowerCase())
+    );
+    const retained = rules.filter(
+      (rule) => !(rule.ruleType === 'EXCLUDE' && !rule.enabled && keys.has(rule.pattern.toLowerCase()))
+    );
+    onChange([
+      ...retained,
+      ...makeRules(
+        'EXCLUDE',
+        patterns.filter((p) => !existing.has(p.toLowerCase())),
+        Date.now()
+      ),
+    ]);
+  };
+
+  const addRule = () => {
+    const value = pattern.trim().replace(/\\/g, '/');
+    if (!value) return;
+    if (
+      rules.some(
+        (rule) => rule.ruleType === type && rule.pattern.toLowerCase() === value.toLowerCase()
+      )
+    ) {
+      setMessage('该过滤规则已存在。');
+      return;
+    }
+    onChange([...rules, ...makeRules(type, [value], Date.now())]);
+    setPattern('');
+    setMessage('');
+  };
+
+  const handleExplainPath = async () => {
+    if (!checkPath.trim()) return;
+    setChecking(true);
+    try {
+      const result = await api.explainSyncRule(checkPath.trim(), rules);
+      setCheckResult(result);
+    } catch (error: unknown) {
+      setCheckResult(
+        typeof error === 'object' && error !== null && 'message' in error
+          ? String(error.message)
+          : String(error)
+      );
+    } finally {
+      setChecking(false);
+    }
+  };
+
+  const filteredRules = rules.filter((rule) => {
+    if (ruleFilter !== 'ALL' && rule.ruleType !== ruleFilter) return false;
+    if (searchFilter.trim() && !rule.pattern.toLowerCase().includes(searchFilter.trim().toLowerCase())) {
+      return false;
+    }
+    return true;
+  });
+
+  const includeCount = rules.filter((r) => r.ruleType === 'INCLUDE').length;
+  const excludeCount = rules.filter((r) => r.ruleType === 'EXCLUDE').length;
+
+  return (
+    <div className="space-y-4 text-xs">
+      {/* 1. Scope Selection Preset Cards */}
+      <div className="space-y-2">
+        <div className="flex items-center justify-between">
+          <label className="text-xs font-semibold text-slate-900 dark:text-slate-100">
+            选择同步范围模式
+          </label>
+          <span className="text-[11px] text-slate-500 dark:text-slate-400">
+            {isRecommendedMode
+              ? `白名单模式：仅同步匹配的 ${enabledIncludes} 条包含规则`
+              : '全量模式：同步除排除规则外的全部文件'}
+          </span>
+        </div>
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          {/* Preset Card 1: Context & Config */}
+          <div
+            onClick={() => applyPreset('context')}
+            className={`p-3.5 rounded-xl border cursor-pointer transition-all flex flex-col justify-between relative ${
+              isRecommendedMode
+                ? 'border-indigo-500 ring-2 ring-indigo-500/20 bg-indigo-50/50 dark:bg-indigo-950/30 text-slate-900 dark:text-slate-100 shadow-soft-sm'
+                : 'border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800/60 hover:border-slate-300 dark:hover:border-slate-600 text-slate-700 dark:text-slate-300'
+            }`}
+          >
+            <div className="flex items-start justify-between">
+              <div className="flex items-center gap-2 font-semibold text-xs text-slate-900 dark:text-slate-100">
+                <FileText className="w-4 h-4 text-indigo-600 dark:text-indigo-400" />
+                <span>文档与项目配置</span>
+                <span className="px-1.5 py-0.5 rounded text-[10px] font-medium bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800">
+                  推荐
+                </span>
+              </div>
+              {isRecommendedMode && (
+                <div className="w-4 h-4 rounded-full bg-indigo-600 text-white flex items-center justify-center">
+                  <Check className="w-2.5 h-2.5" />
+                </div>
+              )}
+            </div>
+            <p className="mt-2 text-[11px] text-slate-500 dark:text-slate-400 leading-relaxed">
+              仅同步 Markdown、文本、AI 规则提示词与 docs、config 目录；适合知识库与轻量同步。
+            </p>
+          </div>
+
+          {/* Preset Card 2: Full Project */}
+          <div
+            onClick={() => applyPreset('project')}
+            className={`p-3.5 rounded-xl border cursor-pointer transition-all flex flex-col justify-between relative ${
+              !isRecommendedMode
+                ? 'border-indigo-500 ring-2 ring-indigo-500/20 bg-indigo-50/50 dark:bg-indigo-950/30 text-slate-900 dark:text-slate-100 shadow-soft-sm'
+                : 'border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800/60 hover:border-slate-300 dark:hover:border-slate-600 text-slate-700 dark:text-slate-300'
+            }`}
+          >
+            <div className="flex items-start justify-between">
+              <div className="flex items-center gap-2 font-semibold text-xs text-slate-900 dark:text-slate-100">
+                <Code2 className="w-4 h-4 text-slate-600 dark:text-slate-400" />
+                <span>完整工程源码</span>
+                <span className="px-1.5 py-0.5 rounded text-[10px] font-medium bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300 border border-slate-200 dark:border-slate-700">
+                  全量
+                </span>
+              </div>
+              {!isRecommendedMode && (
+                <div className="w-4 h-4 rounded-full bg-indigo-600 text-white flex items-center justify-center">
+                  <Check className="w-2.5 h-2.5" />
+                </div>
+              )}
+            </div>
+            <p className="mt-2 text-[11px] text-slate-500 dark:text-slate-400 leading-relaxed">
+              同步工程内所有源码与资源；两者均自动排除常见依赖、产物与临时文件。
+            </p>
+          </div>
+        </div>
+      </div>
+
+      {/* 2. Quick Exclusions Chips */}
+      <div className="space-y-2">
+        <div className="flex items-center justify-between">
+          <label className="text-xs font-semibold text-slate-900 dark:text-slate-100">
+            快速排除常用规则
+          </label>
+          <span className="text-[11px] text-slate-500 dark:text-slate-400">
+            排除规则始终优先判定
+          </span>
+        </div>
+
+        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-2">
+          {groups.map((group) => {
+            const Icon = group.icon;
+            const activeCount = group.patterns.filter((p) =>
+              rules.some(
+                (r) =>
+                  r.enabled &&
+                  r.ruleType === 'EXCLUDE' &&
+                  r.pattern.toLowerCase() === p.toLowerCase()
+              )
+            ).length;
+            const isAllActive = activeCount === group.patterns.length;
+            const isPartial = activeCount > 0 && !isAllActive;
+
+            return (
+              <button
+                key={group.id}
+                type="button"
+                onClick={() => toggleGroup(group.patterns, !isAllActive)}
+                className={`p-2.5 rounded-xl border text-left transition-all flex flex-col justify-between ${
+                  isAllActive
+                    ? 'border-indigo-400 dark:border-indigo-600 bg-indigo-50/70 dark:bg-indigo-950/40 text-indigo-950 dark:text-indigo-100 shadow-soft-sm'
+                    : isPartial
+                    ? 'border-amber-300 dark:border-amber-700 bg-amber-50/50 dark:bg-amber-950/30 text-amber-950 dark:text-amber-100'
+                    : 'border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800/70 text-slate-600 dark:text-slate-400 hover:border-slate-300 dark:hover:border-slate-600'
+                }`}
+              >
+                <div className="flex items-center justify-between w-full mb-1">
+                  <Icon
+                    className={`w-3.5 h-3.5 ${
+                      isAllActive
+                        ? 'text-indigo-600 dark:text-indigo-400'
+                        : isPartial
+                        ? 'text-amber-600 dark:text-amber-400'
+                        : 'text-slate-400'
+                    }`}
+                  />
+                  <span
+                    className={`text-[10px] font-mono px-1 py-0.2 rounded ${
+                      isAllActive
+                        ? 'bg-indigo-100 text-indigo-700 dark:bg-indigo-900/60 dark:text-indigo-300 font-semibold'
+                        : isPartial
+                        ? 'bg-amber-100 text-amber-800 dark:bg-amber-900/60 dark:text-amber-300'
+                        : 'bg-slate-100 dark:bg-slate-800 text-slate-400'
+                    }`}
+                  >
+                    {isAllActive ? '已排除' : isPartial ? `${activeCount}/${group.patterns.length}` : '未排除'}
+                  </span>
+                </div>
+                <div className="font-semibold text-xs truncate">{group.label}</div>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* 3. Custom Rules List & Add Bar */}
+      <div className="border border-slate-200 dark:border-slate-700 rounded-xl bg-white dark:bg-slate-800/80 overflow-hidden shadow-soft-sm">
+        {/* Header & Filter Tabs */}
+        <div className="px-3.5 py-2.5 bg-slate-50/80 dark:bg-slate-900/70 border-b border-slate-200 dark:border-slate-700 flex flex-wrap items-center justify-between gap-2">
+          <div className="flex items-center gap-2">
+            <span className="font-semibold text-xs text-slate-900 dark:text-slate-100">
+              自定义规则
+            </span>
+            <span className="text-[11px] font-mono text-slate-500 bg-slate-200/60 dark:bg-slate-800 px-1.5 py-0.5 rounded">
+              {rules.length}
+            </span>
+          </div>
+
+          <div className="flex items-center gap-2">
+            {/* Filter Tabs */}
+            <div className="flex rounded-lg bg-slate-200/60 dark:bg-slate-800 p-0.5">
+              <button
+                type="button"
+                onClick={() => setRuleFilter('ALL')}
+                className={`px-2 py-0.5 rounded-md text-[11px] font-medium transition-colors ${
+                  ruleFilter === 'ALL'
+                    ? 'bg-white dark:bg-slate-700 text-slate-900 dark:text-slate-100 shadow-soft-sm'
+                    : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
+                }`}
+              >
+                全部 ({rules.length})
+              </button>
+              <button
+                type="button"
+                onClick={() => setRuleFilter('INCLUDE')}
+                className={`px-2 py-0.5 rounded-md text-[11px] font-medium transition-colors ${
+                  ruleFilter === 'INCLUDE'
+                    ? 'bg-white dark:bg-slate-700 text-emerald-700 dark:text-emerald-300 shadow-soft-sm'
+                    : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
+                }`}
+              >
+                包含 ({includeCount})
+              </button>
+              <button
+                type="button"
+                onClick={() => setRuleFilter('EXCLUDE')}
+                className={`px-2 py-0.5 rounded-md text-[11px] font-medium transition-colors ${
+                  ruleFilter === 'EXCLUDE'
+                    ? 'bg-white dark:bg-slate-700 text-rose-700 dark:text-rose-300 shadow-soft-sm'
+                    : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
+                }`}
+              >
+                排除 ({excludeCount})
+              </button>
+            </div>
+
+            {/* Quick Search */}
+            <div className="relative">
+              <input
+                type="text"
+                value={searchFilter}
+                onChange={(e) => setSearchFilter(e.target.value)}
+                placeholder="筛选规则..."
+                className="w-24 focus:w-36 transition-all bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg px-2 py-0.5 text-[11px] font-mono text-slate-800 dark:text-slate-200 focus:outline-none focus:border-indigo-500"
+              />
+            </div>
+          </div>
+        </div>
+
+        {/* Inline Add Bar */}
+        <div className="p-3 bg-slate-50/40 dark:bg-slate-900/40 border-b border-slate-200/80 dark:border-slate-700/80 flex flex-wrap sm:flex-nowrap items-center gap-2">
+          {/* Segmented Type Toggle */}
+          <div className="flex rounded-lg bg-slate-200/70 dark:bg-slate-800 p-0.5 shrink-0">
+            <button
+              type="button"
+              onClick={() => setType('INCLUDE')}
+              className={`px-2.5 py-1 rounded-md text-xs font-semibold transition-all ${
+                type === 'INCLUDE'
+                  ? 'bg-emerald-600 text-white shadow-soft-sm'
+                  : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
+              }`}
+            >
+              + 包含
+            </button>
+            <button
+              type="button"
+              onClick={() => setType('EXCLUDE')}
+              className={`px-2.5 py-1 rounded-md text-xs font-semibold transition-all ${
+                type === 'EXCLUDE'
+                  ? 'bg-rose-600 text-white shadow-soft-sm'
+                  : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
+              }`}
+            >
+              - 排除
+            </button>
+          </div>
+
+          <input
+            aria-label="规则表达式"
+            value={pattern}
+            onChange={(e) => setPattern(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                e.preventDefault();
+                addRule();
+              }
+            }}
+            placeholder="填写 Glob 表达式，例如: docs/**、**/*.md、**/cache/**"
+            className="min-w-0 flex-1 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg px-3 py-1.5 font-mono text-xs text-slate-900 dark:text-slate-100 focus:outline-none focus:border-indigo-500"
+          />
+
+          <Button variant="primary" size="sm" onClick={addRule} className="gap-1 shrink-0">
+            <Plus className="w-3.5 h-3.5" /> 添加
+          </Button>
+        </div>
+
+        {/* Rules Scrollable Container */}
+        <div className="max-h-56 overflow-y-auto divide-y divide-slate-100 dark:divide-slate-800/80 p-1">
+          {filteredRules.length === 0 ? (
+            <div className="py-6 text-center text-slate-400 text-xs">
+              {searchFilter ? '未找到匹配该关键字的规则' : '当前类别暂无规则'}
+            </div>
+          ) : (
+            filteredRules.map((rule, idx) => {
+              const originalIndex = rules.indexOf(rule);
+              return (
+                <div
+                  key={`${rule.id || idx}-${rule.pattern}`}
+                  className="flex items-center justify-between px-2.5 py-1.5 hover:bg-slate-50 dark:hover:bg-slate-800/50 rounded-lg transition-colors group"
+                >
+                  <div className="flex items-center gap-2.5 min-w-0 flex-1">
+                    <span
+                      className={`px-1.5 py-0.5 rounded text-[10px] font-semibold shrink-0 ${
+                        rule.ruleType === 'INCLUDE'
+                          ? 'bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800'
+                          : 'bg-rose-50 dark:bg-rose-950/60 text-rose-700 dark:text-rose-300 border border-rose-200 dark:border-rose-800'
+                      }`}
+                    >
+                      {rule.ruleType === 'INCLUDE' ? '包含' : '排除'}
+                    </span>
+                    <code
+                      className={`font-mono text-xs truncate px-2 py-0.5 rounded bg-slate-100 dark:bg-slate-800/80 border border-slate-200/50 dark:border-slate-700/50 ${
+                        rule.enabled
+                          ? 'text-slate-800 dark:text-slate-200 font-medium'
+                          : 'text-slate-400 dark:text-slate-500 line-through'
+                      }`}
+                    >
+                      {rule.pattern}
+                    </code>
+                  </div>
+
+                  <div className="flex items-center gap-2.5 shrink-0 ml-2">
+                    <label className="flex items-center gap-1 cursor-pointer text-[11px] text-slate-500 dark:text-slate-400 select-none">
+                      <input
+                        type="checkbox"
+                        checked={rule.enabled}
+                        onChange={(e) =>
+                          onChange(
+                            rules.map((r, i) =>
+                              i === originalIndex ? { ...r, enabled: e.target.checked } : r
+                            )
+                          )
+                        }
+                        className="rounded text-indigo-600 focus:ring-indigo-500"
+                      />
+                      <span>启用</span>
+                    </label>
+                    <button
+                      type="button"
+                      aria-label={`删除规则 ${rule.pattern}`}
+                      onClick={() => onChange(rules.filter((_, i) => i !== originalIndex))}
+                      className="p-1 text-slate-400 hover:text-rose-600 dark:hover:text-rose-400 rounded hover:bg-rose-50 dark:hover:bg-rose-950/40 transition-colors"
+                      title="删除规则"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                </div>
+              );
+            })
+          )}
+        </div>
+      </div>
+
+      {message && (
+        <div
+          role="status"
+          className="text-xs text-indigo-700 dark:text-indigo-300 bg-indigo-50 dark:bg-indigo-950/30 border border-indigo-200 dark:border-indigo-800 rounded-lg p-2 flex items-center gap-1.5"
+        >
+          <CheckCircle2 className="w-3.5 h-3.5 shrink-0" />
+          <span>{message}</span>
+        </div>
+      )}
+
+      {/* 4. Path Diagnostics Tool (Collapsible) */}
+      <div className="border border-slate-200 dark:border-slate-700 rounded-xl overflow-hidden bg-slate-50/50 dark:bg-slate-800/30">
+        <button
+          type="button"
+          onClick={() => setShowDiagnostics(!showDiagnostics)}
+          className="w-full px-3.5 py-2.5 flex items-center justify-between text-left text-xs font-semibold text-slate-800 dark:text-slate-200 hover:bg-slate-100/60 dark:hover:bg-slate-800/60 transition-colors"
+        >
+          <span className="flex items-center gap-2">
+            <Search className="w-4 h-4 text-indigo-600 dark:text-indigo-400" />
+            <span>路径规则命中诊断</span>
+            <span className="text-[11px] font-normal text-slate-500 dark:text-slate-400">
+              测试相对路径在当前规则下的实际命中结果
+            </span>
+          </span>
+          {showDiagnostics ? (
+            <ChevronUp className="w-4 h-4 text-slate-400" />
+          ) : (
+            <ChevronDown className="w-4 h-4 text-slate-400" />
+          )}
+        </button>
+
+        {showDiagnostics && (
+          <div className="p-3.5 pt-0 space-y-3">
+            <div className="flex gap-2">
+              <input
+                id="rule-check-path"
+                value={checkPath}
+                onChange={(e) => {
+                  setCheckPath(e.target.value);
+                  setCheckResult('');
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault();
+                    handleExplainPath();
+                  }
+                }}
+                placeholder="输入项目内相对路径测试，例如: docs/guide.md 或 target/debug/app"
+                className="min-w-0 flex-1 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-1.5 font-mono text-xs text-slate-900 dark:text-slate-100 focus:outline-none focus:border-indigo-500"
+              />
+              <Button
+                variant="secondary"
+                size="sm"
+                disabled={!checkPath.trim() || checking}
+                onClick={handleExplainPath}
+                className="gap-1.5 shrink-0"
+              >
+                {checking ? '检查中...' : '检查路径'}
+              </Button>
+            </div>
+
+            {/* Quick Test Sample Chips */}
+            <div className="flex flex-wrap items-center gap-1.5 text-[11px] text-slate-500">
+              <span>快速填入:</span>
+              {['README.md', 'docs/spec.md', 'node_modules/react', '.env', 'target/debug/app'].map(
+                (sample) => (
+                  <button
+                    key={sample}
+                    type="button"
+                    onClick={() => {
+                      setCheckPath(sample);
+                      setCheckResult('');
+                    }}
+                    className="font-mono px-2 py-0.5 rounded bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 hover:border-indigo-400 text-slate-700 dark:text-slate-300 transition-colors"
+                  >
+                    {sample}
+                  </button>
+                )
+              )}
+            </div>
+
+            {checkResult && (
+              <div
+                className={`p-3 rounded-xl border text-xs flex items-start gap-2.5 ${
+                  checkResult.includes('【排除】')
+                    ? 'bg-rose-50/90 dark:bg-rose-950/40 border-rose-200 dark:border-rose-800 text-rose-800 dark:text-rose-200'
+                    : checkResult.includes('【忽略】')
+                    ? 'bg-amber-50/90 dark:bg-amber-950/40 border-amber-200 dark:border-amber-800 text-amber-800 dark:text-amber-200'
+                    : 'bg-emerald-50/90 dark:bg-emerald-950/40 border-emerald-200 dark:border-emerald-800 text-emerald-800 dark:text-emerald-200'
+                }`}
+              >
+                {checkResult.includes('【排除】') ? (
+                  <XCircle className="w-4 h-4 text-rose-600 dark:text-rose-400 shrink-0 mt-0.5" />
+                ) : checkResult.includes('【忽略】') ? (
+                  <AlertCircle className="w-4 h-4 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
+                ) : (
+                  <CheckCircle2 className="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0 mt-0.5" />
+                )}
+                <div className="font-medium leading-relaxed">{checkResult}</div>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* 5. AI Scope Recommendation Drawer */}
+      <AiScope key={localPath} localPath={localPath} onApply={onChange} />
+    </div>
+  );
+}

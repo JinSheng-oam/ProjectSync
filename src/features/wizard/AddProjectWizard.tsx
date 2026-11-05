@@ -2,7 +2,6 @@ import { useEffect, useState } from 'react';
 import {
   Server,
   Cloud,
-  Filter,
   ArrowRight,
   ArrowLeft,
   AlertTriangle,
@@ -11,15 +10,15 @@ import {
   ArrowUp,
   ShieldCheck,
   LoaderCircle,
-  Plus,
-  Trash2,
 } from 'lucide-react';
-import { WebDavAccountDto, SyncRuleDto, InitialSyncPreviewDto } from '../../types/dto';
+import { WebDavAccountDto, SyncRuleDto, InitialSyncPreviewDto, DiscoveredProject } from '../../types/dto';
 import { Button, Modal } from '../../components/common/UIComponents';
 import { api } from '../../services/api';
+import { RuleEditor, recommendedRules } from '../rules/RuleEditor';
 
 interface AddProjectWizardProps {
   isOpen: boolean;
+  remoteProject: DiscoveredProject | null;
   onClose: () => void;
   accounts: WebDavAccountDto[];
   onProjectCreated: () => void;
@@ -27,6 +26,7 @@ interface AddProjectWizardProps {
 
 export function AddProjectWizard({
   isOpen,
+  remoteProject,
   onClose,
   accounts,
   onProjectCreated,
@@ -41,25 +41,14 @@ export function AddProjectWizard({
   const [localPath, setLocalPath] = useState(defaultLocalPath);
   const [remotePath, setRemotePath] = useState(() => defaultRemotePath(defaultLocalPath));
   const [remotePathCustomized, setRemotePathCustomized] = useState(false);
-  const [remoteBrowsePath, setRemoteBrowsePath] = useState('/projects');
+  const [remoteBrowsePath, setRemoteBrowsePath] = useState('/');
   const [remoteEntries, setRemoteEntries] = useState<Awaited<ReturnType<typeof api.browseRemoteDirectory>>>([]);
   const [remoteBrowseLoaded, setRemoteBrowseLoaded] = useState(false);
   const [loadingRemote, setLoadingRemote] = useState(false);
   const [remoteBrowseError, setRemoteBrowseError] = useState<string | null>(null);
+  const [remoteBrowseRefresh, setRemoteBrowseRefresh] = useState(0);
 
-  // Rules state (default template: Developer Project)
-  const [rules, setRules] = useState<SyncRuleDto[]>([
-    { id: 1, ruleType: 'INCLUDE', pattern: 'docs/**', enabled: true, priority: 10 },
-    { id: 2, ruleType: 'INCLUDE', pattern: '*.md', enabled: true, priority: 20 },
-    { id: 3, ruleType: 'INCLUDE', pattern: '.cursor/rules/**', enabled: true, priority: 30 },
-    { id: 4, ruleType: 'INCLUDE', pattern: 'config/**', enabled: true, priority: 40 },
-    { id: 5, ruleType: 'EXCLUDE', pattern: '**/.git/**', enabled: true, priority: 100 },
-    { id: 6, ruleType: 'EXCLUDE', pattern: '**/node_modules/**', enabled: true, priority: 110 },
-    { id: 7, ruleType: 'EXCLUDE', pattern: '**/target/**', enabled: true, priority: 120 },
-  ]);
-
-  const [newRulePattern, setNewRulePattern] = useState('');
-  const [newRuleType, setNewRuleType] = useState<'INCLUDE' | 'EXCLUDE'>('INCLUDE');
+  const [rules, setRules] = useState<SyncRuleDto[]>(recommendedRules);
 
   // Step 5 Preview State
   const [previewData, setPreviewData] = useState<InitialSyncPreviewDto | null>(null);
@@ -73,6 +62,17 @@ export function AddProjectWizard({
       accounts.some((account) => account.id === currentId) ? currentId : accounts[0]?.id || ''
     );
   }, [accounts]);
+
+  useEffect(() => {
+    if (!isOpen || !remoteProject) return;
+    setCurrentStep(2);
+    setSelectedAccountId(remoteProject.accountId);
+    setProjectName(remoteProject.name);
+    setProjectNameCustomized(true);
+    setLocalPath('');
+    setRemotePath(remoteProject.remotePath);
+    setRemotePathCustomized(true);
+  }, [isOpen, remoteProject]);
 
   // Load preview when entering Step 5
   const handleGoToStep5 = async () => {
@@ -97,22 +97,6 @@ export function AddProjectWizard({
     if (!remotePathCustomized) setRemotePath(defaultRemotePath(path));
   };
 
-  const handleAddRule = () => {
-    if (!newRulePattern.trim()) return;
-    const nextId = Date.now();
-    setRules((prev) => [
-      ...prev,
-      {
-        id: nextId,
-        ruleType: newRuleType,
-        pattern: newRulePattern.trim(),
-        enabled: true,
-        priority: prev.length * 10 + 10,
-      },
-    ]);
-    setNewRulePattern('');
-  };
-
   const handlePickLocalDirectory = async () => {
     try {
       const selected = await api.pickLocalDirectory();
@@ -122,29 +106,20 @@ export function AddProjectWizard({
     }
   };
 
-  const handleBrowseRemote = async () => {
-    if (!selectedAccountId) return;
+  useEffect(() => {
+    if (!isOpen || currentStep !== 3 || !selectedAccountId) return;
+    let cancelled = false;
     setLoadingRemote(true);
     setRemoteBrowseError(null);
     setRemoteBrowseLoaded(false);
-    try {
-      setRemoteEntries(await api.browseRemoteDirectory(selectedAccountId, remoteBrowsePath));
-      setRemoteBrowseLoaded(true);
-    } catch (error: unknown) {
-      setRemoteEntries([]);
-      if (getErrorCode(error) === 'DAV_NOT_FOUND') {
-        setRemoteBrowseLoaded(true);
-      } else {
-        setRemoteBrowseError(getErrorMessage(error));
-      }
-    } finally {
-      setLoadingRemote(false);
-    }
-  };
-
-  const handleRemoveRule = (id?: number) => {
-    setRules((prev) => prev.filter((r) => r.id !== id));
-  };
+    setRemoteEntries([]);
+    api.browseRemoteDirectory(selectedAccountId, remoteBrowsePath).then((entries) => {
+      if (!cancelled) { setRemoteEntries(entries); setRemoteBrowseLoaded(true); }
+    }).catch((error: unknown) => {
+      if (!cancelled) setRemoteBrowseError(getErrorCode(error) === 'DAV_NOT_FOUND' ? '该目录不存在，请返回上级目录。' : getErrorMessage(error));
+    }).finally(() => { if (!cancelled) setLoadingRemote(false); });
+    return () => { cancelled = true; };
+  }, [isOpen, currentStep, selectedAccountId, remoteBrowsePath, remoteBrowseRefresh]);
 
   const handleConfirmCreate = async () => {
     setCreateError(null);
@@ -175,42 +150,100 @@ export function AddProjectWizard({
       title="添加同步项目"
       subtitle="关联本地工作区与 WebDAV 远端路径，并配置文件过滤规则"
       maxWidth="max-w-3xl"
-    >
-      {/* Step Indicator Stepper */}
-      <div className="flex items-center justify-between pb-4 border-b border-slate-200 dark:border-slate-800">
-        {[
-          { step: 1, title: 'WebDAV 节点' },
-          { step: 2, title: '项目名称与目录' },
-          { step: 3, title: '远端路径' },
-          { step: 4, title: '同步规则' },
-          { step: 5, title: '初始预览' },
-        ].map((item) => (
-          <div key={item.step} className="flex items-center gap-2">
-            <span
-              className={`w-6 h-6 rounded-full flex items-center justify-center font-mono text-xs font-semibold ${
-                currentStep === item.step
-                  ? 'bg-indigo-600 text-white shadow-soft-sm'
-                  : currentStep > item.step
-                  ? 'bg-emerald-50 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-700'
-                  : 'bg-slate-100 dark:bg-slate-800 text-slate-500'
-              }`}
+      headerExtra={
+        <div className="flex items-center justify-between">
+          {[
+            { step: 1, title: 'WebDAV 节点' },
+            { step: 2, title: '项目名称与目录' },
+            { step: 3, title: '远端路径' },
+            { step: 4, title: '同步规则' },
+            { step: 5, title: '初始预览' },
+          ].map((item) => (
+            <div key={item.step} className="flex items-center gap-2">
+              <span
+                className={`w-6 h-6 rounded-full flex items-center justify-center font-mono text-xs font-semibold transition-colors ${
+                  currentStep === item.step
+                    ? 'bg-indigo-600 text-white shadow-soft-sm ring-2 ring-indigo-500/20'
+                    : currentStep > item.step
+                    ? 'bg-emerald-50 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-700'
+                    : 'bg-slate-100 dark:bg-slate-800 text-slate-500'
+                }`}
+              >
+                {currentStep > item.step ? '✓' : item.step}
+              </span>
+              <span
+                className={`text-xs transition-colors ${
+                  currentStep === item.step
+                    ? 'text-indigo-700 dark:text-indigo-300 font-semibold'
+                    : currentStep > item.step
+                    ? 'text-slate-700 dark:text-slate-300 font-medium'
+                    : 'text-slate-400 dark:text-slate-500'
+                }`}
+              >
+                {item.title}
+              </span>
+            </div>
+          ))}
+        </div>
+      }
+      footer={
+        <div className="flex items-center justify-between w-full">
+          {currentStep > 1 ? (
+            <Button
+              variant="secondary"
+              size="md"
+              onClick={() => setCurrentStep((prev) => (prev - 1) as 1 | 2 | 3 | 4 | 5)}
+              className="gap-1.5"
             >
-              {currentStep > item.step ? '✓' : item.step}
-            </span>
-            <span
-              className={`text-xs ${
-                currentStep === item.step
-                  ? 'text-indigo-700 dark:text-indigo-300 font-semibold'
-                  : currentStep > item.step
-                  ? 'text-slate-700 dark:text-slate-300'
-                  : 'text-slate-400 dark:text-slate-500'
-              }`}
-            >
-              {item.title}
-            </span>
+              <ArrowLeft className="w-3.5 h-3.5" />
+              上一步
+            </Button>
+          ) : (
+            <div />
+          )}
+
+          <div className="flex items-center gap-2">
+            <Button variant="ghost" size="md" onClick={onClose}>
+              取消
+            </Button>
+
+            {currentStep < 4 ? (
+              <Button
+                variant="primary"
+                size="md"
+                onClick={() => setCurrentStep((prev) => (prev + 1) as 1 | 2 | 3 | 4 | 5)}
+                disabled={currentStep === 1 && !selectedAccountId}
+                className="gap-1.5"
+              >
+                下一步
+                <ArrowRight className="w-3.5 h-3.5" />
+              </Button>
+            ) : currentStep === 4 ? (
+              <Button
+                variant="primary"
+                size="md"
+                onClick={handleGoToStep5}
+                className="gap-1.5"
+              >
+                查看同步预览
+                <ArrowRight className="w-3.5 h-3.5" />
+              </Button>
+            ) : (
+              <Button
+                variant="accent"
+                size="md"
+                onClick={previewData ? handleConfirmCreate : handleGoToStep5}
+                disabled={submitting || loadingPreview || (!previewData && !selectedAccountId)}
+                className="gap-1.5"
+              >
+                {submitting && <LoaderCircle className="h-3.5 w-3.5 animate-spin" />}
+                {submitting ? '正在创建...' : previewData ? '确认并开始同步' : '重新生成预览'}
+              </Button>
+            )}
           </div>
-        ))}
-      </div>
+        </div>
+      }
+    >
 
       {/* Step 1: Select WebDAV Account */}
       {currentStep === 1 && (
@@ -225,7 +258,7 @@ export function AddProjectWizard({
               ) : accounts.map((acc) => (
                 <div
                   key={acc.id}
-                  onClick={() => setSelectedAccountId(acc.id)}
+                  onClick={() => { if (selectedAccountId !== acc.id) setRemoteBrowsePath('/'); setSelectedAccountId(acc.id); }}
                   className={`p-3.5 rounded-xl border cursor-pointer transition-colors flex items-center justify-between ${
                     selectedAccountId === acc.id
                       ? 'bg-indigo-50/70 dark:bg-indigo-950/40 border-indigo-500 text-slate-900 dark:text-slate-100 shadow-soft-sm'
@@ -353,11 +386,11 @@ export function AddProjectWizard({
               </span>
               <div className="flex items-center gap-2">
                 <code className="text-[11px] text-slate-600 dark:text-slate-400">{remoteBrowsePath}</code>
-                <button type="button" onClick={() => { setRemoteBrowsePath(parentRemoteDirectory(remoteBrowsePath)); setRemoteEntries([]); setRemoteBrowseLoaded(false); setRemoteBrowseError(null); }} disabled={remoteBrowsePath === '/'} className="p-1 rounded hover:bg-slate-200 dark:hover:bg-slate-700 disabled:opacity-40" aria-label="上级目录">
+                <button type="button" onClick={() => setRemoteBrowsePath(parentRemoteDirectory(remoteBrowsePath))} disabled={remoteBrowsePath === '/'} className="p-1 rounded hover:bg-slate-200 dark:hover:bg-slate-700 disabled:opacity-40" aria-label="上级目录">
                   <ArrowUp className="w-3.5 h-3.5" />
                 </button>
-                <Button variant="secondary" size="sm" onClick={handleBrowseRemote} disabled={loadingRemote || !selectedAccountId} className="gap-1">
-                  <FolderOpen className="w-3.5 h-3.5" />{loadingRemote ? '读取中' : '浏览'}
+                <Button variant="secondary" size="sm" onClick={() => setRemoteBrowseRefresh((value) => value + 1)} disabled={loadingRemote || !selectedAccountId} className="gap-1">
+                  <FolderOpen className="w-3.5 h-3.5" />{loadingRemote ? '读取中' : '刷新'}
                 </Button>
               </div>
             </div>
@@ -368,79 +401,19 @@ export function AddProjectWizard({
             )}
             {remoteBrowseError && <div role="alert" className="text-[11px] text-rose-600 dark:text-rose-400">{remoteBrowseError}</div>}
             <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg p-2.5 font-mono text-xs text-slate-700 dark:text-slate-300 space-y-1 max-h-40 overflow-y-auto">
-              {remoteEntries.length === 0 ? <div className="text-slate-500">{remoteBrowseLoaded ? '此目录没有可浏览的子项；若目标目录尚不存在，创建同步项目时会自动发送 MKCOL 创建。' : '选择“浏览”读取此目录。点击文件夹可将其设为目标路径。'}</div> : remoteEntries.map((entry) => (
-                <button key={entry.path} type="button" disabled={!entry.isCollection} onClick={() => { setRemotePath(entry.path); setRemotePathCustomized(true); setRemoteBrowsePath(entry.path); setRemoteEntries([]); setRemoteBrowseLoaded(false); setRemoteBrowseError(null); }} className="w-full text-left rounded px-2 py-1 hover:bg-slate-100 dark:hover:bg-slate-800 disabled:opacity-50">
+              {remoteEntries.length === 0 ? <div className="text-slate-500">{loadingRemote ? '正在读取远端目录…' : remoteBrowseLoaded ? '此目录为空。' : remoteBrowseError ? '无法读取目录。' : '正在准备读取远端目录。'}</div> : remoteEntries.map((entry) => (
+                <button key={entry.path} type="button" disabled={!entry.isCollection} onClick={() => setRemoteBrowsePath(entry.path)} className="w-full text-left rounded px-2 py-1 hover:bg-slate-100 dark:hover:bg-slate-800 disabled:opacity-50">
                   {entry.isCollection ? '📁' : '📄'} {entry.name || '/'}{entry.isCollection ? '/' : ''}
                 </button>
               ))}
             </div>
-            <Button variant="ghost" size="sm" onClick={() => { setRemotePath(remoteBrowsePath); setRemotePathCustomized(true); }} className="text-indigo-700 dark:text-indigo-300">使用当前远端目录：{remoteBrowsePath}</Button>
+            <Button variant="ghost" size="sm" disabled={!remoteBrowseLoaded || loadingRemote} onClick={() => { setRemotePath(remoteBrowsePath); setRemotePathCustomized(true); }} className="text-indigo-700 dark:text-indigo-300">使用当前远端目录：{remoteBrowsePath}</Button>
           </div>
         </div>
       )}
 
-      {/* Step 4: Sync Rules Engine */}
       {currentStep === 4 && (
-        <div className="space-y-4 py-2">
-          <div className="flex items-center justify-between">
-            <div className="text-xs font-medium text-slate-700 dark:text-slate-300 flex items-center gap-1.5">
-              <Filter className="w-4 h-4 text-indigo-600 dark:text-indigo-400" />
-              <span>文件过滤规则（自上而下匹配，排除规则优先）</span>
-            </div>
-          </div>
-
-          {/* Add New Rule Inline */}
-          <div className="flex gap-2">
-            <select
-              value={newRuleType}
-              onChange={(e) => setNewRuleType(e.target.value as 'INCLUDE' | 'EXCLUDE')}
-              className="bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-2.5 py-1.5 text-xs text-slate-800 dark:text-slate-200 focus:outline-none focus:border-indigo-500"
-            >
-              <option value="INCLUDE">包含 (INCLUDE)</option>
-              <option value="EXCLUDE">排除 (EXCLUDE)</option>
-            </select>
-            <input
-              type="text"
-              value={newRulePattern}
-              onChange={(e) => setNewRulePattern(e.target.value)}
-              placeholder="Glob 表达式: 如 docs/**, *.md, **/.git/**"
-              className="flex-1 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-1.5 text-xs font-mono text-slate-900 dark:text-slate-100 focus:outline-none focus:border-indigo-500"
-            />
-            <Button variant="secondary" size="sm" onClick={handleAddRule} className="gap-1">
-              <Plus className="w-3.5 h-3.5" />
-              添加
-            </Button>
-          </div>
-
-          {/* Rules List */}
-          <div className="border border-slate-200 dark:border-slate-700 rounded-xl bg-white dark:bg-slate-800 overflow-hidden max-h-56 overflow-y-auto">
-            <div className="divide-y divide-slate-100 dark:divide-slate-700">
-              {rules.map((rule) => (
-                <div key={rule.id} className="p-2.5 flex items-center justify-between text-xs font-mono">
-                  <div className="flex items-center gap-2">
-                    <span
-                      className={`px-1.5 py-0.5 rounded text-[11px] font-semibold ${
-                        rule.ruleType === 'INCLUDE'
-                          ? 'bg-indigo-50 dark:bg-indigo-950 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800'
-                          : 'bg-rose-50 dark:bg-rose-950 text-rose-700 dark:text-rose-300 border border-rose-200 dark:border-rose-800'
-                      }`}
-                    >
-                      {rule.ruleType}
-                    </span>
-                    <span className="text-slate-900 dark:text-slate-100">{rule.pattern}</span>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => handleRemoveRule(rule.id)}
-                    className="text-slate-400 hover:text-rose-600 dark:text-slate-400 dark:hover:text-rose-400 p-1 rounded transition-colors"
-                  >
-                    <Trash2 className="w-3.5 h-3.5" />
-                  </button>
-                </div>
-              ))}
-            </div>
-          </div>
-        </div>
+        <div className="py-2"><RuleEditor rules={rules} onChange={setRules} localPath={localPath} /></div>
       )}
 
       {/* Step 5: Initial Sync Preview & Safety Gate */}
@@ -535,62 +508,6 @@ export function AddProjectWizard({
         </div>
       )}
 
-      {/* Wizard Footer Controls */}
-      <div className="flex items-center justify-between pt-4 border-t border-slate-200 dark:border-slate-800">
-        {currentStep > 1 ? (
-          <Button
-            variant="secondary"
-            size="md"
-            onClick={() => setCurrentStep((prev) => (prev - 1) as 1 | 2 | 3 | 4 | 5)}
-            className="gap-1.5"
-          >
-            <ArrowLeft className="w-3.5 h-3.5" />
-            上一步
-          </Button>
-        ) : (
-          <div />
-        )}
-
-        <div className="flex items-center gap-2">
-          <Button variant="ghost" size="md" onClick={onClose}>
-            取消
-          </Button>
-
-          {currentStep < 4 ? (
-            <Button
-              variant="primary"
-              size="md"
-              onClick={() => setCurrentStep((prev) => (prev + 1) as 1 | 2 | 3 | 4 | 5)}
-              disabled={currentStep === 1 && !selectedAccountId}
-              className="gap-1.5"
-            >
-              下一步
-              <ArrowRight className="w-3.5 h-3.5" />
-            </Button>
-          ) : currentStep === 4 ? (
-            <Button
-              variant="primary"
-              size="md"
-              onClick={handleGoToStep5}
-              className="gap-1.5"
-            >
-              查看同步预览
-              <ArrowRight className="w-3.5 h-3.5" />
-            </Button>
-          ) : (
-            <Button
-              variant="accent"
-              size="md"
-              onClick={previewData ? handleConfirmCreate : handleGoToStep5}
-              disabled={submitting || loadingPreview || (!previewData && !selectedAccountId)}
-              className="gap-1.5"
-            >
-              {submitting && <LoaderCircle className="h-3.5 w-3.5 animate-spin" />}
-              {submitting ? '正在创建...' : previewData ? '确认并开始同步' : '重新生成预览'}
-            </Button>
-          )}
-        </div>
-      </div>
     </Modal>
   );
 }

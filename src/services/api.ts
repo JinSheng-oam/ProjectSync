@@ -475,6 +475,56 @@ export const api = {
     return invoke<RuleImpactDto>('preview_rule_impact', { rootId, rules });
   },
 
+  async explainSyncRule(path: string, rules: SyncRuleDto[]): Promise<string> {
+    if (!isTauriEnv) {
+      const normalizedPath = path.trim().replace(/\\/g, '/').replace(/^\/+/, '');
+      if (!normalizedPath) return '请输入有效的文件相对路径。';
+
+      if (normalizedPath.split('/').some(p => p.toLowerCase() === '.projectsync')) {
+        return 'ProjectSync 内部元数据目录不会同步。';
+      }
+
+      const enabledRules = rules.filter((r) => r.enabled);
+      const excludeRules = enabledRules.filter((r) => r.ruleType === 'EXCLUDE');
+      const includeRules = enabledRules.filter((r) => r.ruleType === 'INCLUDE');
+
+      const matchGlob = (pat: string, targetStr: string) => {
+        let p = pat.trim().replace(/\\/g, '/');
+        const special = ['.', '+', '^', '$', '(', ')', '{', '}', '|', '[', ']'];
+        for (const char of special) {
+          p = p.split(char).join('\\' + char);
+        }
+        p = p.split('**').join('.*');
+        p = p.split('*').join('[^/]*');
+        p = p.split('?').join('.');
+        try {
+          const reg = new RegExp('^' + p + '$', 'i');
+          return reg.test(targetStr) || reg.test('/' + targetStr) || new RegExp(p, 'i').test(targetStr);
+        } catch {
+          return false;
+        }
+      };
+
+      for (const rule of excludeRules) {
+        if (matchGlob(rule.pattern, normalizedPath)) {
+          return `文件将被【排除】：命中排除规则「${rule.pattern}」（排除规则优先判定）。`;
+        }
+      }
+
+      if (includeRules.length > 0) {
+        const matched = includeRules.find((rule) => matchGlob(rule.pattern, normalizedPath));
+        if (matched) {
+          return `文件将被【同步】：命中包含规则「${matched.pattern}」。`;
+        }
+        return `文件将被【忽略】：已开启白名单过滤（${includeRules.length} 条包含规则），该路径未命中任何包含规则。`;
+      }
+
+      return '文件将被【同步】：未命中任何排除规则，且未限制包含范围。';
+    }
+    const { invoke } = await import('@tauri-apps/api/core');
+    return invoke<string>('explain_sync_rule', { path, rules });
+  },
+
   async pickLocalDirectory(): Promise<string | null> {
     if (!isTauriEnv) return null;
     const { open } = await import('@tauri-apps/plugin-dialog');

@@ -7,7 +7,7 @@ use crate::{
         TaskDto, WebDavAccountDto, WebDavAccountInput, WebDavCapabilities,
     },
     filesystem::{scan_local, RuleEngine},
-    security::{normalize_remote_path, validate_webdav_url},
+    security::{normalize_remote_path, validate_relative_path, validate_webdav_url},
     webdav::href_to_dav_path,
 };
 use serde::{Deserialize, Serialize};
@@ -194,31 +194,165 @@ pub async fn browse_remote_directory(
     api(async {
         let path = normalize_remote_path(&path)?;
         let (_, client) = state.sync.client_for(&account_id).await?;
-        let entries = match client.propfind(&path, 1).await {
-            Ok(entries) => entries,
-            Err(error) if error.code == "DAV_NOT_FOUND" => return Ok(Vec::new()),
-            Err(error) => return Err(error),
-        };
-        entries
+        let entries = client.propfind(&path, 1).await?;
+        let mut result = Vec::new();
+        for entry in entries {
+            let remote_path = href_to_dav_path(&client, &entry.path, &path)?;
+            if !is_direct_remote_child(&path, &remote_path) {
+                continue;
+            }
+            let name = remote_path
+                .rsplit('/')
+                .next()
+                .unwrap_or_default()
+                .to_owned();
+            result.push(RemoteEntryDto {
+                path: remote_path,
+                name,
+                is_collection: entry.is_collection,
+                size: entry.size,
+                modified_at: entry.modified_at,
+                etag: entry.etag,
+            });
+        }
+        result.sort_by(|a, b| {
+            b.is_collection
+                .cmp(&a.is_collection)
+                .then_with(|| a.name.to_lowercase().cmp(&b.name.to_lowercase()))
+                .then_with(|| a.name.cmp(&b.name))
+        });
+        Ok(result)
+    }
+    .await)
+}
+
+fn is_direct_remote_child(parent: &str, child: &str) -> bool {
+    let prefix = if parent == "/" {
+        "/".to_owned()
+    } else {
+        format!("{parent}/")
+    };
+    child
+        .strip_prefix(&prefix)
+        .is_some_and(|name| !name.is_empty() && !name.contains('/'))
+}
+
+#[cfg(test)]
+mod browse_tests {
+    use super::is_direct_remote_child;
+
+    #[test]
+    fn only_immediate_children_are_listed() {
+        assert!(!is_direct_remote_child("/", "/"));
+        assert!(is_direct_remote_child("/", "/projects"));
+        assert!(!is_direct_remote_child("/", "/projects/nested"));
+        assert!(!is_direct_remote_child("/projects", "/projects"));
+        assert!(is_direct_remote_child("/projects", "/projects/中文 文件"));
+        assert!(!is_direct_remote_child(
+            "/projects",
+            "/projects/nested/file"
+        ));
+        assert!(!is_direct_remote_child("/projects", "/projects-other/file"));
+    }
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DiscoveredProject {
+    account_id: String,
+    remote_path: String,
+    remote_project_id: String,
+    name: String,
+}
+
+#[tauri::command]
+pub async fn discover_remote_projects(
+    state: State<'_, AppState>,
+    account_id: String,
+) -> ApiResult<Vec<DiscoveredProject>> {
+    api(async {
+        let (_, client) = state.sync.client_for(&account_id).await?;
+        let bound = state
+            .db
+            .roots()
+            .await?
             .into_iter()
-            .map(|entry| {
-                let remote_path = href_to_dav_path(&client, &entry.path, &path)?;
-                let name = remote_path
-                    .trim_end_matches('/')
+            .map(|r| r.remote_project_id)
+            .collect::<HashSet<_>>();
+        let mut queue = std::collections::VecDeque::from(["/".to_owned()]);
+        let mut seen = HashSet::new();
+        let mut result = Vec::new();
+        while let Some(path) = queue.pop_front() {
+            if !seen.insert(path.clone()) {
+                continue;
+            }
+            if seen.len() > 500 {
+                return Err(crate::domain::AppError::new(
+                    "DISCOVERY_LIMIT",
+                    "远端目录超过 500 项，无法完成项目发现",
+                ));
+            }
+            let entries = client.propfind(&path, 1).await?;
+            for entry in entries.into_iter().filter(|e| e.is_collection) {
+                let child = href_to_dav_path(&client, &entry.path, &path)?;
+                if !is_direct_remote_child(&path, &child) {
+                    continue;
+                }
+                if child
                     .rsplit('/')
                     .next()
-                    .unwrap_or_default()
-                    .to_owned();
-                Ok(RemoteEntryDto {
-                    path: remote_path,
-                    name,
-                    is_collection: entry.is_collection,
-                    size: entry.size,
-                    modified_at: entry.modified_at,
-                    etag: entry.etag,
-                })
-            })
-            .collect()
+                    .is_some_and(|name| name.eq_ignore_ascii_case(".projectsync"))
+                {
+                    let manifest_path = format!("{}/root.json", child);
+                    match client.get_bytes(&manifest_path).await {
+                        Ok(bytes) => {
+                            let value: serde_json::Value =
+                                serde_json::from_slice(&bytes).map_err(|_| {
+                                    crate::domain::AppError::new(
+                                        "DAV_INVALID_RESPONSE",
+                                        "远端项目标识格式无效",
+                                    )
+                                })?;
+                            let id = value
+                                .get("remote_project_id")
+                                .and_then(|v| v.as_str())
+                                .filter(|v| !v.trim().is_empty())
+                                .ok_or_else(|| {
+                                    crate::domain::AppError::new(
+                                        "DAV_INVALID_RESPONSE",
+                                        "远端项目标识缺失",
+                                    )
+                                })?;
+                            if value.get("schema_version").and_then(|v| v.as_u64()) != Some(1) {
+                                return Err(crate::domain::AppError::new(
+                                    "DAV_INVALID_RESPONSE",
+                                    "远端项目标识版本不支持",
+                                ));
+                            }
+                            if !bound.contains(id) {
+                                result.push(DiscoveredProject {
+                                    account_id: account_id.clone(),
+                                    remote_path: path.clone(),
+                                    remote_project_id: id.to_owned(),
+                                    name: path
+                                        .rsplit('/')
+                                        .next()
+                                        .filter(|s| !s.is_empty())
+                                        .unwrap_or("远端项目")
+                                        .to_owned(),
+                                });
+                            }
+                        }
+                        Err(e) if e.code == "DAV_NOT_FOUND" => {}
+                        Err(e) => return Err(e),
+                    }
+                } else {
+                    queue.push_back(child);
+                }
+            }
+        }
+        result.sort_by(|a, b| a.remote_path.cmp(&b.remote_path));
+        Ok(result)
     }
     .await)
 }
@@ -400,6 +534,33 @@ pub async fn replace_sync_rules(
 }
 
 #[tauri::command]
+pub fn explain_sync_rule(path: String, rules: Vec<SyncRuleDto>) -> ApiResult<String> {
+    api((|| {
+        let path = validate_relative_path(&path.replace('\\', "/"))?;
+        let engine = RuleEngine::compile(&rules)?;
+        if path
+            .split('/')
+            .any(|part| part.eq_ignore_ascii_case(".projectsync"))
+        {
+            return Ok("ProjectSync 内部目录不会同步。".to_string());
+        }
+        for rule in rules
+            .iter()
+            .filter(|r| r.enabled && r.rule_type == crate::domain::RuleType::Exclude)
+        {
+            if !RuleEngine::compile(std::slice::from_ref(rule))?.includes(&path) {
+                return Ok(format!("不会同步：匹配排除规则 {}", rule.pattern));
+            }
+        }
+        if engine.includes(&path) {
+            Ok("会纳入同步范围；实际操作还取决于文件状态及同步预览。".to_string())
+        } else {
+            Ok("不会同步：未匹配任何启用的包含规则。".to_string())
+        }
+    })())
+}
+
+#[tauri::command]
 pub async fn preview_rule_impact(
     state: State<'_, AppState>,
     root_id: String,
@@ -416,8 +577,10 @@ pub async fn preview_rule_impact(
             .into_iter()
             .map(|entry| entry.relative_path)
             .collect::<HashSet<_>>();
-        let newly_included = new.difference(&old).cloned().collect::<Vec<_>>();
-        let newly_excluded = old.difference(&new).cloned().collect::<Vec<_>>();
+        let mut newly_included = new.difference(&old).cloned().collect::<Vec<_>>();
+        let mut newly_excluded = old.difference(&new).cloned().collect::<Vec<_>>();
+        newly_included.sort();
+        newly_excluded.sort();
         let unchanged = old.intersection(&new).count() as u64;
         Ok(RuleImpactDto {
             newly_included,
@@ -607,12 +770,15 @@ async fn setting_bool(state: &AppState, key: &str, default: bool) -> bool {
 
 pub fn register_commands(builder: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
     builder.invoke_handler(tauri::generate_handler![
+        crate::ai_scope::list_ai_scope_paths,
+        crate::ai_scope::suggest_ai_scope,
         list_webdav_accounts,
         create_webdav_account,
         update_webdav_account,
         delete_webdav_account,
         test_webdav_connection,
         browse_remote_directory,
+        discover_remote_projects,
         list_sync_roots,
         create_sync_root,
         update_sync_root,
@@ -630,6 +796,7 @@ pub fn register_commands(builder: tauri::Builder<tauri::Wry>) -> tauri::Builder<
         get_sync_rules,
         replace_sync_rules,
         preview_rule_impact,
+        explain_sync_rule,
         list_files,
         list_conflicts,
         get_conflict_detail,

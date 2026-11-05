@@ -11,13 +11,16 @@ import {
   Settings2,
 } from 'lucide-react';
 import { Button, StatusBadge, formatDisplayPath } from '../../components/common/UIComponents';
-import { SyncRootDto } from '../../types/dto';
+import { DiscoveredProject, SyncRootDto, WebDavAccountDto } from '../../types/dto';
+import { RemoteProjects } from './RemoteProjects';
 import emptySyncIllustration from '../../assets/empty-sync-indigo.png';
 
 type ProjectFilter = 'all' | 'active' | 'paused' | 'attention';
 
 interface ProjectManagementViewProps {
   roots: SyncRootDto[];
+  accounts: WebDavAccountDto[];
+  onBindRemote: (project: DiscoveredProject) => void;
   onOpenDetail: (rootId: string) => void;
   onOpenWizard: () => void;
   onSyncNow: (rootId: string) => void;
@@ -63,6 +66,8 @@ function getLastSyncLabel(timestamp?: number): string {
 
 export function ProjectManagementView({
   roots,
+  accounts,
+  onBindRemote,
   onOpenDetail,
   onOpenWizard,
   onSyncNow,
@@ -115,6 +120,8 @@ export function ProjectManagementView({
           <span>添加同步项目</span>
         </Button>
       </div>
+
+      <RemoteProjects accounts={accounts} roots={roots} onBind={onBindRemote} />
 
       {/* Filter Tabs & Search Bar */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">

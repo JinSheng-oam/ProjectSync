@@ -217,3 +217,5 @@ export interface RuleImpactDto {
   newlyExcluded: string[];
   unchanged: number;
 }
+
+export interface DiscoveredProject { accountId: string; remotePath: string; remoteProjectId: string; name: string; }

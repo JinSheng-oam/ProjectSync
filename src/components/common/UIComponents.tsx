@@ -41,14 +41,14 @@ export function StatusBadge({ status, pulse = false }: { status: SyncRootStatus 
       );
     case 'ONLINE':
       return (
-        <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-xs font-medium whitespace-nowrap shrink-0 select-none bg-emerald-50 dark:bg-emerald-950/80 text-emerald-800 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800/60">
+        <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded text-xs font-medium whitespace-nowrap shrink-0 select-none bg-emerald-50 dark:bg-emerald-950/80 text-emerald-800 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800/60">
           <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 dark:bg-emerald-400" />
           在线
         </span>
       );
     case 'OFFLINE':
       return (
-        <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-xs font-medium whitespace-nowrap shrink-0 select-none bg-slate-100 dark:bg-slate-900 text-slate-600 dark:text-slate-400 border border-slate-300 dark:border-slate-700">
+        <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded text-xs font-medium whitespace-nowrap shrink-0 select-none bg-slate-100 dark:bg-slate-900 text-slate-600 dark:text-slate-400 border border-slate-300 dark:border-slate-700">
           <span className="w-1.5 h-1.5 rounded-full bg-slate-400 dark:bg-slate-500" />
           离线
         </span>
@@ -171,6 +171,9 @@ export function Modal({
   children,
   onClose,
   maxWidth = 'max-w-2xl',
+  headerExtra,
+  footer,
+  bodyClassName = 'p-6 space-y-4',
 }: {
   isOpen: boolean;
   title: string;
@@ -178,16 +181,19 @@ export function Modal({
   children: React.ReactNode;
   onClose: () => void;
   maxWidth?: string;
+  headerExtra?: React.ReactNode;
+  footer?: React.ReactNode;
+  bodyClassName?: string;
 }) {
   if (!isOpen) return null;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/50 dark:bg-black/80 backdrop-blur-sm animate-in fade-in duration-150">
       <div
-        className={`bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-soft-lg w-full ${maxWidth} flex flex-col max-h-[90vh] overflow-hidden`}
+        className={`bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-soft-lg w-full ${maxWidth} flex flex-col max-h-[88vh] overflow-hidden`}
         role="dialog"
       >
-        <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200 dark:border-slate-800 bg-slate-50/70 dark:bg-slate-950/60">
+        <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200 dark:border-slate-800 bg-slate-50/70 dark:bg-slate-950/60 shrink-0">
           <div>
             <h2 className="text-base font-semibold text-slate-900 dark:text-slate-100">{title}</h2>
             {subtitle && <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">{subtitle}</p>}
@@ -200,9 +206,19 @@ export function Modal({
             ✕
           </button>
         </div>
-        <div className="p-6 overflow-y-auto space-y-4 text-slate-800 dark:text-slate-200 text-sm">
+        {headerExtra && (
+          <div className="px-6 py-3 border-b border-slate-200 dark:border-slate-800 bg-slate-50/40 dark:bg-slate-900/40 shrink-0">
+            {headerExtra}
+          </div>
+        )}
+        <div className={`overflow-y-auto text-slate-800 dark:text-slate-200 text-sm flex-1 ${bodyClassName}`}>
           {children}
         </div>
+        {footer && (
+          <div className="px-6 py-3.5 border-t border-slate-200 dark:border-slate-800 bg-slate-50/70 dark:bg-slate-950/60 shrink-0">
+            {footer}
+          </div>
+        )}
       </div>
     </div>
   );
