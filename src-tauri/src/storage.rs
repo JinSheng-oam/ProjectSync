@@ -14,6 +14,14 @@ pub struct Database {
     path: PathBuf,
 }
 
+#[derive(Debug, Clone)]
+pub struct ConflictCopyArtifact {
+    pub source_path: String,
+    pub local_hash: Option<String>,
+    pub local_copy_path: Option<String>,
+    pub remote_copy_path: Option<String>,
+}
+
 impl Database {
     pub async fn open(path: &Path) -> AppResult<Self> {
         if let Some(parent) = path.parent() {
@@ -450,11 +458,11 @@ impl Database {
         }
         let now = unix_ms();
         for file in local {
-            sqlx::query("INSERT INTO sync_files(root_id,relative_path,path_key,local_exists,local_hash,local_size,local_mtime_ns,last_observed_at,created_at,updated_at) VALUES(?,?,?,1,?,?,?,?,?,?) ON CONFLICT(root_id,path_key) DO UPDATE SET relative_path=excluded.relative_path,local_exists=1,local_hash=excluded.local_hash,local_size=excluded.local_size,local_mtime_ns=excluded.local_mtime_ns,last_observed_at=excluded.last_observed_at,updated_at=excluded.updated_at")
+            sqlx::query("INSERT INTO sync_files(root_id,relative_path,path_key,local_exists,local_hash,local_size,local_mtime_ns,last_observed_at,created_at,updated_at) VALUES(?,?,?,1,?,?,?,?,?,?) ON CONFLICT(root_id,path_key) DO UPDATE SET sync_state=CASE WHEN sync_state='LINE_ENDINGS_EQUIVALENT' AND local_hash IS NOT excluded.local_hash THEN 'UNKNOWN' ELSE sync_state END,relative_path=excluded.relative_path,local_exists=1,local_hash=excluded.local_hash,local_size=excluded.local_size,local_mtime_ns=excluded.local_mtime_ns,last_observed_at=excluded.last_observed_at,updated_at=excluded.updated_at")
                 .bind(root_id).bind(&file.relative_path).bind(&file.path_key).bind(&file.hash).bind(file.size as i64).bind(file.mtime_ns).bind(now).bind(now).bind(now).execute(&mut *tx).await?;
         }
         for file in remote {
-            sqlx::query("INSERT INTO sync_files(root_id,relative_path,path_key,remote_exists,remote_hash,remote_etag,remote_size,remote_mtime_ms,last_observed_at,created_at,updated_at) VALUES(?,?,?,1,?,?,?,?,?,?,?) ON CONFLICT(root_id,path_key) DO UPDATE SET relative_path=excluded.relative_path,remote_exists=1,remote_hash=excluded.remote_hash,remote_etag=excluded.remote_etag,remote_size=excluded.remote_size,remote_mtime_ms=excluded.remote_mtime_ms,last_observed_at=excluded.last_observed_at,updated_at=excluded.updated_at")
+            sqlx::query("INSERT INTO sync_files(root_id,relative_path,path_key,remote_exists,remote_hash,remote_etag,remote_size,remote_mtime_ms,last_observed_at,created_at,updated_at) VALUES(?,?,?,1,?,?,?,?,?,?,?) ON CONFLICT(root_id,path_key) DO UPDATE SET sync_state=CASE WHEN sync_state='LINE_ENDINGS_EQUIVALENT' AND remote_hash IS NOT excluded.remote_hash THEN 'UNKNOWN' ELSE sync_state END,relative_path=excluded.relative_path,remote_exists=1,remote_hash=excluded.remote_hash,remote_etag=excluded.remote_etag,remote_size=excluded.remote_size,remote_mtime_ms=excluded.remote_mtime_ms,last_observed_at=excluded.last_observed_at,updated_at=excluded.updated_at")
                 .bind(root_id).bind(&file.relative_path).bind(&file.path_key).bind(&file.hash).bind(&file.etag).bind(file.size as i64).bind(file.modified_at).bind(now).bind(now).bind(now).execute(&mut *tx).await?;
         }
         if local_complete && remote_complete {
@@ -508,9 +516,13 @@ impl Database {
                 let remote_exists = r.get::<i64, _>("remote_exists") != 0;
                 let local_hash: Option<String> = r.get("local_hash");
                 let remote_hash: Option<String> = r.get("remote_hash");
-                let state = if r.get::<String, _>("sync_state") == "IGNORED" {
+                let sync_state = r.get::<String, _>("sync_state");
+                let state = if sync_state == "IGNORED" {
                     "IGNORED"
-                } else if local_exists && remote_exists && local_hash == remote_hash {
+                } else if local_exists
+                    && remote_exists
+                    && (local_hash == remote_hash || sync_state == "LINE_ENDINGS_EQUIVALENT")
+                {
                     "IN_SYNC"
                 } else if local_exists
                     && remote_exists
@@ -740,24 +752,21 @@ impl Database {
         Ok((id, true))
     }
 
-    pub async fn conflict_copy_path(&self, id: &str) -> AppResult<Option<String>> {
-        let row = sqlx::query("SELECT local_snapshot_path FROM sync_conflicts WHERE id=?")
-            .bind(id)
-            .fetch_optional(&self.pool)
-            .await?
-            .ok_or_else(|| AppError::new("CONFLICT_NOT_FOUND", "冲突不存在"))?;
-        Ok(row.get("local_snapshot_path"))
-    }
-
-    pub async fn set_conflict_copy_paths(
+    pub async fn conflict_copy_artifacts(
         &self,
-        id: &str,
-        local_path: Option<&str>,
-        remote_path: Option<&str>,
-    ) -> AppResult<()> {
-        sqlx::query("UPDATE sync_conflicts SET local_snapshot_path=?,conflict_copy_path=?,updated_at=? WHERE id=?")
-            .bind(local_path).bind(remote_path).bind(unix_ms()).bind(id).execute(&self.pool).await?;
-        Ok(())
+        root_id: &str,
+    ) -> AppResult<Vec<ConflictCopyArtifact>> {
+        let rows = sqlx::query("SELECT relative_path,local_hash,local_snapshot_path,conflict_copy_path FROM sync_conflicts WHERE root_id=? AND (status='UNRESOLVED' OR resolution IS NOT NULL)")
+            .bind(root_id).fetch_all(&self.pool).await?;
+        Ok(rows
+            .iter()
+            .map(|row| ConflictCopyArtifact {
+                source_path: row.get("relative_path"),
+                local_hash: row.get("local_hash"),
+                local_copy_path: row.get("local_snapshot_path"),
+                remote_copy_path: row.get("conflict_copy_path"),
+            })
+            .collect())
     }
 
     pub async fn conflicts(
@@ -860,6 +869,19 @@ impl Database {
         if result.rows_affected() == 0 {
             return Err(AppError::new("CONFLICT_NOT_FOUND", "冲突不存在或已解决"));
         }
+        Ok(())
+    }
+
+    pub async fn resolve_conflicts_for_path(&self, root_id: &str, path: &str) -> AppResult<()> {
+        let now = unix_ms();
+        sqlx::query("UPDATE sync_conflicts SET status='RESOLVED',resolution='CONTENT_MATCH',resolved_at=?,updated_at=? WHERE root_id=? AND lower(relative_path)=lower(?) AND status='UNRESOLVED'")
+            .bind(now).bind(now).bind(root_id).bind(path).execute(&self.pool).await?;
+        Ok(())
+    }
+
+    pub async fn mark_line_endings_equivalent(&self, root_id: &str, path: &str) -> AppResult<()> {
+        sqlx::query("UPDATE sync_files SET sync_state='LINE_ENDINGS_EQUIVALENT',updated_at=? WHERE root_id=? AND path_key=?")
+            .bind(unix_ms()).bind(root_id).bind(path.to_lowercase()).execute(&self.pool).await?;
         Ok(())
     }
 

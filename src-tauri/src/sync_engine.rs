@@ -11,14 +11,15 @@ use crate::{
         scan_local_cached, RuleEngine,
     },
     security::{normalize_remote_path, path_key, unix_ms, validate_relative_path},
-    storage::Database,
+    storage::{ConflictCopyArtifact, Database},
     webdav::{href_to_dav_path, PutCondition, WebDavClient},
 };
 use futures_util::StreamExt;
 use serde::{Deserialize, Serialize};
 use std::{
-    collections::{BTreeSet, HashMap},
+    collections::{BTreeSet, HashMap, HashSet},
     fs,
+    io::{Read, Write},
     path::{Path, PathBuf},
     sync::{
         atomic::{AtomicBool, Ordering},
@@ -448,8 +449,26 @@ impl SyncCoordinator {
                 Err(error) if error.code == "DAV_NOT_FOUND" => Vec::new(),
                 Err(error) => return Err(error),
             };
+        let line_ending_equivalent = line_ending_equivalent_paths(
+            &client,
+            &normalized_remote,
+            &local,
+            &remote,
+            &[],
+            &self.data_dir,
+        )
+        .await?;
         let root_id = format!("preview-{}", uuid::Uuid::new_v4().simple());
-        let plan = build_plan(&local, &remote, &[], rules, true, true, &capabilities);
+        let plan = build_plan(
+            &local,
+            &remote,
+            &[],
+            &line_ending_equivalent,
+            rules,
+            true,
+            true,
+            &capabilities,
+        );
         Ok(preview_from_plan(&root_id, plan))
     }
 
@@ -591,16 +610,38 @@ impl SyncCoordinator {
         self.db
             .apply_rule_state(&root.id, &ignored, &reenabled)
             .await?;
+        let conflict_copy_artifacts = self.db.conflict_copy_artifacts(&root.id).await?;
+        let (local_conflict_copy_hashes, remote_conflict_copy_hashes) =
+            prepare_conflict_copy_filters(&self.data_dir, root, &conflict_copy_artifacts);
         self.db.set_root_status(&root.id, "SCANNING_LOCAL").await?;
-        let local = scan_local_cached(&root.local_path, &rules, &old_baseline)?;
+        let mut local = scan_local_cached(&root.local_path, &rules, &old_baseline)?;
+        local.retain(|entry| {
+            local_conflict_copy_hashes
+                .get(&entry.path_key)
+                .is_none_or(|expected| expected != &entry.hash)
+        });
         self.ensure_sync_active(&root.id).await?;
         self.db.set_root_status(&root.id, "SCANNING_REMOTE").await?;
-        let remote = scan_remote(
+        let mut remote = scan_remote(
             &client,
             &root.remote_path,
             &rules,
             &self.data_dir,
             &old_baseline,
+        )
+        .await?;
+        remote.retain(|entry| {
+            remote_conflict_copy_hashes
+                .get(&entry.path_key)
+                .is_none_or(|expected| expected != &entry.hash)
+        });
+        let line_ending_equivalent = line_ending_equivalent_paths(
+            &client,
+            &root.remote_path,
+            &local,
+            &remote,
+            &old_baseline,
+            &self.data_dir,
         )
         .await?;
         self.ensure_sync_active(&root.id).await?;
@@ -616,6 +657,7 @@ impl SyncCoordinator {
             &local,
             &remote,
             &baseline,
+            &line_ending_equivalent,
             &rules,
             true,
             true,
@@ -685,6 +727,19 @@ impl SyncCoordinator {
                             item.remote.as_ref(),
                         )
                         .await?;
+                    if item.local.is_some()
+                        && item.remote.is_some()
+                        && line_ending_equivalent.contains(&path_key(&item.path))
+                    {
+                        self.db
+                            .mark_line_endings_equivalent(&root.id, &item.path)
+                            .await?;
+                    }
+                    if item.local.is_some() && item.remote.is_some() {
+                        self.db
+                            .resolve_conflicts_for_path(&root.id, &item.path)
+                            .await?;
+                    }
                     self.db
                         .reconcile_tasks_for_path(&root.id, &item.path, true)
                         .await?;
@@ -697,86 +752,6 @@ impl SyncCoordinator {
                         .and_then(|b| b.base_hash.as_deref());
                     let (conflict_id, created) =
                         self.db.create_conflict(&root.id, &item, base).await?;
-                    if self.db.conflict_copy_path(&conflict_id).await?.is_none() {
-                        let mut local_copy_rel = None;
-                        if let Some(local) = item.local.as_ref() {
-                            if hash_file(&local.absolute_path).ok().as_deref()
-                                == Some(local.hash.as_str())
-                            {
-                                let candidate = crate::filesystem::unique_conflict_path(
-                                    &item.path,
-                                    &self.db.device_name().await?,
-                                );
-                                if let Ok(conflict_path) = candidate {
-                                    if let Ok(target) =
-                                        ensure_safe_parent(&root.local_path, &conflict_path)
-                                    {
-                                        if crate::filesystem::copy_create_new(
-                                            &local.absolute_path,
-                                            &target,
-                                        )
-                                        .is_ok()
-                                        {
-                                            local_copy_rel = Some(conflict_path);
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                        let mut remote_copy_rel = None;
-                        if let (Some(local_path), true) =
-                            (&local_copy_rel, capabilities.safe_create_only)
-                        {
-                            if let Ok(source) = ensure_safe_parent(&root.local_path, local_path) {
-                                if let Ok(remote_copy) =
-                                    remote_file_path(&root.remote_path, local_path)
-                                {
-                                    if ensure_remote_parent(&client, &remote_copy).await.is_ok()
-                                        && put_remote_create_only(
-                                            &client,
-                                            &source,
-                                            &remote_copy,
-                                            &capabilities,
-                                            &self.data_dir,
-                                            None,
-                                        )
-                                        .await
-                                        .is_ok()
-                                    {
-                                        let source_hash = item
-                                            .local
-                                            .as_ref()
-                                            .map(|v| v.hash.as_str())
-                                            .unwrap_or_default();
-                                        if verify_remote_hash(
-                                            &client,
-                                            &remote_copy,
-                                            &self.data_dir,
-                                            source_hash,
-                                        )
-                                        .await
-                                        .is_ok()
-                                        {
-                                            remote_copy_rel = Some(remote_copy);
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                        let marker = local_copy_rel
-                            .as_deref()
-                            .or_else(|| item.local.is_none().then_some("NONE"));
-                        if marker.is_some() {
-                            let _ = self
-                                .db
-                                .set_conflict_copy_paths(
-                                    &conflict_id,
-                                    marker,
-                                    remote_copy_rel.as_deref(),
-                                )
-                                .await;
-                        }
-                    }
                     summary.conflicts += 1;
                     if created {
                         self.emit("sync://conflict-created",serde_json::json!({"conflictId":conflict_id,"rootId":root.id,"path":item.path,"conflictType":item.conflict}));
@@ -1804,6 +1779,44 @@ impl SyncCoordinator {
             ));
         }
 
+        if instruction == "__DIRECT_USER_EDIT__" {
+            let base_content = current_content.unwrap_or(&record.merged_content);
+            if base_content.len() > AI_MERGE_OUTPUT_LIMIT {
+                return Err(AppError::new(
+                    "AI_RESPONSE_INVALID",
+                    "编辑后的合并内容超过 256 KiB，请缩小文件后重试",
+                ));
+            }
+            let (root_id, path, _, _, _, _) = self.db.conflict_record(conflict_id).await?;
+            let root = self.db.root(&root_id).await?;
+            let target = ensure_safe_parent(&root.local_path, &path)?;
+            let local_meta = fs::metadata(&target).map_err(|_| AppError::new("LOCAL_NOT_FOUND", "本地冲突版本不存在"))?;
+
+            record.merged_content = base_content.to_string();
+            record.suggestions = Some("已保存用户在编辑器中手动调整的代码内容。".to_string());
+            record.created_at = unix_ms();
+            tokio::fs::write(
+                &preview_path,
+                serde_json::to_vec(&record)
+                    .map_err(|error| AppError::new("SERIALIZATION_ERROR", error.to_string()))?,
+            )
+            .await?;
+            return Ok(AiMergePreviewDto {
+                preview_id: preview_id.to_string(),
+                conflict_id: conflict_id.to_owned(),
+                relative_path: path,
+                merged_content: record.merged_content,
+                local_content: record.local_content.clone(),
+                remote_content: record.remote_content.clone(),
+                suggestions: record.suggestions,
+                local_size: local_meta.len(),
+                remote_size: local_meta.len(),
+                model: record.model.clone(),
+                created_at: record.created_at,
+                expires_at: record.created_at.saturating_add(AI_MERGE_PREVIEW_TTL_MS),
+            });
+        }
+
         let (root_id, path, _, _, _, _) = self.db.conflict_record(conflict_id).await?;
         let root = self.db.root(&root_id).await?;
         let target = ensure_safe_parent(&root.local_path, &path)?;
@@ -1896,6 +1909,12 @@ impl SyncCoordinator {
         let root = self.db.root(&root_id).await?;
         let (account, client) = self.client_for(&root.account_id).await?;
         let capabilities = account.capabilities.unwrap_or_else(unsafe_capabilities);
+        if !capabilities.safe_update_existing {
+            return Err(AppError::new(
+                "BLOCKED_SERVER_CAPABILITY",
+                "当前 WebDAV 未通过 If-Match 或独占写锁的安全覆盖验证，不能写入远端；请启用条件写入或 LOCK 后重新检测连接能力。",
+            ));
+        }
         let target = ensure_safe_parent(&root.local_path, &path)?;
         if !target.is_file() || hash_file(&target)? != preview.local_hash {
             return Err(AppError::retryable(
@@ -1934,23 +1953,54 @@ impl SyncCoordinator {
                     "生成预览后远端内容发生变化，请重新合并",
                 ));
             }
+            let mut merged_file = fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(&merged_stage)
+                .map_err(|error| {
+                    local_file_operation_error("创建合并暂存文件失败", &merged_stage, error)
+                })?;
+            merged_file
+                .write_all(preview.merged_content.as_bytes())
+                .map_err(|error| {
+                    local_file_operation_error("写入合并暂存文件失败", &merged_stage, error)
+                })?;
+            merged_file.sync_all().map_err(|error| {
+                local_file_operation_error("刷新合并暂存文件失败", &merged_stage, error)
+            })?;
+            drop(merged_file);
+            let merged_hash = hash_file(&merged_stage)?;
+
             let _local_backup = copy_to_trash(
                 &self.data_dir,
                 &root.id,
                 &path,
                 "before-ai-merge-local",
                 &target,
-            )?;
+            )
+            .map_err(|mut error| {
+                error.message = format!(
+                    "备份本地原文件失败（{}）：{}",
+                    target.display(),
+                    error.message
+                );
+                error
+            })?;
             let _remote_backup = copy_to_trash(
                 &self.data_dir,
                 &root.id,
                 &path,
                 "before-ai-merge-remote",
                 &remote_stage,
-            )?;
-            fs::write(&merged_stage, preview.merged_content.as_bytes())?;
-            fs::File::open(&merged_stage)?.sync_all()?;
-            let merged_hash = hash_file(&merged_stage)?;
+            )
+            .map_err(|mut error| {
+                error.message = format!(
+                    "备份远端原文件到本地回收站失败（{}）：{}",
+                    remote_stage.display(),
+                    error.message
+                );
+                error
+            })?;
             put_remote_update(
                 &client,
                 &merged_stage,
@@ -2062,6 +2112,23 @@ fn unsafe_capabilities() -> WebDavCapabilities {
         probe_cleanup_warning: None,
         tested_at: 0,
     }
+}
+
+fn local_file_operation_error(context: &str, path: &Path, error: std::io::Error) -> AppError {
+    let code = match error.kind() {
+        std::io::ErrorKind::PermissionDenied => "LOCAL_PERMISSION_DENIED",
+        std::io::ErrorKind::NotFound => "LOCAL_NOT_FOUND",
+        _ => "LOCAL_IO_ERROR",
+    };
+    AppError::new(
+        code,
+        format!("{context}：{}（路径：{}）", error, path.display()),
+    )
+    .with_details(serde_json::json!({
+        "path": path.to_string_lossy(),
+        "kind": format!("{:?}", error.kind()),
+        "osCode": error.raw_os_error(),
+    }))
 }
 
 fn parse_manifest(bytes: &[u8]) -> AppResult<RootManifest> {
@@ -2394,6 +2461,248 @@ async fn read_remote_snapshot(
     })
 }
 
+fn line_ending_insensitive_hash(path: &Path) -> AppResult<Option<String>> {
+    let mut file = fs::File::open(path)?;
+    let mut buffer = [0_u8; 128 * 1024];
+    let mut utf8_tail = Vec::with_capacity(4);
+    let mut normalized = Vec::with_capacity(buffer.len() + 1);
+    let mut pending_cr = false;
+    let mut hasher = blake3::Hasher::new();
+
+    loop {
+        let read = file.read(&mut buffer)?;
+        if read == 0 {
+            break;
+        }
+        let bytes = &buffer[..read];
+        if bytes.contains(&0) {
+            return Ok(None);
+        }
+
+        let mut validation = Vec::with_capacity(utf8_tail.len() + read);
+        validation.extend_from_slice(&utf8_tail);
+        validation.extend_from_slice(bytes);
+        match std::str::from_utf8(&validation) {
+            Ok(_) => utf8_tail.clear(),
+            Err(error) if error.error_len().is_some() => return Ok(None),
+            Err(error) => {
+                utf8_tail.clear();
+                utf8_tail.extend_from_slice(&validation[error.valid_up_to()..]);
+            }
+        }
+
+        normalized.clear();
+        for byte in bytes {
+            if pending_cr {
+                normalized.push(b'\n');
+                pending_cr = false;
+                if *byte == b'\n' {
+                    continue;
+                }
+            }
+            if *byte == b'\r' {
+                pending_cr = true;
+            } else {
+                normalized.push(*byte);
+            }
+        }
+        hasher.update(&normalized);
+    }
+
+    if !utf8_tail.is_empty() {
+        return Ok(None);
+    }
+    if pending_cr {
+        hasher.update(b"\n");
+    }
+    Ok(Some(hasher.finalize().to_hex().to_string()))
+}
+
+async fn line_ending_equivalent_paths(
+    client: &WebDavClient,
+    root_path: &str,
+    local: &[LocalEntry],
+    remote: &[RemoteEntry],
+    baseline: &[crate::domain::BaselineEntry],
+    data_dir: &Path,
+) -> AppResult<HashSet<String>> {
+    let remote_by_path = remote
+        .iter()
+        .map(|entry| (entry.path_key.as_str(), entry))
+        .collect::<HashMap<_, _>>();
+    let baseline_by_path = baseline
+        .iter()
+        .map(|entry| (entry.path_key.as_str(), entry))
+        .collect::<HashMap<_, _>>();
+    let mut equivalent = HashSet::new();
+
+    for local_entry in local {
+        let Some(remote_entry) = remote_by_path.get(local_entry.path_key.as_str()) else {
+            continue;
+        };
+        if local_entry.relative_path != remote_entry.relative_path
+            || local_entry.hash == remote_entry.hash
+        {
+            continue;
+        }
+        if let Some(base) = baseline_by_path.get(local_entry.path_key.as_str()) {
+            if base.baseline_state == "PRESENT"
+                && (Some(local_entry.hash.as_str()) == base.base_hash.as_deref()
+                    || Some(remote_entry.hash.as_str()) == base.base_hash.as_deref())
+            {
+                continue;
+            }
+        }
+        let Some(local_normalized_hash) =
+            line_ending_insensitive_hash(&local_entry.absolute_path)?
+        else {
+            continue;
+        };
+        if hash_file(&local_entry.absolute_path)? != local_entry.hash {
+            continue;
+        }
+
+        let remote_path = remote_file_path(root_path, &remote_entry.relative_path)?;
+        let staging = data_dir
+            .join("staging")
+            .join(format!("line-ending-check-{}.bin", uuid::Uuid::new_v4()));
+        if let Some(parent) = staging.parent() {
+            tokio::fs::create_dir_all(parent).await?;
+        }
+        let remote_normalized_hash = async {
+            client.get_to_file(&remote_path, &staging).await?;
+            if hash_file(&staging)? != remote_entry.hash {
+                return Ok::<_, AppError>(None);
+            }
+            line_ending_insensitive_hash(&staging)
+        }
+        .await;
+        let _ = tokio::fs::remove_file(&staging).await;
+        let Some(remote_normalized_hash) = remote_normalized_hash? else {
+            continue;
+        };
+        if local_normalized_hash == remote_normalized_hash
+            && hash_file(&local_entry.absolute_path)? == local_entry.hash
+        {
+            equivalent.insert(local_entry.path_key.clone());
+        }
+    }
+
+    Ok(equivalent)
+}
+
+fn is_generated_conflict_copy_for(source_path: &str, candidate_path: &str) -> bool {
+    let source = Path::new(source_path);
+    let candidate = Path::new(candidate_path);
+    if source.parent() != candidate.parent() || source.extension() != candidate.extension() {
+        return false;
+    }
+    let Some(source_stem) = source.file_stem().and_then(|value| value.to_str()) else {
+        return false;
+    };
+    let Some(candidate_stem) = candidate.file_stem().and_then(|value| value.to_str()) else {
+        return false;
+    };
+    let prefix = format!("{source_stem}.conflict-");
+    let Some(suffix) = candidate_stem.strip_prefix(&prefix) else {
+        return false;
+    };
+    let parts = suffix.split('-').collect::<Vec<_>>();
+    if parts.len() < 3 {
+        return false;
+    }
+    let device = parts[..parts.len() - 2].join("-");
+    let timestamp = parts[parts.len() - 2].as_bytes();
+    let token = parts[parts.len() - 1];
+    !device.is_empty()
+        && device.len() <= 24
+        && device
+            .chars()
+            .all(|value| value.is_ascii_alphanumeric() || value == '-' || value == '_')
+        && timestamp.len() == 16
+        && timestamp[8] == b'T'
+        && timestamp[15] == b'Z'
+        && timestamp
+            .iter()
+            .enumerate()
+            .all(|(index, value)| index == 8 || index == 15 || value.is_ascii_digit())
+        && matches!(token.len(), 6 | 32)
+        && token.chars().all(|value| value.is_ascii_hexdigit())
+}
+
+fn prepare_conflict_copy_filters(
+    data_dir: &Path,
+    root: &RootRecord,
+    artifacts: &[ConflictCopyArtifact],
+) -> (HashMap<String, String>, HashMap<String, String>) {
+    let mut local_copies = HashMap::new();
+    let mut remote_copies = HashMap::new();
+    let remote_root = normalize_remote_path(&root.remote_path).ok();
+
+    for artifact in artifacts {
+        let Some(expected_hash) = artifact.local_hash.as_deref() else {
+            continue;
+        };
+        let mut known_auto_local_copy = false;
+        if let Some(copy_path) = artifact
+            .local_copy_path
+            .as_deref()
+            .filter(|value| *value != "NONE")
+        {
+            if is_generated_conflict_copy_for(&artifact.source_path, copy_path) {
+                let copy = ensure_safe_parent(&root.local_path, copy_path);
+                if let Ok(copy) = copy {
+                    match fs::symlink_metadata(&copy) {
+                        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                            known_auto_local_copy = true;
+                        }
+                        Ok(meta)
+                            if meta.is_file()
+                                && !meta.file_type().is_symlink()
+                                && hash_file(&copy).ok().as_deref() == Some(expected_hash) =>
+                        {
+                            known_auto_local_copy = true;
+                            match move_to_trash(data_dir, &root.id, copy_path, &copy) {
+                                Ok(_) => {
+                                    local_copies
+                                        .insert(path_key(copy_path), expected_hash.to_owned());
+                                }
+                                Err(error) => tracing::warn!(
+                                    path = %copy_path,
+                                    error = %error,
+                                    "could not move duplicate conflict copy to app trash"
+                                ),
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+            }
+        }
+
+        if !known_auto_local_copy {
+            continue;
+        }
+        let Some((remote_root, remote_copy)) = remote_root.as_deref().zip(
+            artifact.remote_copy_path.as_deref(),
+        ) else {
+            continue;
+        };
+        let prefix = format!("{}/", remote_root.trim_end_matches('/'));
+        let Some(remote_relative) = remote_copy.strip_prefix(&prefix) else {
+            continue;
+        };
+        let Ok(remote_relative) = validate_relative_path(remote_relative) else {
+            continue;
+        };
+        if is_generated_conflict_copy_for(&artifact.source_path, &remote_relative) {
+            remote_copies.insert(path_key(&remote_relative), expected_hash.to_owned());
+        }
+    }
+
+    (local_copies, remote_copies)
+}
+
 async fn scan_remote(
     client: &WebDavClient,
     root_path: &str,
@@ -2538,6 +2847,7 @@ fn build_plan(
     local: &[LocalEntry],
     remote: &[RemoteEntry],
     baseline: &[crate::domain::BaselineEntry],
+    line_ending_equivalent: &HashSet<String>,
     rules: &[SyncRuleDto],
     local_complete: bool,
     remote_complete: bool,
@@ -2588,14 +2898,19 @@ fn build_plan(
         let base_hash = b.and_then(|v| v.base_hash.as_deref());
         match (l, r) {
             (Some(local), Some(remote)) => {
-                if local.hash == remote.hash {
+                let line_endings_only = line_ending_equivalent.contains(&key);
+                if local.hash == remote.hash || line_endings_only {
                     plan.push(plan_item(
                         &path,
                         SyncAction::MarkClean,
                         None,
                         Some((*local).clone()),
                         Some((*remote).clone()),
-                        "两端内容一致",
+                        if line_endings_only {
+                            "两端仅换行符格式不同，视为内容一致"
+                        } else {
+                            "两端内容一致"
+                        },
                     ));
                     continue;
                 }

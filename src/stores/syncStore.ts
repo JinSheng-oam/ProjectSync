@@ -9,6 +9,7 @@ import {
   AiMergePreviewDto,
 } from '../types/dto';
 import { api } from '../services/api';
+import { getErrorMessage } from '../services/errorMessage';
 
 export type ActiveNav =
   | 'overview'
@@ -289,7 +290,7 @@ export function useSyncStore() {
         };
       });
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : String(err);
+      const msg = getErrorMessage(err, '生成 AI 合并预览失败');
       setAiSession((prev) => {
         if (!prev || prev.conflictId !== conflict.id) return prev;
         return {
@@ -346,7 +347,7 @@ export function useSyncStore() {
         };
       });
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : String(err);
+      const msg = getErrorMessage(err, 'AI 调整合并内容失败');
       setAiSession((prev) => {
         if (!prev) return null;
         return {
@@ -363,22 +364,24 @@ export function useSyncStore() {
     const { conflictId, preview } = aiSession;
     setAiSession((prev) => (prev ? { ...prev, status: 'applying' } : null));
     try {
+      let activePreviewId = preview.previewId;
       if (finalContent && finalContent !== preview.mergedContent) {
-        // Apply manual refinement if user edited content before saving
-        await api.refineAiMerge({
+        // Direct save of manual user edits into preview without re-invoking the LLM
+        const refined = await api.refineAiMerge({
           conflictId,
           previewId: preview.previewId,
-          instruction: '应用用户手动编辑的代码内容',
+          instruction: '__DIRECT_USER_EDIT__',
           currentContent: finalContent,
         });
+        activePreviewId = refined.previewId;
       }
-      const result = await api.applyAiMerge(conflictId, preview.previewId);
+      const result = await api.applyAiMerge(conflictId, activePreviewId);
       setBannerAlert(result.message);
       setTimeout(() => setBannerAlert(null), 7000);
       setAiSession(null);
       await refreshAll();
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : String(err);
+      const msg = getErrorMessage(err, '写入本地与 WebDAV 失败');
       setAiSession((prev) => (prev ? { ...prev, status: 'ready', error: msg } : null));
     }
   };
