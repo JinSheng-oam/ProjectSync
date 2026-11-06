@@ -12,6 +12,7 @@ import { SettingsView } from './features/settings/SettingsView';
 import { AddProjectWizard } from './features/wizard/AddProjectWizard';
 import { ProjectManagementView } from './features/projects/ProjectManagementView';
 import { AiSettingsView } from './features/ai/AiSettingsView';
+import { AiMergeModal } from './features/ai/AiMergeModal';
 
 export function App() {
   const {
@@ -165,11 +166,7 @@ export function App() {
                   onExcludeFile={handleExcludeConflictFile}
                   aiSession={aiSession}
                   onStartAiMerge={startAiMerge}
-                  onRefineAiMerge={refineAiMerge}
-                  onApplyAiMerge={applyAiMerge}
-                  onCloseAiMergeModal={() => setAiSessionOpen(false)}
                   onOpenAiMergeModal={() => setAiSessionOpen(true)}
-                  onCancelAiMerge={cancelAiMerge}
                   onOpenAiSettings={() => setCurrentNav('ai')}
                 />
               )}
@@ -200,6 +197,17 @@ export function App() {
         onClose={() => { setIsWizardOpen(false); setRemoteProject(null); }}
         accounts={accounts}
         onProjectCreated={refreshAll}
+      />
+
+      {/* Global AI Merge & Agent Workspace Modal */}
+      <AiMergeModal
+        session={aiSession}
+        projectName={roots.find((r) => r.id === conflicts.find((c) => c.id === aiSession?.conflictId)?.rootId)?.name || 'ProjectSync'}
+        onRefine={refineAiMerge}
+        onApply={applyAiMerge}
+        onClose={() => setAiSessionOpen(false)}
+        onCancel={cancelAiMerge}
+        onOpenAiSettings={() => setCurrentNav('ai')}
       />
     </div>
   );
