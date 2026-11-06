@@ -29,7 +29,7 @@ impl RuleEngine {
             }
             let glob = GlobBuilder::new(pattern)
                 .literal_separator(true)
-                .backslash_escape(false)
+                .backslash_escape(true)
                 .case_insensitive(true)
                 .build()
                 .map_err(|e| AppError::new("RULE_INVALID", format!("Glob 规则无效：{e}")))?;
@@ -122,6 +122,12 @@ pub fn scan_local_cached(
                     return false;
                 }
             };
+            if relative
+                .split('/')
+                .any(|part| part.eq_ignore_ascii_case(".projectsync"))
+            {
+                return false;
+            }
             if rule_engine.is_excluded(&relative, file_type.is_dir() || file_type.is_symlink()) {
                 return false;
             }

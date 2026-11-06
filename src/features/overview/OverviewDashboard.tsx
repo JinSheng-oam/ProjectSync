@@ -25,6 +25,7 @@ interface OverviewDashboardProps {
   onResume: (rootId: string) => void;
   onEnable: (rootId: string) => void;
   onRetryTask: (taskId: string) => void;
+  onCancelTask: (taskId: string) => void;
 }
 
 export function OverviewDashboard({
@@ -40,6 +41,7 @@ export function OverviewDashboard({
   onResume,
   onEnable,
   onRetryTask,
+  onCancelTask,
 }: OverviewDashboardProps) {
   const unresolvedConflicts = conflicts.filter((c) => c.status === 'UNRESOLVED');
   const onlineAccounts = accounts.filter((a) => a.status === 'ONLINE');
@@ -187,7 +189,7 @@ export function OverviewDashboard({
       </div>
 
       {/* Live Transfer Telemetry Queue */}
-      <ActiveTransferQueue tasks={tasks} onRetryTask={onRetryTask} />
+      <ActiveTransferQueue tasks={tasks} onRetryTask={onRetryTask} onCancelTask={onCancelTask} />
     </div>
   );
 }

@@ -15,15 +15,18 @@ import {
   Check,
   RotateCcw,
   Minimize2,
+  EyeOff,
 } from 'lucide-react';
-import { AiSettingsDto, ConflictItemDto, ConflictResolution } from '../../types/dto';
+import { AiSettingsDto, ConflictItemDto, ConflictResolution, SyncRootDto } from '../../types/dto';
 import { Button } from '../../components/common/UIComponents';
 import { api } from '../../services/api';
 import { AiMergeSession } from '../../stores/syncStore';
 
 interface ConflictCenterProps {
   conflicts: ConflictItemDto[];
+  roots: SyncRootDto[];
   onResolve: (conflictId: string, resolution: ConflictResolution) => Promise<void>;
+  onExcludeFile: (conflictId: string) => Promise<void>;
   aiSession?: AiMergeSession | null;
   onStartAiMerge: (conflict: ConflictItemDto) => Promise<void>;
   onRefineAiMerge: (instruction: string, currentContent?: string) => Promise<void>;
@@ -36,7 +39,9 @@ interface ConflictCenterProps {
 
 export function ConflictCenter({
   conflicts,
+  roots,
   onResolve,
+  onExcludeFile,
   aiSession,
   onStartAiMerge,
   onRefineAiMerge,
@@ -58,12 +63,17 @@ export function ConflictCenter({
   } | null>(null);
   const [processing, setProcessing] = useState(false);
   const [aiSettings, setAiSettings] = useState<AiSettingsDto | null>(null);
+  const [excludeConfirmation, setExcludeConfirmation] = useState<{ id: string; path: string } | null>(null);
 
   // Local draft content for manual edits in the merge modal
   const [localDraftContent, setLocalDraftContent] = useState('');
   const [agentInstruction, setAgentInstruction] = useState('');
+  const [aiSourceView, setAiSourceView] = useState<'merged' | 'local' | 'remote'>('merged');
 
   const activeConflict = conflicts.find((c) => c.id === selectedId) || unresolvedConflicts[0];
+  const activeProjectName = activeConflict
+    ? roots.find((root) => root.id === activeConflict.rootId)?.name
+    : undefined;
 
   useEffect(() => {
     let active = true;
@@ -80,12 +90,29 @@ export function ConflictCenter({
     }
   }, [aiSession?.preview]);
 
+  useEffect(() => {
+    setAiSourceView('merged');
+  }, [aiSession?.conflictId, aiSession?.preview?.previewId]);
+
   const handleApplyResolution = async () => {
     if (!confirmResolution) return;
     setProcessing(true);
     try {
       await onResolve(confirmResolution.id, confirmResolution.resolution);
       setConfirmResolution(null);
+    } finally {
+      setProcessing(false);
+    }
+  };
+
+  const handleApplyExclusion = async () => {
+    if (!excludeConfirmation) return;
+    setProcessing(true);
+    try {
+      await onExcludeFile(excludeConfirmation.id);
+      setExcludeConfirmation(null);
+    } catch {
+      // Keep the confirmation open so the user can retry after the error banner.
     } finally {
       setProcessing(false);
     }
@@ -99,6 +126,13 @@ export function ConflictCenter({
   };
 
   const isAiMergingThis = aiSession && aiSession.conflictId === activeConflict?.id;
+  const aiPreview = aiSession?.preview;
+  const aiSourceContent = aiSourceView === 'merged'
+    ? localDraftContent
+    : aiSourceView === 'local'
+      ? aiPreview?.localContent ?? ''
+      : aiPreview?.remoteContent ?? '';
+  const isOriginalAiSource = aiSourceView !== 'merged';
 
   return (
     <div className="space-y-6 max-w-7xl mx-auto">
@@ -193,14 +227,14 @@ export function ConflictCenter({
           {activeConflict && (
             <div className="lg:col-span-8 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 shadow-soft-sm space-y-5 transition-colors">
               {/* Target File Info */}
-              <div className="flex items-start justify-between pb-4 border-b border-slate-200 dark:border-slate-800">
+              <div className="flex items-start justify-between gap-3 pb-4 border-b border-slate-200 dark:border-slate-800">
                 <div className="space-y-1 min-w-0">
                   <div className="flex items-center gap-2">
                     <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100 font-mono truncate">
                       {activeConflict.relativePath}
                     </h3>
                     <span className="text-xs font-mono px-2 py-0.5 rounded bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700">
-                      项目 ID: {activeConflict.rootId}
+                      项目: {activeProjectName || activeConflict.rootId}
                     </span>
                   </div>
                   <div className="text-xs text-amber-700 dark:text-amber-400 font-mono flex items-center gap-2">
@@ -209,6 +243,14 @@ export function ConflictCenter({
                     <span>拦截时间: {new Date(activeConflict.detectedAt).toLocaleString()}</span>
                   </div>
                 </div>
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  className="gap-1.5 shrink-0"
+                  onClick={() => setExcludeConfirmation({ id: activeConflict.id, path: activeConflict.relativePath })}
+                >
+                  <EyeOff className="w-3.5 h-3.5" /> 排除此文件
+                </Button>
               </div>
 
               {/* Three-Way Comparison Grid: Local Version vs WebDAV Remote Version */}
@@ -433,6 +475,32 @@ export function ConflictCenter({
         </div>
       )}
 
+      {excludeConfirmation && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/50 dark:bg-black/80 backdrop-blur-sm animate-in fade-in duration-150">
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-soft-lg w-full max-w-lg p-6 space-y-4">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 flex items-center justify-center text-slate-700 dark:text-slate-300 shrink-0">
+                <EyeOff className="w-5 h-5" />
+              </div>
+              <div>
+                <h3 className="text-base font-semibold text-slate-900 dark:text-slate-100">将此文件加入排除规则？</h3>
+                <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">该文件以后不会参与此项目的同步</p>
+              </div>
+            </div>
+            <div className="text-xs text-slate-700 dark:text-slate-300 bg-slate-50 dark:bg-slate-800 p-3.5 rounded-xl border border-slate-200 dark:border-slate-700 leading-relaxed space-y-1.5">
+              <p className="font-mono break-all">{excludeConfirmation.path}</p>
+              <p>本地和远端现有文件都会保留，只有这个相对路径会被排除。</p>
+            </div>
+            <div className="flex items-center justify-end gap-3 pt-2">
+              <Button variant="secondary" size="md" onClick={() => setExcludeConfirmation(null)} disabled={processing}>返回</Button>
+              <Button variant="primary" size="md" onClick={handleApplyExclusion} disabled={processing}>
+                {processing ? '正在更新规则…' : '确认排除文件'}
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Confirmation Modal for Standard Conflict Action */}
       {confirmResolution && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/50 dark:bg-black/80 backdrop-blur-sm animate-in fade-in duration-150">
@@ -513,26 +581,57 @@ export function ConflictCenter({
               </div>
             </div>
 
-            {/* Split Workspace Body: Left Code Editor (7 cols) + Right Agent Instructions & Chinese Suggestions (5 cols) */}
+            {/* Split Workspace Body: source/merge review + Agent conversation */}
             <div className="grid grid-cols-1 lg:grid-cols-12 gap-0 flex-1 min-h-0 overflow-hidden divide-y lg:divide-y-0 lg:divide-x divide-slate-200 dark:divide-slate-800">
-              {/* Left Column: Editable Merged Content (7 Cols) */}
+              {/* Left Column: original versions and editable merged result */}
               <div className="lg:col-span-7 flex flex-col min-h-0 bg-slate-50/40 dark:bg-slate-900/40 relative">
-                <div className="flex items-center justify-between px-4 py-2.5 border-b border-slate-200 dark:border-slate-800 bg-slate-100/60 dark:bg-slate-800/40 text-xs shrink-0">
-                  <span className="font-semibold text-slate-800 dark:text-slate-200 flex items-center gap-1.5">
-                    <span>最终合并代码</span>
-                    <span className="text-[11px] font-normal text-slate-500 dark:text-slate-400">(可直接手动微调)</span>
-                  </span>
-                  <span className="font-mono text-[11px] text-slate-500 dark:text-slate-400">
-                    {localDraftContent.length} 字符 · {localDraftContent.split('\n').length} 行
-                  </span>
+                <div className="px-4 py-2.5 border-b border-slate-200 dark:border-slate-800 bg-slate-100/60 dark:bg-slate-800/40 text-xs shrink-0">
+                  <div className="flex items-center justify-between gap-3">
+                    <span className="font-semibold text-slate-800 dark:text-slate-200">
+                      {aiSourceView === 'merged' ? '最终合并代码' : aiSourceView === 'local' ? '本地原文件' : '远端冲突文件'}
+                    </span>
+                    <span className="font-mono text-[11px] text-slate-500 dark:text-slate-400">
+                      {aiSourceContent.length} 字符 · {aiSourceContent.split('\n').length} 行
+                      {isOriginalAiSource ? ' · 只读' : ' · 可编辑'}
+                    </span>
+                  </div>
+                  <div className="mt-2 flex flex-wrap gap-1.5" role="group" aria-label="选择查看内容">
+                    {([
+                      { id: 'merged', label: '合并结果', available: true },
+                      { id: 'local', label: '本地原文件', available: typeof aiPreview?.localContent === 'string' },
+                      { id: 'remote', label: '远端冲突文件', available: typeof aiPreview?.remoteContent === 'string' },
+                    ] as const).map((tab) => (
+                      <button
+                        key={tab.id}
+                        type="button"
+                        aria-pressed={aiSourceView === tab.id}
+                        disabled={!tab.available}
+                        onClick={() => setAiSourceView(tab.id)}
+                        className={`rounded-lg border px-2.5 py-1 text-[11px] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-1 dark:focus-visible:ring-offset-slate-900 disabled:cursor-not-allowed disabled:opacity-40 ${
+                          aiSourceView === tab.id
+                            ? 'border-indigo-200 bg-white font-medium text-indigo-700 shadow-sm dark:border-indigo-800 dark:bg-slate-900 dark:text-indigo-300'
+                            : 'border-transparent text-slate-500 hover:border-slate-200 hover:bg-white/70 hover:text-slate-800 dark:text-slate-400 dark:hover:border-slate-700 dark:hover:bg-slate-900'
+                        }`}
+                      >
+                        {tab.label}
+                      </button>
+                    ))}
+                  </div>
                 </div>
 
                 <div className="flex-1 p-3 min-h-0 relative">
                   <textarea
-                    aria-label="AI 合并代码预览与编辑"
-                    value={localDraftContent}
-                    onChange={(e) => setLocalDraftContent(e.target.value)}
-                    className="w-full h-full resize-none rounded-xl border border-slate-200 bg-white p-3 font-mono text-xs leading-relaxed text-slate-900 outline-none focus:border-indigo-500 dark:border-slate-700 dark:bg-slate-950/70 dark:text-slate-100 transition-colors"
+                    aria-label={aiSourceView === 'merged' ? 'AI 合并代码预览与编辑' : aiSourceView === 'local' ? '本地冲突原文件只读预览' : '远端冲突原文件只读预览'}
+                    value={aiSourceContent}
+                    readOnly={isOriginalAiSource}
+                    onChange={(e) => {
+                      if (!isOriginalAiSource) setLocalDraftContent(e.target.value);
+                    }}
+                    className={`w-full h-full resize-none rounded-xl border border-slate-200 p-3 font-mono text-xs leading-relaxed outline-none transition-colors dark:border-slate-700 dark:text-slate-100 ${
+                      isOriginalAiSource
+                        ? 'cursor-default bg-slate-100/80 text-slate-600 dark:bg-slate-950/50 dark:text-slate-300'
+                        : 'bg-white text-slate-900 focus:border-indigo-500 dark:bg-slate-950/70'
+                    }`}
                     placeholder={aiSession.status === 'merging' ? 'AI 正在分析并生成合并代码...' : '合并内容为空'}
                   />
 
@@ -547,33 +646,20 @@ export function ConflictCenter({
                 </div>
               </div>
 
-              {/* Right Column: AI Suggestions & Agent Command Interactive Panel (5 Cols) */}
+              {/* Right Column: Agent conversation and command input */}
               <div className="lg:col-span-5 flex flex-col min-h-0 bg-white dark:bg-slate-900">
                 <div className="flex items-center justify-between px-4 py-2.5 border-b border-slate-200 dark:border-slate-800 bg-slate-50/70 dark:bg-slate-800/50 text-xs shrink-0">
                   <span className="font-semibold text-slate-800 dark:text-slate-200 flex items-center gap-1.5">
                     <Bot className="w-4 h-4 text-indigo-600 dark:text-indigo-400" />
-                    <span>AI 合并建议与指令 (Agent)</span>
+                    <span>AI 合并对话</span>
                   </span>
                   <span className="text-[11px] text-slate-500 dark:text-slate-400">
-                    {aiSession.messages.length} 条记录
+                    {aiSession.messages.length} 条消息
                   </span>
                 </div>
 
                 {/* Messages & Suggestions Scrollable Box */}
                 <div className="flex-1 p-4 space-y-3.5 overflow-y-auto min-h-0 text-xs">
-                  {/* Primary Chinese Suggestions Card */}
-                  {aiSession.suggestions && (
-                    <div className="p-3.5 rounded-xl border border-emerald-200 dark:border-emerald-800/80 bg-emerald-50/60 dark:bg-emerald-950/30 text-emerald-950 dark:text-emerald-100 space-y-1.5 shadow-soft-sm">
-                      <div className="font-semibold text-xs flex items-center gap-1.5 text-emerald-800 dark:text-emerald-300">
-                        <Sparkles className="w-3.5 h-3.5 text-emerald-600" />
-                        <span>AI 中文合并建议与说明:</span>
-                      </div>
-                      <div className="text-xs leading-relaxed whitespace-pre-wrap font-sans text-slate-700 dark:text-slate-200">
-                        {aiSession.suggestions}
-                      </div>
-                    </div>
-                  )}
-
                   {/* Agent Dialog Stream */}
                   {aiSession.messages.map((msg) => (
                     <div

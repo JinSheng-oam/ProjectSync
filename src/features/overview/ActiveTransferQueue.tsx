@@ -1,8 +1,8 @@
-import { ArrowUpRight, ArrowDownLeft, ShieldCheck, Clock, RefreshCw } from 'lucide-react';
+import { ArrowUpRight, ArrowDownLeft, ShieldCheck, Clock, RefreshCw, X } from 'lucide-react';
 import { TaskDto } from '../../types/dto';
 import { Button } from '../../components/common/UIComponents';
 
-export function ActiveTransferQueue({ tasks, onRetryTask }: { tasks: TaskDto[]; onRetryTask: (taskId: string) => void }) {
+export function ActiveTransferQueue({ tasks, onRetryTask, onCancelTask }: { tasks: TaskDto[]; onRetryTask: (taskId: string) => void; onCancelTask: (taskId: string) => void }) {
   const visibleTasks = tasks.filter((task) => task.status !== 'Succeeded' && task.status !== 'Cancelled');
   const activeCount = visibleTasks.filter((task) => task.status === 'Running' || task.status === 'Pending' || task.status === 'RetryWait').length;
 
@@ -68,6 +68,10 @@ export function ActiveTransferQueue({ tasks, onRetryTask }: { tasks: TaskDto[]; 
                     {task.status === 'Failed' || task.status === 'Blocked' ? (
                       <Button variant="secondary" size="sm" onClick={() => onRetryTask(task.id)} className="gap-1">
                         <RefreshCw className="w-3 h-3" /> 重试
+                      </Button>
+                    ) : task.status === 'Running' && (task.action.startsWith('Upload') || task.action.startsWith('Download')) ? (
+                      <Button variant="secondary" size="sm" onClick={() => onCancelTask(task.id)} className="gap-1 text-rose-700 dark:text-rose-300">
+                        <X className="w-3 h-3" /> 取消此文件
                       </Button>
                     ) : (
                       <span className="text-indigo-700 dark:text-indigo-300 font-semibold w-12 text-right">

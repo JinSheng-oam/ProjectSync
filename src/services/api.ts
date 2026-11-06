@@ -154,6 +154,24 @@ class MockEngine {
     return { success: true, message };
   }
 
+  async excludeConflictFile(conflictId: string): Promise<{ success: boolean; message: string }> {
+    await this.delay(200);
+    const index = this.conflicts.findIndex((conflict) => conflict.id === conflictId);
+    if (index < 0) throw new Error('Conflict item not found or already resolved.');
+    const conflict = this.conflicts[index];
+    const rules = this.rules[conflict.rootId] || [];
+    if (!rules.some((rule) => rule.enabled && rule.ruleType === 'EXCLUDE' && rule.pattern === conflict.relativePath)) {
+      this.rules[conflict.rootId] = [...rules, {
+        ruleType: 'EXCLUDE',
+        pattern: conflict.relativePath,
+        enabled: true,
+        priority: Math.max(0, ...rules.map((rule) => rule.priority)) + 1,
+      }];
+    }
+    this.conflicts.splice(index, 1);
+    return { success: true, message: `已将 ${conflict.relativePath} 加入排除规则；本地和远端现有文件均保留，后续同步将跳过此文件。` };
+  }
+
   async listWebDavAccounts(): Promise<WebDavAccountDto[]> {
     await this.delay(100);
     return [...this.accounts];
@@ -342,6 +360,14 @@ export const api = {
     return mockEngine.resolveConflict(conflictId, resolution);
   },
 
+  async excludeConflictFile(conflictId: string): Promise<{ success: boolean; message: string }> {
+    if (isTauriEnv) {
+      const { invoke } = await import('@tauri-apps/api/core');
+      return invoke('exclude_conflict_file', { conflictId });
+    }
+    return mockEngine.excludeConflictFile(conflictId);
+  },
+
   async listWebDavAccounts(): Promise<WebDavAccountDto[]> {
     if (isTauriEnv) {
       const { invoke } = await import('@tauri-apps/api/core');
@@ -480,6 +506,12 @@ export const api = {
     if (!isTauriEnv) return null;
     const { invoke } = await import('@tauri-apps/api/core');
     return invoke('retry_failed_task', { taskId });
+  },
+
+  async cancelSyncTask(taskId: string) {
+    if (!isTauriEnv) return null;
+    const { invoke } = await import('@tauri-apps/api/core');
+    return invoke('cancel_sync_task', { taskId });
   },
 
   async previewRuleImpact(rootId: string, rules: SyncRuleDto[]): Promise<RuleImpactDto> {
@@ -641,6 +673,8 @@ export const api = {
         conflictId,
         relativePath: 'docs/merge-preview.md',
         mergedContent: '# 合并预览\n\n本地与远端内容已合并。',
+        localContent: '# 本地版本\n\n这里显示本地冲突文件原文。',
+        remoteContent: '# 远端版本\n\n这里显示 WebDAV 上的冲突文件原文。',
         suggestions: '检测到本地新增了部分实现逻辑，远端更新了配置说明。已合并双方有效变更，请审阅下方的代码或在右侧发送指令继续微调。',
         localSize: 1024,
         remoteSize: 1280,
@@ -660,6 +694,8 @@ export const api = {
         conflictId: input.conflictId,
         relativePath: 'docs/merge-preview.md',
         mergedContent: (input.currentContent || '# 合并预览\n\n本地与远端内容已合并。') + `\n\n// [AI Agent 修改记录]: 已按指令「${input.instruction}」调整`,
+        localContent: '# 本地版本\n\n这里显示本地冲突文件原文。',
+        remoteContent: '# 远端版本\n\n这里显示 WebDAV 上的冲突文件原文。',
         suggestions: `已根据您的指令「${input.instruction}」对合并内容进行修改，请继续审阅。如需进一步微调可继续输入。`,
         localSize: 1024,
         remoteSize: 1280,

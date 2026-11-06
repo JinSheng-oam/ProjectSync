@@ -224,6 +224,15 @@ export function useSyncStore() {
     }
   };
 
+  const handleCancelTask = async (taskId: string) => {
+    try {
+      await api.cancelSyncTask(taskId);
+      await refreshAll();
+    } catch (error: unknown) {
+      setBannerAlert(`取消当前文件失败：${error instanceof Error ? error.message : String(error)}`);
+    }
+  };
+
   const handleResolveConflict = async (conflictId: string, res: ConflictResolution) => {
     try {
       const resResult = await api.resolveConflict(conflictId, res);
@@ -232,6 +241,18 @@ export function useSyncStore() {
       await refreshAll();
     } catch (e: unknown) {
       alert((e as Error).message);
+    }
+  };
+
+  const handleExcludeConflictFile = async (conflictId: string) => {
+    try {
+      const result = await api.excludeConflictFile(conflictId);
+      setBannerAlert(result.message);
+      setTimeout(() => setBannerAlert(null), 7000);
+      await refreshAll();
+    } catch (error: unknown) {
+      setBannerAlert(`加入排除规则失败：${error instanceof Error ? error.message : String(error)}`);
+      throw error;
     }
   };
 
@@ -410,7 +431,9 @@ export function useSyncStore() {
     handleResumeSync,
     handleEnableSync,
     handleRetryTask,
+    handleCancelTask,
     handleResolveConflict,
+    handleExcludeConflictFile,
     handlePreviewAiMerge,
     handleApplyAiMerge,
     aiSession,

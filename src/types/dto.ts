@@ -219,7 +219,7 @@ export interface RuleImpactDto {
   unchanged: number;
 }
 
-export interface DiscoveredProject { accountId: string; remotePath: string; remoteProjectId: string; name: string; }
+export interface DiscoveredProject { accountId: string; remotePath: string; remoteProjectId: string | null; name: string; }
 
 export interface AiSettingsDto {
   endpoint: string;
@@ -248,6 +248,8 @@ export interface AiMergePreviewDto {
   conflictId: string;
   relativePath: string;
   mergedContent: string;
+  localContent?: string;
+  remoteContent?: string;
   suggestions?: string;
   localSize: number;
   remoteSize: number;

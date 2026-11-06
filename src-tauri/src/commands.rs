@@ -262,7 +262,7 @@ mod browse_tests {
 pub struct DiscoveredProject {
     account_id: String,
     remote_path: String,
-    remote_project_id: String,
+    remote_project_id: Option<String>,
     name: String,
 }
 
@@ -273,12 +273,15 @@ pub async fn discover_remote_projects(
 ) -> ApiResult<Vec<DiscoveredProject>> {
     api(async {
         let (_, client) = state.sync.client_for(&account_id).await?;
-        let bound = state
-            .db
-            .roots()
-            .await?
-            .into_iter()
-            .map(|r| r.remote_project_id)
+        let roots = state.db.roots().await?;
+        let bound = roots
+            .iter()
+            .map(|r| r.remote_project_id.clone())
+            .collect::<HashSet<_>>();
+        let bound_paths = roots
+            .iter()
+            .filter(|r| r.account_id == account_id)
+            .map(|r| r.remote_path.trim_end_matches('/').to_owned())
             .collect::<HashSet<_>>();
         let mut queue = std::collections::VecDeque::from(["/".to_owned()]);
         let mut seen = HashSet::new();
@@ -293,61 +296,72 @@ pub async fn discover_remote_projects(
                     "远端目录超过 500 项，无法完成项目发现",
                 ));
             }
+            let manifest_path = format!("{}/.projectsync/root.json", path.trim_end_matches('/'));
+            let mut project_root = false;
+            match client.get_bytes(&manifest_path).await {
+                Ok(bytes) => {
+                    project_root = true;
+                    let value: serde_json::Value =
+                        serde_json::from_slice(&bytes).map_err(|_| {
+                            crate::domain::AppError::new(
+                                "DAV_INVALID_RESPONSE",
+                                "远端项目标识格式无效",
+                            )
+                        })?;
+                    let id = value
+                        .get("remote_project_id")
+                        .and_then(|v| v.as_str())
+                        .filter(|v| !v.trim().is_empty())
+                        .ok_or_else(|| {
+                            crate::domain::AppError::new("DAV_INVALID_RESPONSE", "远端项目标识缺失")
+                        })?;
+                    if value.get("schema_version").and_then(|v| v.as_u64()) != Some(1) {
+                        return Err(crate::domain::AppError::new(
+                            "DAV_INVALID_RESPONSE",
+                            "远端项目标识版本不支持",
+                        ));
+                    }
+                    if !bound.contains(id) && !bound_paths.contains(&path) {
+                        result.push(DiscoveredProject {
+                            account_id: account_id.clone(),
+                            remote_path: path.clone(),
+                            remote_project_id: Some(id.to_owned()),
+                            name: path
+                                .rsplit('/')
+                                .next()
+                                .filter(|s| !s.is_empty())
+                                .unwrap_or("远端项目")
+                                .to_owned(),
+                        });
+                    }
+                }
+                Err(e) if e.code == "DAV_NOT_FOUND" => {
+                    if is_direct_remote_child("/projects", &path) {
+                        project_root = true;
+                        if !bound_paths.contains(&path) {
+                            result.push(DiscoveredProject {
+                                account_id: account_id.clone(),
+                                remote_path: path.clone(),
+                                remote_project_id: None,
+                                name: path.rsplit('/').next().unwrap_or("远端项目").to_owned(),
+                            });
+                        }
+                    }
+                }
+                Err(e) => return Err(e),
+            }
+            if project_root {
+                continue;
+            }
             let entries = client.propfind(&path, 1).await?;
             for entry in entries.into_iter().filter(|e| e.is_collection) {
                 let child = href_to_dav_path(&client, &entry.path, &path)?;
-                if !is_direct_remote_child(&path, &child) {
-                    continue;
-                }
-                if child
-                    .rsplit('/')
-                    .next()
-                    .is_some_and(|name| name.eq_ignore_ascii_case(".projectsync"))
+                if is_direct_remote_child(&path, &child)
+                    && !child
+                        .rsplit('/')
+                        .next()
+                        .is_some_and(|name| name.eq_ignore_ascii_case(".projectsync"))
                 {
-                    let manifest_path = format!("{}/root.json", child);
-                    match client.get_bytes(&manifest_path).await {
-                        Ok(bytes) => {
-                            let value: serde_json::Value =
-                                serde_json::from_slice(&bytes).map_err(|_| {
-                                    crate::domain::AppError::new(
-                                        "DAV_INVALID_RESPONSE",
-                                        "远端项目标识格式无效",
-                                    )
-                                })?;
-                            let id = value
-                                .get("remote_project_id")
-                                .and_then(|v| v.as_str())
-                                .filter(|v| !v.trim().is_empty())
-                                .ok_or_else(|| {
-                                    crate::domain::AppError::new(
-                                        "DAV_INVALID_RESPONSE",
-                                        "远端项目标识缺失",
-                                    )
-                                })?;
-                            if value.get("schema_version").and_then(|v| v.as_u64()) != Some(1) {
-                                return Err(crate::domain::AppError::new(
-                                    "DAV_INVALID_RESPONSE",
-                                    "远端项目标识版本不支持",
-                                ));
-                            }
-                            if !bound.contains(id) {
-                                result.push(DiscoveredProject {
-                                    account_id: account_id.clone(),
-                                    remote_path: path.clone(),
-                                    remote_project_id: id.to_owned(),
-                                    name: path
-                                        .rsplit('/')
-                                        .next()
-                                        .filter(|s| !s.is_empty())
-                                        .unwrap_or("远端项目")
-                                        .to_owned(),
-                                });
-                            }
-                        }
-                        Err(e) if e.code == "DAV_NOT_FOUND" => {}
-                        Err(e) => return Err(e),
-                    }
-                } else {
                     queue.push_back(child);
                 }
             }
@@ -502,6 +516,11 @@ pub async fn get_pending_tasks(state: State<'_, AppState>) -> ApiResult<Vec<Task
 }
 
 #[tauri::command]
+pub async fn cancel_sync_task(state: State<'_, AppState>, task_id: String) -> ApiResult<()> {
+    api(state.sync.cancel_task(&task_id).await)
+}
+
+#[tauri::command]
 pub async fn retry_failed_task(
     state: State<'_, AppState>,
     task_id: String,
@@ -624,6 +643,65 @@ pub async fn get_conflict_detail(
     .await)
 }
 
+fn escape_glob_literal(value: &str) -> String {
+    let mut escaped = String::with_capacity(value.len());
+    for character in value.chars() {
+        if matches!(character, '\\' | '*' | '?' | '[' | ']' | '{' | '}') {
+            escaped.push('\\');
+        }
+        escaped.push(character);
+    }
+    escaped
+}
+
+#[tauri::command]
+pub async fn exclude_conflict_file(
+    state: State<'_, AppState>,
+    conflict_id: String,
+) -> ApiResult<serde_json::Value> {
+    api(async {
+        let conflict = state
+            .db
+            .conflicts(Some(&conflict_id), None)
+            .await?
+            .into_iter()
+            .next()
+            .ok_or_else(|| crate::domain::AppError::new("CONFLICT_NOT_FOUND", "冲突不存在或已解决"))?;
+        let root_id = conflict.root_id;
+        let path = validate_relative_path(&conflict.relative_path)?;
+        let mut rules = state.db.rules(&root_id).await?;
+        let already_excluded = rules.iter().any(|rule| {
+            rule.enabled
+                && rule.rule_type == crate::domain::RuleType::Exclude
+                && RuleEngine::compile(std::slice::from_ref(rule))
+                    .is_ok_and(|engine| !engine.includes(&path))
+        });
+        if !already_excluded {
+            let priority = rules
+                .iter()
+                .map(|rule| rule.priority)
+                .max()
+                .unwrap_or_default()
+                .saturating_add(1);
+            rules.push(SyncRuleDto {
+                id: None,
+                rule_type: crate::domain::RuleType::Exclude,
+                pattern: escape_glob_literal(&path),
+                enabled: true,
+                priority,
+            });
+            let _ = RuleEngine::compile(&rules)?;
+            state.db.replace_rules(&root_id, &rules).await?;
+        }
+        state.db.resolve_conflict_as(&conflict_id, "EXCLUDED").await?;
+        Ok(serde_json::json!({
+            "success": true,
+            "message": format!("已将 {path} 加入排除规则；本地和远端现有文件均保留，后续同步将跳过此文件。")
+        }))
+    }
+    .await)
+}
+
 #[tauri::command]
 pub async fn resolve_conflict(
     state: State<'_, AppState>,
@@ -662,12 +740,15 @@ pub async fn refine_ai_merge(
     state: State<'_, AppState>,
     input: RefineAiMergeInput,
 ) -> ApiResult<AiMergePreviewDto> {
-    api(state.sync.refine_ai_merge(
-        &input.conflict_id,
-        &input.preview_id,
-        &input.instruction,
-        input.current_content.as_deref(),
-    ).await)
+    api(state
+        .sync
+        .refine_ai_merge(
+            &input.conflict_id,
+            &input.preview_id,
+            &input.instruction,
+            input.current_content.as_deref(),
+        )
+        .await)
 }
 
 #[tauri::command]
@@ -840,6 +921,7 @@ pub fn register_commands(builder: tauri::Builder<tauri::Wry>) -> tauri::Builder<
         resume_sync,
         get_sync_status,
         get_pending_tasks,
+        cancel_sync_task,
         retry_failed_task,
         get_sync_rules,
         replace_sync_rules,
@@ -848,6 +930,7 @@ pub fn register_commands(builder: tauri::Builder<tauri::Wry>) -> tauri::Builder<
         list_files,
         list_conflicts,
         get_conflict_detail,
+        exclude_conflict_file,
         resolve_conflict,
         preview_ai_merge,
         refine_ai_merge,

@@ -48,12 +48,13 @@ if ($LASTEXITCODE -ne 0) {
 
 $toolchainNames = $toolchains | ForEach-Object { ($_ -split '\s+')[0] }
 $rustToolchain = $toolchainNames |
-    Where-Object { $_ -eq 'stable-x86_64-pc-windows-msvc' } |
+    Where-Object { $_ -match '^\d+\.\d+\.\d+-x86_64-pc-windows-msvc$' } |
+    Sort-Object { [version]($_ -replace '-x86_64-pc-windows-msvc$', '') } -Descending |
     Select-Object -First 1
 
 if (-not $rustToolchain) {
     $rustToolchain = $toolchainNames |
-        Where-Object { $_ -match 'x86_64-pc-windows-msvc$' } |
+        Where-Object { $_ -eq 'stable-x86_64-pc-windows-msvc' } |
         Select-Object -First 1
 }
 

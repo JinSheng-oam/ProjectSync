@@ -936,10 +936,13 @@ fn parse_multistatus(body: &[u8], base_url: &Url, request_url: &Url) -> AppResul
                         .and_then(|s| s.parse::<u16>().ok())
                         .is_some_and(|s| (200..300).contains(&s));
                 }
-                if propstat_ok {
-                    if let Some(entry) = current.as_mut() {
+                if let Some(entry) = current.as_mut() {
+                    if tag == "href" {
+                        // href belongs to the response element, not a propstat. Servers may
+                        // return it before a later 404 propstat for unsupported properties.
+                        entry.path = normalize_href(value);
+                    } else if propstat_ok {
                         match tag {
-                            "href" => entry.path = normalize_href(value),
                             "getcontentlength" => entry.size = value.parse().unwrap_or(0),
                             "getlastmodified" => {
                                 entry.modified_at = chrono::DateTime::parse_from_rfc2822(value)

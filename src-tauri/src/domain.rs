@@ -391,6 +391,10 @@ pub struct AiMergePreviewDto {
     pub relative_path: String,
     pub merged_content: String,
     #[serde(default)]
+    pub local_content: Option<String>,
+    #[serde(default)]
+    pub remote_content: Option<String>,
+    #[serde(default)]
     pub suggestions: Option<String>,
     pub local_size: u64,
     pub remote_size: u64,

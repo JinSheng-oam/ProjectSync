@@ -36,7 +36,9 @@ export function App() {
     handleResumeSync,
     handleEnableSync,
     handleRetryTask,
+    handleCancelTask,
     handleResolveConflict,
+    handleExcludeConflictFile,
     aiSession,
     startAiMerge,
     refineAiMerge,
@@ -125,6 +127,7 @@ export function App() {
                   onResume={handleResumeSync}
                   onEnable={handleEnableSync}
                   onRetryTask={handleRetryTask}
+                  onCancelTask={handleCancelTask}
                 />
               )}
 
@@ -157,7 +160,9 @@ export function App() {
               {currentNav === 'conflicts' && (
                 <ConflictCenter
                   conflicts={conflicts}
+                  roots={roots}
                   onResolve={handleResolveConflict}
+                  onExcludeFile={handleExcludeConflictFile}
                   aiSession={aiSession}
                   onStartAiMerge={startAiMerge}
                   onRefineAiMerge={refineAiMerge}
