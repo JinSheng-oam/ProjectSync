@@ -8,10 +8,11 @@ use crate::{
     },
     filesystem::{
         atomic_replace, copy_to_trash, ensure_safe_parent, hash_file, move_to_trash, scan_local,
-        scan_local_cached, RuleEngine,
+        scan_local_cached, is_generated_conflict_copy, move_generated_conflict_copies_to_trash,
+        RuleEngine,
     },
     security::{normalize_remote_path, path_key, unix_ms, validate_relative_path},
-    storage::{ConflictCopyArtifact, Database},
+    storage::Database,
     webdav::{href_to_dav_path, PutCondition, WebDavClient},
 };
 use futures_util::StreamExt;
@@ -629,6 +630,15 @@ impl SyncCoordinator {
 
     async fn sync_locked(&self, root: &RootRecord, summary: &mut SyncSummaryDto) -> AppResult<()> {
         self.ensure_sync_active(&root.id).await?;
+        let cleaned_conflict_copies =
+            move_generated_conflict_copies_to_trash(&root.local_path, &self.data_dir, &root.id)?;
+        if cleaned_conflict_copies > 0 {
+            tracing::info!(
+                root_id = %root.id,
+                count = cleaned_conflict_copies,
+                "moved generated conflict copies out of the synchronized folder"
+            );
+        }
         let (_, client) = self.client_for(&root.account_id).await?;
         let account = self.db.account(&root.account_id).await?;
         let capabilities = account.capabilities.unwrap_or_else(unsafe_capabilities);
@@ -650,19 +660,11 @@ impl SyncCoordinator {
         self.db
             .apply_rule_state(&root.id, &ignored, &reenabled)
             .await?;
-        let conflict_copy_artifacts = self.db.conflict_copy_artifacts(&root.id).await?;
-        let (local_conflict_copy_hashes, remote_conflict_copy_hashes) =
-            prepare_conflict_copy_filters(&self.data_dir, root, &conflict_copy_artifacts);
         self.db.set_root_status(&root.id, "SCANNING_LOCAL").await?;
-        let mut local = scan_local_cached(&root.local_path, &rules, &old_baseline)?;
-        local.retain(|entry| {
-            local_conflict_copy_hashes
-                .get(&entry.path_key)
-                .is_none_or(|expected| expected != &entry.hash)
-        });
+        let local = scan_local_cached(&root.local_path, &rules, &old_baseline)?;
         self.ensure_sync_active(&root.id).await?;
         self.db.set_root_status(&root.id, "SCANNING_REMOTE").await?;
-        let mut remote = scan_remote(
+        let remote = scan_remote(
             &client,
             &root.remote_path,
             &rules,
@@ -670,11 +672,6 @@ impl SyncCoordinator {
             &old_baseline,
         )
         .await?;
-        remote.retain(|entry| {
-            remote_conflict_copy_hashes
-                .get(&entry.path_key)
-                .is_none_or(|expected| expected != &entry.hash)
-        });
         let line_ending_equivalent = line_ending_equivalent_paths(
             &client,
             &root.remote_path,
@@ -1493,14 +1490,12 @@ impl SyncCoordinator {
                         &path,
                         &self.db.device_name().await?,
                     )?;
-                    let conflict_target = ensure_safe_parent(&root.local_path, &conflict_path)?;
-                    crate::filesystem::copy_create_new(&target, &conflict_target)?;
                     if capabilities.safe_create_only {
                         let conflict_remote = remote_file_path(&root.remote_path, &conflict_path)?;
                         ensure_remote_parent(&client, &conflict_remote).await?;
                         put_remote_create_only(
                             &client,
-                            &conflict_target,
+                            &target,
                             &conflict_remote,
                             &capabilities,
                             &self.data_dir,
@@ -1514,6 +1509,8 @@ impl SyncCoordinator {
                             local_hash,
                         )
                         .await?;
+                    } else {
+                        copy_to_trash(&self.data_dir, &root.id, &path, "keep-both", &target)?;
                     }
                     if let Some(remote) = current_remote.as_ref() {
                         let stage = target.with_file_name(format!(
@@ -1530,7 +1527,7 @@ impl SyncCoordinator {
                         if hash_file(&target)? != local_hash {
                             return Err(AppError::retryable(
                                 "LOCAL_FILE_CHANGED",
-                                "保存冲突副本后本地原文件发生变化",
+                                "保存本地冲突版本后原文件发生变化",
                             ));
                         }
                         atomic_replace(&stage, &target)?;
@@ -1578,7 +1575,11 @@ impl SyncCoordinator {
                             )
                             .await?;
                     }
-                    format!("本地版本已另存为冲突副本：{conflict_path}。")
+                    if capabilities.safe_create_only {
+                        format!("本地版本已保存在远端冲突副本 {conflict_path}；同步目录不会保留该副本。")
+                    } else {
+                        "远端不支持安全创建冲突副本；本地版本已保存在 ProjectSync 回收站，同步目录不会保留副本。".to_owned()
+                    }
                 } else if let Some(remote) = current_remote.as_ref() {
                     let stage = target.with_file_name(format!(
                         ".projectsync-keepboth-{}.stage",
@@ -2631,118 +2632,6 @@ async fn line_ending_equivalent_paths(
     Ok(equivalent)
 }
 
-fn is_generated_conflict_copy_for(source_path: &str, candidate_path: &str) -> bool {
-    let source = Path::new(source_path);
-    let candidate = Path::new(candidate_path);
-    if source.parent() != candidate.parent() || source.extension() != candidate.extension() {
-        return false;
-    }
-    let Some(source_stem) = source.file_stem().and_then(|value| value.to_str()) else {
-        return false;
-    };
-    let Some(candidate_stem) = candidate.file_stem().and_then(|value| value.to_str()) else {
-        return false;
-    };
-    let prefix = format!("{source_stem}.conflict-");
-    let Some(suffix) = candidate_stem.strip_prefix(&prefix) else {
-        return false;
-    };
-    let parts = suffix.split('-').collect::<Vec<_>>();
-    if parts.len() < 3 {
-        return false;
-    }
-    let device = parts[..parts.len() - 2].join("-");
-    let timestamp = parts[parts.len() - 2].as_bytes();
-    let token = parts[parts.len() - 1];
-    !device.is_empty()
-        && device.len() <= 24
-        && device
-            .chars()
-            .all(|value| value.is_ascii_alphanumeric() || value == '-' || value == '_')
-        && timestamp.len() == 16
-        && timestamp[8] == b'T'
-        && timestamp[15] == b'Z'
-        && timestamp
-            .iter()
-            .enumerate()
-            .all(|(index, value)| index == 8 || index == 15 || value.is_ascii_digit())
-        && matches!(token.len(), 6 | 32)
-        && token.chars().all(|value| value.is_ascii_hexdigit())
-}
-
-fn prepare_conflict_copy_filters(
-    data_dir: &Path,
-    root: &RootRecord,
-    artifacts: &[ConflictCopyArtifact],
-) -> (HashMap<String, String>, HashMap<String, String>) {
-    let mut local_copies = HashMap::new();
-    let mut remote_copies = HashMap::new();
-    let remote_root = normalize_remote_path(&root.remote_path).ok();
-
-    for artifact in artifacts {
-        let Some(expected_hash) = artifact.local_hash.as_deref() else {
-            continue;
-        };
-        let mut known_auto_local_copy = false;
-        if let Some(copy_path) = artifact
-            .local_copy_path
-            .as_deref()
-            .filter(|value| *value != "NONE")
-        {
-            if is_generated_conflict_copy_for(&artifact.source_path, copy_path) {
-                let copy = ensure_safe_parent(&root.local_path, copy_path);
-                if let Ok(copy) = copy {
-                    match fs::symlink_metadata(&copy) {
-                        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-                            known_auto_local_copy = true;
-                        }
-                        Ok(meta)
-                            if meta.is_file()
-                                && !meta.file_type().is_symlink()
-                                && hash_file(&copy).ok().as_deref() == Some(expected_hash) =>
-                        {
-                            known_auto_local_copy = true;
-                            match move_to_trash(data_dir, &root.id, copy_path, &copy) {
-                                Ok(_) => {
-                                    local_copies
-                                        .insert(path_key(copy_path), expected_hash.to_owned());
-                                }
-                                Err(error) => tracing::warn!(
-                                    path = %copy_path,
-                                    error = %error,
-                                    "could not move duplicate conflict copy to app trash"
-                                ),
-                            }
-                        }
-                        _ => {}
-                    }
-                }
-            }
-        }
-
-        if !known_auto_local_copy {
-            continue;
-        }
-        let Some((remote_root, remote_copy)) = remote_root.as_deref().zip(
-            artifact.remote_copy_path.as_deref(),
-        ) else {
-            continue;
-        };
-        let prefix = format!("{}/", remote_root.trim_end_matches('/'));
-        let Some(remote_relative) = remote_copy.strip_prefix(&prefix) else {
-            continue;
-        };
-        let Ok(remote_relative) = validate_relative_path(remote_relative) else {
-            continue;
-        };
-        if is_generated_conflict_copy_for(&artifact.source_path, &remote_relative) {
-            remote_copies.insert(path_key(&remote_relative), expected_hash.to_owned());
-        }
-    }
-
-    (local_copies, remote_copies)
-}
-
 async fn scan_remote(
     client: &WebDavClient,
     root_path: &str,
@@ -2788,6 +2677,9 @@ async fn scan_remote(
             let relative = validate_relative_path(relative)?;
             if prop.is_collection {
                 directories.push(dav_path);
+                continue;
+            }
+            if is_generated_conflict_copy(&relative) {
                 continue;
             }
             if !rule_engine.includes(&relative) {

@@ -14,14 +14,6 @@ pub struct Database {
     path: PathBuf,
 }
 
-#[derive(Debug, Clone)]
-pub struct ConflictCopyArtifact {
-    pub source_path: String,
-    pub local_hash: Option<String>,
-    pub local_copy_path: Option<String>,
-    pub remote_copy_path: Option<String>,
-}
-
 impl Database {
     pub async fn open(path: &Path) -> AppResult<Self> {
         if let Some(parent) = path.parent() {
@@ -750,23 +742,6 @@ impl Database {
             .bind(&id).bind(root_id).bind(&item.path).bind(item.conflict.as_ref().map(ConflictType::as_db).unwrap_or("CONCURRENT_MODIFICATION"))
             .bind(item.local.as_ref().map(|v|v.hash.as_str())).bind(item.remote.as_ref().map(|v|v.hash.as_str())).bind(base_hash).bind(item.remote.as_ref().and_then(|v|v.etag.as_deref())).bind(now).bind(now).execute(&self.pool).await?;
         Ok((id, true))
-    }
-
-    pub async fn conflict_copy_artifacts(
-        &self,
-        root_id: &str,
-    ) -> AppResult<Vec<ConflictCopyArtifact>> {
-        let rows = sqlx::query("SELECT relative_path,local_hash,local_snapshot_path,conflict_copy_path FROM sync_conflicts WHERE root_id=? AND (status='UNRESOLVED' OR resolution IS NOT NULL)")
-            .bind(root_id).fetch_all(&self.pool).await?;
-        Ok(rows
-            .iter()
-            .map(|row| ConflictCopyArtifact {
-                source_path: row.get("relative_path"),
-                local_hash: row.get("local_hash"),
-                local_copy_path: row.get("local_snapshot_path"),
-                remote_copy_path: row.get("conflict_copy_path"),
-            })
-            .collect())
     }
 
     pub async fn conflicts(

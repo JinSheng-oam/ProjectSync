@@ -128,6 +128,9 @@ pub fn scan_local_cached(
             {
                 return false;
             }
+            if file_type.is_file() && is_generated_conflict_copy(&relative) {
+                return false;
+            }
             if rule_engine.is_excluded(&relative, file_type.is_dir() || file_type.is_symlink()) {
                 return false;
             }
@@ -204,6 +207,90 @@ pub fn scan_local_cached(
         ));
     }
     Ok(entries)
+}
+
+pub fn is_generated_conflict_copy(relative_path: &str) -> bool {
+    let candidate = Path::new(relative_path);
+    let Some(candidate_stem) = candidate.file_stem().and_then(|value| value.to_str()) else {
+        return false;
+    };
+    let Some((source_stem, suffix)) = candidate_stem.rsplit_once(".conflict-") else {
+        return false;
+    };
+    if source_stem.is_empty() {
+        return false;
+    }
+
+    let parts = suffix.split('-').collect::<Vec<_>>();
+    if parts.len() < 3 {
+        return false;
+    }
+    let device = parts[..parts.len() - 2].join("-");
+    let timestamp = parts[parts.len() - 2].as_bytes();
+    let token = parts[parts.len() - 1];
+    !device.is_empty()
+        && device.len() <= 24
+        && device
+            .chars()
+            .all(|value| value.is_ascii_alphanumeric() || value == '-' || value == '_')
+        && timestamp.len() == 16
+        && timestamp[8] == b'T'
+        && timestamp[15] == b'Z'
+        && timestamp
+            .iter()
+            .enumerate()
+            .all(|(index, value)| index == 8 || index == 15 || value.is_ascii_digit())
+        && matches!(token.len(), 6 | 32)
+        && token.chars().all(|value| value.is_ascii_hexdigit())
+}
+
+pub fn move_generated_conflict_copies_to_trash(
+    root: &Path,
+    data_dir: &Path,
+    root_id: &str,
+) -> AppResult<usize> {
+    let root = fs::canonicalize(root).map_err(|error| {
+        AppError::new(
+            "LOCAL_ROOT_INVALID",
+            format!("无法访问本地同步目录：{error}"),
+        )
+    })?;
+    let mut moved = 0;
+    for walk in WalkDir::new(&root)
+        .follow_links(false)
+        .sort_by_file_name()
+        .into_iter()
+        .skip(1)
+    {
+        let entry = walk.map_err(|error| {
+            AppError::new(
+                "SCAN_INCOMPLETE",
+                format!("清理冲突副本时扫描目录失败：{error}"),
+            )
+        })?;
+        if !entry.file_type().is_file() || entry.file_type().is_symlink() {
+            continue;
+        }
+        let relative = entry
+            .path()
+            .strip_prefix(&root)
+            .map_err(|_| AppError::new("LOCAL_PATH_INVALID", "冲突副本路径越过同步根目录"))?
+            .components()
+            .map(|component| component.as_os_str().to_string_lossy())
+            .collect::<Vec<_>>()
+            .join("/");
+        if relative
+            .split('/')
+            .any(|part| part.eq_ignore_ascii_case(".projectsync"))
+            || !is_generated_conflict_copy(&relative)
+        {
+            continue;
+        }
+        let target = ensure_safe_parent(&root, &relative)?;
+        move_to_trash(data_dir, root_id, &relative, &target)?;
+        moved += 1;
+    }
+    Ok(moved)
 }
 
 pub fn hash_file(path: &Path) -> AppResult<String> {
