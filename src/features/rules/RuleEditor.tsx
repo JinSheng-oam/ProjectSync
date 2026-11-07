@@ -92,12 +92,12 @@ export function RuleEditor({
       <div className="space-y-2">
         <div className="flex items-center justify-between">
           <label className="text-xs font-semibold text-slate-900 dark:text-slate-100">
-            选择同步范围模式
+            同步范围模式
           </label>
-          <span className="text-[11px] text-slate-500 dark:text-slate-400">
+          <span className="text-[11px] font-mono px-2 py-0.5 rounded-md bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400">
             {isRecommendedMode
-              ? `白名单模式：仅同步匹配的 ${enabledIncludes} 条包含规则`
-              : '全量模式：同步除排除规则外的全部文件'}
+              ? `白名单模式 · ${enabledIncludes} 条包含规则`
+              : '全量同步模式'}
           </span>
         </div>
 
@@ -107,11 +107,11 @@ export function RuleEditor({
             onClick={() => applyPreset('context')}
             className={`p-3.5 rounded-xl border cursor-pointer transition-all flex flex-col justify-between relative ${
               isRecommendedMode
-                ? 'border-indigo-500 ring-2 ring-indigo-500/20 bg-indigo-50/50 dark:bg-indigo-950/30 text-slate-900 dark:text-slate-100 shadow-soft-sm'
+                ? 'border-indigo-500 ring-2 ring-indigo-500/15 bg-indigo-50/40 dark:bg-indigo-950/30 text-slate-900 dark:text-slate-100 shadow-soft-sm'
                 : 'border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800/60 hover:border-slate-300 dark:hover:border-slate-600 text-slate-700 dark:text-slate-300'
             }`}
           >
-            <div className="flex items-start justify-between">
+            <div className="flex items-center justify-between">
               <div className="flex items-center gap-2 font-semibold text-xs text-slate-900 dark:text-slate-100">
                 <FileText className="w-4 h-4 text-indigo-600 dark:text-indigo-400" />
                 <span>文档与项目配置</span>
@@ -120,13 +120,13 @@ export function RuleEditor({
                 </span>
               </div>
               {isRecommendedMode && (
-                <div className="w-4 h-4 rounded-full bg-indigo-600 text-white flex items-center justify-center">
+                <div className="w-4 h-4 rounded-full bg-indigo-600 text-white flex items-center justify-center shrink-0">
                   <Check className="w-2.5 h-2.5" />
                 </div>
               )}
             </div>
-            <p className="mt-2 text-[11px] text-slate-500 dark:text-slate-400 leading-relaxed">
-              仅同步 Markdown、文本、AI 规则提示词与 docs、config 目录；适合知识库与轻量同步。
+            <p className="mt-1.5 text-[11px] text-slate-500 dark:text-slate-400">
+              同步 Markdown、文本、AI 规则提示词及 docs / config 目录
             </p>
           </div>
 
@@ -135,11 +135,11 @@ export function RuleEditor({
             onClick={() => applyPreset('project')}
             className={`p-3.5 rounded-xl border cursor-pointer transition-all flex flex-col justify-between relative ${
               !isRecommendedMode
-                ? 'border-indigo-500 ring-2 ring-indigo-500/20 bg-indigo-50/50 dark:bg-indigo-950/30 text-slate-900 dark:text-slate-100 shadow-soft-sm'
+                ? 'border-indigo-500 ring-2 ring-indigo-500/15 bg-indigo-50/40 dark:bg-indigo-950/30 text-slate-900 dark:text-slate-100 shadow-soft-sm'
                 : 'border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800/60 hover:border-slate-300 dark:hover:border-slate-600 text-slate-700 dark:text-slate-300'
             }`}
           >
-            <div className="flex items-start justify-between">
+            <div className="flex items-center justify-between">
               <div className="flex items-center gap-2 font-semibold text-xs text-slate-900 dark:text-slate-100">
                 <Code2 className="w-4 h-4 text-slate-600 dark:text-slate-400" />
                 <span>完整工程源码</span>
@@ -148,13 +148,13 @@ export function RuleEditor({
                 </span>
               </div>
               {!isRecommendedMode && (
-                <div className="w-4 h-4 rounded-full bg-indigo-600 text-white flex items-center justify-center">
+                <div className="w-4 h-4 rounded-full bg-indigo-600 text-white flex items-center justify-center shrink-0">
                   <Check className="w-2.5 h-2.5" />
                 </div>
               )}
             </div>
-            <p className="mt-2 text-[11px] text-slate-500 dark:text-slate-400 leading-relaxed">
-              同步工程内所有源码与资源；两者均自动排除常见依赖、产物与临时文件。
+            <p className="mt-1.5 text-[11px] text-slate-500 dark:text-slate-400">
+              同步工程内全部源码与资源，自动排除依赖、构建产物与临时文件
             </p>
           </div>
         </div>
@@ -164,14 +164,14 @@ export function RuleEditor({
       <div className="space-y-2">
         <div className="flex items-center justify-between">
           <label className="text-xs font-semibold text-slate-900 dark:text-slate-100">
-            快速排除常用规则
+            快速排除常用目录与文件
           </label>
-          <span className="text-[11px] text-slate-500 dark:text-slate-400">
-            排除规则始终优先判定
+          <span className="text-[11px] text-slate-400 dark:text-slate-500">
+            排除规则优先生效
           </span>
         </div>
 
-        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-2">
+        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-2.5">
           {groups.map((group) => {
             const Icon = group.icon;
             const activeCount = group.patterns.filter((p) =>
@@ -190,15 +190,15 @@ export function RuleEditor({
                 key={group.id}
                 type="button"
                 onClick={() => toggleGroup(group.patterns, !isAllActive)}
-                className={`p-2.5 rounded-xl border text-left transition-all flex flex-col justify-between ${
+                className={`p-3 rounded-xl border text-left transition-all flex flex-col justify-between gap-1.5 ${
                   isAllActive
-                    ? 'border-indigo-400 dark:border-indigo-600 bg-indigo-50/70 dark:bg-indigo-950/40 text-indigo-950 dark:text-indigo-100 shadow-soft-sm'
+                    ? 'border-indigo-300 dark:border-indigo-700 bg-indigo-50/60 dark:bg-indigo-950/40 text-indigo-950 dark:text-indigo-100 shadow-soft-sm'
                     : isPartial
                     ? 'border-amber-300 dark:border-amber-700 bg-amber-50/50 dark:bg-amber-950/30 text-amber-950 dark:text-amber-100'
                     : 'border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800/70 text-slate-600 dark:text-slate-400 hover:border-slate-300 dark:hover:border-slate-600'
                 }`}
               >
-                <div className="flex items-center justify-between w-full mb-1">
+                <div className="flex items-center justify-between w-full">
                   <Icon
                     className={`w-3.5 h-3.5 ${
                       isAllActive
@@ -209,7 +209,7 @@ export function RuleEditor({
                     }`}
                   />
                   <span
-                    className={`text-[10px] font-mono px-1 py-0.2 rounded ${
+                    className={`text-[10px] font-mono px-1.5 py-0.5 rounded ${
                       isAllActive
                         ? 'bg-indigo-100 text-indigo-700 dark:bg-indigo-900/60 dark:text-indigo-300 font-semibold'
                         : isPartial
@@ -220,7 +220,12 @@ export function RuleEditor({
                     {isAllActive ? '已排除' : isPartial ? `${activeCount}/${group.patterns.length}` : '未排除'}
                   </span>
                 </div>
-                <div className="font-semibold text-xs truncate">{group.label}</div>
+                <div>
+                  <div className="font-semibold text-xs truncate">{group.label}</div>
+                  <div className="text-[10px] font-mono text-slate-400 dark:text-slate-500 truncate mt-0.5">
+                    {group.description}
+                  </div>
+                </div>
               </button>
             );
           })}
@@ -235,7 +240,7 @@ export function RuleEditor({
             <span className="font-semibold text-xs text-slate-900 dark:text-slate-100">
               自定义规则
             </span>
-            <span className="text-[11px] font-mono text-slate-500 bg-slate-200/60 dark:bg-slate-800 px-1.5 py-0.5 rounded">
+            <span className="text-[11px] font-mono tabular-nums text-slate-500 bg-slate-200/70 dark:bg-slate-800 px-1.5 py-0.5 rounded">
               {rules.length}
             </span>
           </div>
@@ -246,7 +251,7 @@ export function RuleEditor({
               <button
                 type="button"
                 onClick={() => setRuleFilter('ALL')}
-                className={`px-2 py-0.5 rounded-md text-[11px] font-medium transition-colors ${
+                className={`px-2.5 py-0.5 rounded-md text-[11px] font-medium transition-colors ${
                   ruleFilter === 'ALL'
                     ? 'bg-white dark:bg-slate-700 text-slate-900 dark:text-slate-100 shadow-soft-sm'
                     : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
@@ -257,7 +262,7 @@ export function RuleEditor({
               <button
                 type="button"
                 onClick={() => setRuleFilter('INCLUDE')}
-                className={`px-2 py-0.5 rounded-md text-[11px] font-medium transition-colors ${
+                className={`px-2.5 py-0.5 rounded-md text-[11px] font-medium transition-colors ${
                   ruleFilter === 'INCLUDE'
                     ? 'bg-white dark:bg-slate-700 text-emerald-700 dark:text-emerald-300 shadow-soft-sm'
                     : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
@@ -268,7 +273,7 @@ export function RuleEditor({
               <button
                 type="button"
                 onClick={() => setRuleFilter('EXCLUDE')}
-                className={`px-2 py-0.5 rounded-md text-[11px] font-medium transition-colors ${
+                className={`px-2.5 py-0.5 rounded-md text-[11px] font-medium transition-colors ${
                   ruleFilter === 'EXCLUDE'
                     ? 'bg-white dark:bg-slate-700 text-rose-700 dark:text-rose-300 shadow-soft-sm'
                     : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
@@ -285,22 +290,22 @@ export function RuleEditor({
                 value={searchFilter}
                 onChange={(e) => setSearchFilter(e.target.value)}
                 placeholder="筛选规则..."
-                className="w-24 focus:w-36 transition-all bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg px-2 py-0.5 text-[11px] font-mono text-slate-800 dark:text-slate-200 focus:outline-none focus:border-indigo-500"
+                className="w-28 focus:w-40 transition-all bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg px-2.5 py-1 text-[11px] font-mono text-slate-800 dark:text-slate-200 focus:outline-none focus:border-indigo-500"
               />
             </div>
           </div>
         </div>
 
         {/* Inline Add Bar */}
-        <div className="p-3 bg-slate-50/40 dark:bg-slate-900/40 border-b border-slate-200/80 dark:border-slate-700/80 flex flex-wrap sm:flex-nowrap items-center gap-2">
-          {/* Segmented Type Toggle */}
-          <div className="flex rounded-lg bg-slate-200/70 dark:bg-slate-800 p-0.5 shrink-0">
+        <div className="p-3 bg-slate-50/30 dark:bg-slate-900/40 border-b border-slate-200/80 dark:border-slate-700/80 flex flex-wrap sm:flex-nowrap items-center gap-2">
+          {/* Segmented Type Toggle (Subtle surface styling so it doesn't clash with primary Add button) */}
+          <div className="flex rounded-lg bg-slate-200/70 dark:bg-slate-800 p-0.5 shrink-0 border border-slate-200/80 dark:border-slate-700">
             <button
               type="button"
               onClick={() => setType('INCLUDE')}
               className={`px-2.5 py-1 rounded-md text-xs font-semibold transition-all ${
                 type === 'INCLUDE'
-                  ? 'bg-emerald-600 text-white shadow-soft-sm'
+                  ? 'bg-white dark:bg-slate-700 text-emerald-700 dark:text-emerald-300 shadow-sm'
                   : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
               }`}
             >
@@ -311,7 +316,7 @@ export function RuleEditor({
               onClick={() => setType('EXCLUDE')}
               className={`px-2.5 py-1 rounded-md text-xs font-semibold transition-all ${
                 type === 'EXCLUDE'
-                  ? 'bg-rose-600 text-white shadow-soft-sm'
+                  ? 'bg-white dark:bg-slate-700 text-rose-700 dark:text-rose-300 shadow-sm'
                   : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
               }`}
             >
@@ -333,75 +338,78 @@ export function RuleEditor({
             className="min-w-0 flex-1 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg px-3 py-1.5 font-mono text-xs text-slate-900 dark:text-slate-100 focus:outline-none focus:border-indigo-500"
           />
 
-          <Button variant="primary" size="sm" onClick={addRule} className="gap-1 shrink-0">
+          <Button variant="primary" size="sm" onClick={addRule} className="gap-1 shrink-0 py-1.5 px-3">
             <Plus className="w-3.5 h-3.5" /> 添加
           </Button>
         </div>
 
-        {/* Rules Scrollable Container */}
-        <div className="max-h-56 overflow-y-auto divide-y divide-slate-100 dark:divide-slate-800/80 p-1">
+        {/* Rules 2-Column Scrollable Grid */}
+        <div className="max-h-64 overflow-y-auto p-2.5">
           {filteredRules.length === 0 ? (
             <div className="py-6 text-center text-slate-400 text-xs">
               {searchFilter ? '未找到匹配该关键字的规则' : '当前类别暂无规则'}
             </div>
           ) : (
-            filteredRules.map((rule, idx) => {
-              const originalIndex = rules.indexOf(rule);
-              return (
-                <div
-                  key={`${rule.id || idx}-${rule.pattern}`}
-                  className="flex items-center justify-between px-2.5 py-1.5 hover:bg-slate-50 dark:hover:bg-slate-800/50 rounded-lg transition-colors group"
-                >
-                  <div className="flex items-center gap-2.5 min-w-0 flex-1">
-                    <span
-                      className={`px-1.5 py-0.5 rounded text-[10px] font-semibold shrink-0 ${
-                        rule.ruleType === 'INCLUDE'
-                          ? 'bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800'
-                          : 'bg-rose-50 dark:bg-rose-950/60 text-rose-700 dark:text-rose-300 border border-rose-200 dark:border-rose-800'
-                      }`}
-                    >
-                      {rule.ruleType === 'INCLUDE' ? '包含' : '排除'}
-                    </span>
-                    <code
-                      className={`font-mono text-xs truncate px-2 py-0.5 rounded bg-slate-100 dark:bg-slate-800/80 border border-slate-200/50 dark:border-slate-700/50 ${
-                        rule.enabled
-                          ? 'text-slate-800 dark:text-slate-200 font-medium'
-                          : 'text-slate-400 dark:text-slate-500 line-through'
-                      }`}
-                    >
-                      {rule.pattern}
-                    </code>
-                  </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-1.5">
+              {filteredRules.map((rule, idx) => {
+                const originalIndex = rules.indexOf(rule);
+                return (
+                  <div
+                    key={`${rule.id || idx}-${rule.pattern}`}
+                    className="flex items-center justify-between px-2.5 py-1.5 rounded-lg border border-slate-200/70 dark:border-slate-700/60 bg-slate-50/50 dark:bg-slate-800/40 hover:bg-slate-100/70 dark:hover:bg-slate-800/80 transition-colors"
+                  >
+                    <div className="flex items-center gap-2 min-w-0 flex-1">
+                      <span
+                        className={`px-1.5 py-0.5 rounded text-[10px] font-semibold shrink-0 ${
+                          rule.ruleType === 'INCLUDE'
+                            ? 'bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800'
+                            : 'bg-rose-50 dark:bg-rose-950/60 text-rose-700 dark:text-rose-300 border border-rose-200 dark:border-rose-800'
+                        }`}
+                      >
+                        {rule.ruleType === 'INCLUDE' ? '包含' : '排除'}
+                      </span>
+                      <code
+                        title={rule.pattern}
+                        className={`font-mono text-xs truncate ${
+                          rule.enabled
+                            ? 'text-slate-800 dark:text-slate-200 font-medium'
+                            : 'text-slate-400 dark:text-slate-500 line-through'
+                        }`}
+                      >
+                        {rule.pattern}
+                      </code>
+                    </div>
 
-                  <div className="flex items-center gap-2.5 shrink-0 ml-2">
-                    <label className="flex items-center gap-1 cursor-pointer text-[11px] text-slate-500 dark:text-slate-400 select-none">
-                      <input
-                        type="checkbox"
-                        checked={rule.enabled}
-                        onChange={(e) =>
-                          onChange(
-                            rules.map((r, i) =>
-                              i === originalIndex ? { ...r, enabled: e.target.checked } : r
+                    <div className="flex items-center gap-2 shrink-0 ml-2">
+                      <label className="flex items-center gap-1 cursor-pointer text-[11px] text-slate-500 dark:text-slate-400 select-none">
+                        <input
+                          type="checkbox"
+                          checked={rule.enabled}
+                          onChange={(e) =>
+                            onChange(
+                              rules.map((r, i) =>
+                                i === originalIndex ? { ...r, enabled: e.target.checked } : r
+                              )
                             )
-                          )
-                        }
-                        className="rounded text-indigo-600 focus:ring-indigo-500"
-                      />
-                      <span>启用</span>
-                    </label>
-                    <button
-                      type="button"
-                      aria-label={`删除规则 ${rule.pattern}`}
-                      onClick={() => onChange(rules.filter((_, i) => i !== originalIndex))}
-                      className="p-1 text-slate-400 hover:text-rose-600 dark:hover:text-rose-400 rounded hover:bg-rose-50 dark:hover:bg-rose-950/40 transition-colors"
-                      title="删除规则"
-                    >
-                      <Trash2 className="w-3.5 h-3.5" />
-                    </button>
+                          }
+                          className="rounded text-indigo-600 focus:ring-indigo-500"
+                        />
+                        <span>启用</span>
+                      </label>
+                      <button
+                        type="button"
+                        aria-label={`删除规则 ${rule.pattern}`}
+                        onClick={() => onChange(rules.filter((_, i) => i !== originalIndex))}
+                        className="p-1 text-slate-400 hover:text-rose-600 dark:hover:text-rose-400 rounded hover:bg-rose-50 dark:hover:bg-rose-950/40 transition-colors"
+                        title="删除规则"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
                   </div>
-                </div>
-              );
-            })
+                );
+              })}
+            </div>
           )}
         </div>
       </div>
@@ -416,10 +424,12 @@ export function RuleEditor({
         </div>
       )}
 
+      {/* 4 & 5. Side-by-side Auxiliary Tools: Path Diagnostics & AI Scope Recommendation */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-3 items-start">
         <RulePathDiagnostics rules={rules} />
 
-      {/* 5. AI Scope Recommendation Drawer */}
-      <AiScope key={localPath} localPath={localPath} onApply={onChange} />
+        <AiScope key={localPath} localPath={localPath} onApply={onChange} />
+      </div>
     </div>
   );
 }
