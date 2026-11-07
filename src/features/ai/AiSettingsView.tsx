@@ -14,8 +14,7 @@ import { Button } from '../../components/common/UIComponents';
 import { api } from '../../services/api';
 import { AiSettingsDto } from '../../types/dto';
 
-const FALLBACK_PROMPT =
-  '合并本地与远端修改，保留双方意图；给出详细的中文合并分析与修改说明；不要引入新事实、删除无关内容或改变文件格式。';
+import FALLBACK_PROMPT from './default-merge-prompt.txt?raw';
 
 export function AiSettingsView() {
   const [settings, setSettings] = useState<AiSettingsDto | null>(null);

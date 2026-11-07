@@ -11,7 +11,7 @@ use zeroize::Zeroize;
 
 const AI_KEY_REFERENCE: &str = "ProjectSync/AI/Default";
 const DEFAULT_MERGE_PROMPT: &str =
-    "合并本地与远端修改，保留双方意图；不要引入新事实、删除无关内容或改变文件格式。";
+    include_str!("../../src/features/ai/default-merge-prompt.txt");
 
 #[derive(Debug, Clone)]
 pub struct AiConfig {
