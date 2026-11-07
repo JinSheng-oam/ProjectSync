@@ -1,4 +1,4 @@
-use crate::{domain::*, security::unix_ms};
+use crate::{domain::*, filesystem::is_generated_conflict_copy, security::unix_ms};
 use sqlx::{
     sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions, SqliteSynchronous},
     Row, SqlitePool,
@@ -607,6 +607,35 @@ impl Database {
                 updated_at: r.get("updated_at"),
             })
             .collect())
+    }
+
+    pub async fn cancel_generated_conflict_copy_tasks(&self, root_id: &str) -> AppResult<u64> {
+        let rows = sqlx::query(
+            "SELECT id,relative_path FROM sync_tasks WHERE root_id=? AND status IN ('PENDING','RETRY_WAIT','RUNNING','FAILED','BLOCKED')",
+        )
+        .bind(root_id)
+        .fetch_all(&self.pool)
+        .await?;
+        let now = unix_ms();
+        let mut cancelled = 0;
+        for row in rows {
+            let relative_path: String = row.get("relative_path");
+            if !is_generated_conflict_copy(&relative_path) {
+                continue;
+            }
+            let id: String = row.get("id");
+            let result = sqlx::query(
+                "UPDATE sync_tasks SET status='CANCELLED',last_error_code='CONFLICT_COPY_IGNORED',last_error_message='自动生成的冲突副本已排除本地同步；远端副本保留。',next_retry_at=NULL,updated_at=?,completed_at=? WHERE id=? AND root_id=? AND status IN ('PENDING','RETRY_WAIT','RUNNING','FAILED','BLOCKED')",
+            )
+            .bind(now)
+            .bind(now)
+            .bind(id)
+            .bind(root_id)
+            .execute(&self.pool)
+            .await?;
+            cancelled += result.rows_affected();
+        }
+        Ok(cancelled)
     }
 
     pub async fn retry_task(&self, task_id: &str) -> AppResult<String> {

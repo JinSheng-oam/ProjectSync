@@ -175,7 +175,7 @@ export function useSyncStore() {
     try {
       await api.syncNow(rootId);
     } catch (error: unknown) {
-      setBannerAlert(`立即同步失败：${error instanceof Error ? error.message : String(error)}`);
+      setBannerAlert(`立即同步失败：${getErrorMessage(error, '同步请求失败')}`);
     } finally {
       await refreshAll();
     }
@@ -188,7 +188,7 @@ export function useSyncStore() {
     try {
       await api.pauseSync(rootId);
     } catch (error: unknown) {
-      setBannerAlert(`暂停同步失败：${error instanceof Error ? error.message : String(error)}`);
+      setBannerAlert(`暂停同步失败：${getErrorMessage(error, '暂停请求失败')}`);
     } finally {
       await refreshAll();
     }
@@ -201,7 +201,7 @@ export function useSyncStore() {
     try {
       await api.resumeSync(rootId);
     } catch (error: unknown) {
-      setBannerAlert(`恢复同步失败：${error instanceof Error ? error.message : String(error)}`);
+      setBannerAlert(`恢复同步失败：${getErrorMessage(error, '恢复请求失败')}`);
     } finally {
       await refreshAll();
     }
@@ -212,7 +212,7 @@ export function useSyncStore() {
       await api.enableSyncRoot(rootId);
       await refreshAll();
     } catch (error: unknown) {
-      alert((error as Error).message);
+      alert(getErrorMessage(error, '启用同步失败'));
     }
   };
 
@@ -221,7 +221,7 @@ export function useSyncStore() {
       await api.retryFailedTask(taskId);
       await refreshAll();
     } catch (error: unknown) {
-      alert((error as Error).message);
+      alert(getErrorMessage(error, '重试任务失败'));
     }
   };
 
@@ -230,7 +230,7 @@ export function useSyncStore() {
       await api.cancelSyncTask(taskId);
       await refreshAll();
     } catch (error: unknown) {
-      setBannerAlert(`取消当前文件失败：${error instanceof Error ? error.message : String(error)}`);
+      setBannerAlert(`取消当前文件失败：${getErrorMessage(error, '取消任务失败')}`);
     }
   };
 
@@ -241,7 +241,7 @@ export function useSyncStore() {
       setTimeout(() => setBannerAlert(null), 7000);
       await refreshAll();
     } catch (e: unknown) {
-      alert((e as Error).message);
+      alert(getErrorMessage(e, '解决冲突失败'));
     }
   };
 
@@ -252,7 +252,7 @@ export function useSyncStore() {
       setTimeout(() => setBannerAlert(null), 7000);
       await refreshAll();
     } catch (error: unknown) {
-      setBannerAlert(`加入排除规则失败：${error instanceof Error ? error.message : String(error)}`);
+      setBannerAlert(`加入排除规则失败：${getErrorMessage(error, '更新排除规则失败')}`);
       throw error;
     }
   };

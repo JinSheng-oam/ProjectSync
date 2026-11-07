@@ -630,6 +630,15 @@ impl SyncCoordinator {
 
     async fn sync_locked(&self, root: &RootRecord, summary: &mut SyncSummaryDto) -> AppResult<()> {
         self.ensure_sync_active(&root.id).await?;
+        let cancelled_conflict_copy_tasks =
+            self.db.cancel_generated_conflict_copy_tasks(&root.id).await?;
+        if cancelled_conflict_copy_tasks > 0 {
+            tracing::info!(
+                root_id = %root.id,
+                count = cancelled_conflict_copy_tasks,
+                "cancelled stale tasks for generated conflict copies"
+            );
+        }
         let cleaned_conflict_copies =
             move_generated_conflict_copies_to_trash(&root.local_path, &self.data_dir, &root.id)?;
         if cleaned_conflict_copies > 0 {
@@ -744,12 +753,26 @@ impl SyncCoordinator {
                         .map(|v| v.hash.as_str())
                         .or_else(|| item.remote.as_ref().map(|v| v.hash.as_str()));
                     if item.local.is_none() && item.remote.is_none() {
+                        let previous_hash = baseline
+                            .iter()
+                            .find(|entry| entry.path_key == path_key(&item.path))
+                            .and_then(|entry| entry.base_hash.as_deref());
                         self.db
                             .add_tombstone(
                                 &root.id,
                                 &item.path,
-                                "BOTH",
+                                "LOCAL",
+                                previous_hash,
                                 None,
+                                Some("CONFIRMED_DELETED"),
+                            )
+                            .await?;
+                        self.db
+                            .add_tombstone(
+                                &root.id,
+                                &item.path,
+                                "REMOTE",
+                                previous_hash,
                                 None,
                                 Some("CONFIRMED_DELETED"),
                             )
