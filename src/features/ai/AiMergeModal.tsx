@@ -48,7 +48,6 @@ export function AiMergeModal({
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  // Sync draft content whenever session preview updates
   useEffect(() => {
     if (session?.preview?.mergedContent !== undefined) {
       setLocalDraftContent(session.preview.mergedContent);
@@ -112,7 +111,7 @@ export function AiMergeModal({
         ? aiPreview?.localContent ?? ''
         : aiPreview?.remoteContent ?? '';
 
-  const lineCount = (currentViewContent.match(/\n/g) || []).length + 1;
+  const lineCount = currentViewContent ? (currentViewContent.match(/\n/g) || []).length + 1 : 1;
   const charCount = currentViewContent.length;
 
   const quickChips = [
@@ -122,43 +121,60 @@ export function AiMergeModal({
     '精简重复项并统一中文注释',
   ];
 
+  const isBusyMerging = session.status === 'merging';
+  const isBusyApplying = session.status === 'applying';
+
   const modalDom = (
     <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-900/60 p-4 backdrop-blur-sm dark:bg-black/80 animate-in fade-in duration-150">
-      <div className="flex max-h-[92vh] w-full max-w-6xl flex-col rounded-2xl border border-slate-200 bg-white shadow-soft-lg dark:border-slate-800 dark:bg-slate-900 overflow-hidden">
+      <div className="flex h-[84vh] max-h-[780px] min-h-[540px] w-full max-w-6xl flex-col rounded-2xl border border-slate-200/90 bg-white shadow-soft-lg dark:border-slate-800 dark:bg-slate-900 overflow-hidden">
         {/* Modal Top Header */}
-        <div className="flex items-center justify-between gap-4 border-b border-slate-200 px-6 py-3.5 dark:border-slate-800 bg-slate-50/80 dark:bg-slate-950/80 shrink-0">
-          <div className="flex items-center gap-3.5 min-w-0">
-            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-amber-200 bg-amber-50 text-amber-600 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-300 shadow-soft-sm">
-              <Sparkles className="h-5 w-5" />
+        <div className="flex items-center justify-between gap-4 border-b border-slate-200 px-5 py-3 dark:border-slate-800 bg-slate-50/80 dark:bg-slate-950/80 shrink-0">
+          <div className="flex items-center gap-3 min-w-0">
+            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-amber-200/80 bg-amber-50 text-amber-600 dark:border-amber-800/80 dark:bg-amber-950/40 dark:text-amber-300 shadow-soft-sm">
+              <Sparkles className="h-4 w-4" />
             </div>
-            <div className="min-w-0">
-              <div className="flex items-center gap-2 flex-wrap">
-                <h3 className="text-base font-semibold text-slate-900 dark:text-slate-100">
+            <div className="min-w-0 flex flex-col sm:flex-row sm:items-center gap-1.5 sm:gap-3">
+              <div className="flex items-center gap-2">
+                <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100 whitespace-nowrap">
                   AI 智能合并与协同审阅
                 </h3>
-                <span className="text-[11px] px-2.5 py-0.5 rounded-full bg-indigo-50 dark:bg-indigo-950/80 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800 font-medium flex items-center gap-1.5 shadow-soft-sm">
-                  <span className="w-1.5 h-1.5 rounded-full bg-indigo-500 animate-pulse" />
+                <span
+                  className={`text-[11px] px-2 py-0.5 rounded-full font-medium flex items-center gap-1.5 whitespace-nowrap border ${
+                    isBusyMerging || isBusyApplying
+                      ? 'bg-indigo-50 dark:bg-indigo-950/80 text-indigo-700 dark:text-indigo-300 border-indigo-200 dark:border-indigo-800'
+                      : 'bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300 border-emerald-200 dark:border-emerald-800/60'
+                  }`}
+                >
+                  <span
+                    className={`w-1.5 h-1.5 rounded-full ${
+                      isBusyMerging || isBusyApplying
+                        ? 'bg-indigo-500 animate-pulse'
+                        : 'bg-emerald-500'
+                    }`}
+                  />
                   <span>
-                    {session.status === 'merging'
-                      ? 'AI 分析生成中...'
-                      : session.status === 'applying'
-                        ? '写入两端中...'
-                        : 'Agent 协同就绪'}
+                    {isBusyMerging
+                      ? '分析生成中'
+                      : isBusyApplying
+                        ? '正在写入'
+                        : '就绪'}
                   </span>
                 </span>
               </div>
-              <div className="mt-1 flex items-center gap-2 text-xs text-slate-500 dark:text-slate-400">
-                <span className="px-2 py-0.5 rounded-md bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 font-medium border border-slate-200 dark:border-slate-700 shrink-0 text-[11px]">
+
+              <div className="flex items-center gap-1.5 text-xs text-slate-500 dark:text-slate-400 min-w-0">
+                <span className="hidden sm:inline text-slate-300 dark:text-slate-700">|</span>
+                <span className="px-1.5 py-0.5 rounded bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 font-medium border border-slate-200/80 dark:border-slate-700 shrink-0 text-[11px]">
                   {projectName}
                 </span>
-                <span className="font-mono text-slate-700 dark:text-slate-300 truncate max-w-md select-all">
+                <span className="font-mono text-xs text-slate-700 dark:text-slate-300 truncate max-w-[260px] sm:max-w-md select-all">
                   {session.relativePath}
                 </span>
                 <button
                   type="button"
                   onClick={handleCopyPath}
                   title="复制相对路径"
-                  className="p-1 rounded-md hover:bg-slate-200/70 dark:hover:bg-slate-800 text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 transition-colors"
+                  className="p-1 rounded-md hover:bg-slate-200/70 dark:hover:bg-slate-800 text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 transition-colors shrink-0"
                 >
                   {copiedPath ? (
                     <Check className="w-3.5 h-3.5 text-emerald-600" />
@@ -170,9 +186,9 @@ export function AiMergeModal({
             </div>
           </div>
 
-          <div className="flex items-center gap-2 shrink-0">
+          <div className="flex items-center gap-1.5 shrink-0">
             {session.preview?.model && (
-              <span className="flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2.5 py-1 font-mono text-[11px] text-slate-600 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300 shadow-soft-sm">
+              <span className="hidden md:flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2.5 py-1 font-mono text-[11px] text-slate-600 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300 mr-1">
                 <Cpu className="w-3.5 h-3.5 text-indigo-500" />
                 <span>{session.preview.model}</span>
               </span>
@@ -180,13 +196,15 @@ export function AiMergeModal({
             <button
               type="button"
               onClick={onClose}
-              title="后台运行并在后台保持（可随时返回）"
-              className="p-2 rounded-xl border border-slate-200 dark:border-slate-700 text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-slate-100 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors shadow-soft-sm"
+              disabled={isBusyApplying}
+              title="最小化至后台"
+              className="p-1.5 rounded-lg border border-slate-200 dark:border-slate-700 text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-slate-100 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors disabled:opacity-40"
             >
               <Minimize2 className="w-4 h-4" />
             </button>
             <button
               type="button"
+              disabled={isBusyApplying}
               onClick={() => {
                 if (isModified) {
                   setConfirmCancel(true);
@@ -194,8 +212,8 @@ export function AiMergeModal({
                   onCancel();
                 }
               }}
-              title="关闭并放弃本次合并"
-              className="p-2 rounded-xl border border-slate-200 dark:border-slate-700 text-slate-500 hover:text-rose-600 dark:text-slate-400 dark:hover:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/40 transition-colors shadow-soft-sm"
+              title="关闭并放弃合并"
+              className="p-1.5 rounded-lg border border-slate-200 dark:border-slate-700 text-slate-500 hover:text-rose-600 dark:text-slate-400 dark:hover:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/40 transition-colors disabled:opacity-40"
             >
               <X className="w-4 h-4" />
             </button>
@@ -205,59 +223,73 @@ export function AiMergeModal({
         {/* Modal Main Body: 7 Cols Editor + 5 Cols Agent Interaction */}
         <div className="flex-1 grid grid-cols-1 lg:grid-cols-12 min-h-0 overflow-hidden divide-y lg:divide-y-0 lg:divide-x divide-slate-200 dark:divide-slate-800">
           {/* Left Column: Code Editor & Version Compare (7 cols) */}
-          <div className="lg:col-span-7 flex flex-col min-h-0 overflow-hidden bg-slate-50/50 dark:bg-slate-950/40">
+          <div className="lg:col-span-7 flex flex-col min-h-0 overflow-hidden bg-slate-50/40 dark:bg-slate-950/40">
             {/* View Switcher & File Stats Header */}
-            <div className="flex items-center justify-between border-b border-slate-200 dark:border-slate-800 px-4 py-2.5 bg-white dark:bg-slate-900 shrink-0">
-              <div className="flex items-center gap-1.5 p-0.5 rounded-lg bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-xs">
+            <div className="flex items-center justify-between gap-2 border-b border-slate-200 dark:border-slate-800 px-4 py-2 bg-white dark:bg-slate-900 shrink-0">
+              <div className="flex items-center gap-1 p-0.5 rounded-lg bg-slate-100 dark:bg-slate-800/90 border border-slate-200/80 dark:border-slate-700/80 text-xs">
                 <button
                   type="button"
                   onClick={() => setAiSourceView('merged')}
-                  className={`flex items-center gap-1.5 px-3 py-1 rounded-md transition-all font-medium ${
+                  className={`flex items-center gap-1.5 px-2.5 py-1 rounded-md transition-all font-medium whitespace-nowrap ${
                     aiSourceView === 'merged'
                       ? 'bg-white dark:bg-slate-700 text-indigo-600 dark:text-indigo-300 shadow-sm'
                       : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
                   }`}
                 >
-                  <FileCheck2 className="w-3.5 h-3.5" />
-                  <span>合并结果 (可编辑)</span>
-                  {isModified && <span className="w-1.5 h-1.5 rounded-full bg-amber-500" />}
+                  <FileCheck2 className="w-3.5 h-3.5 shrink-0" />
+                  <span>合并结果</span>
+                  {isModified && (
+                    <span
+                      title="已手动修改"
+                      className="w-1.5 h-1.5 rounded-full bg-amber-500"
+                    />
+                  )}
                 </button>
                 <button
                   type="button"
                   onClick={() => setAiSourceView('local')}
-                  className={`flex items-center gap-1.5 px-3 py-1 rounded-md transition-all font-medium ${
+                  className={`flex items-center gap-1.5 px-2.5 py-1 rounded-md transition-all font-medium whitespace-nowrap ${
                     aiSourceView === 'local'
                       ? 'bg-white dark:bg-slate-700 text-indigo-600 dark:text-indigo-300 shadow-sm'
                       : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
                   }`}
                 >
-                  <HardDrive className="w-3.5 h-3.5" />
-                  <span>本地原文件 (只读)</span>
+                  <HardDrive className="w-3.5 h-3.5 shrink-0" />
+                  <span>本地版本</span>
                 </button>
                 <button
                   type="button"
                   onClick={() => setAiSourceView('remote')}
-                  className={`flex items-center gap-1.5 px-3 py-1 rounded-md transition-all font-medium ${
+                  className={`flex items-center gap-1.5 px-2.5 py-1 rounded-md transition-all font-medium whitespace-nowrap ${
                     aiSourceView === 'remote'
                       ? 'bg-white dark:bg-slate-700 text-indigo-600 dark:text-indigo-300 shadow-sm'
                       : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
                   }`}
                 >
-                  <Cloud className="w-3.5 h-3.5" />
-                  <span>远端冲突文件 (只读)</span>
+                  <Cloud className="w-3.5 h-3.5 shrink-0" />
+                  <span>远端版本</span>
                 </button>
               </div>
 
-              <div className="flex items-center gap-2">
-                <span className="text-[11px] font-mono text-slate-500 dark:text-slate-400">
-                  {charCount} 字符 · {lineCount} 行 · {aiSourceView === 'merged' ? '可编辑' : '只读'}
+              <div className="flex items-center gap-2 shrink-0">
+                <span
+                  className={`text-[11px] px-1.5 py-0.5 rounded font-medium ${
+                    aiSourceView === 'merged'
+                      ? 'bg-indigo-50 text-indigo-600 dark:bg-indigo-950/60 dark:text-indigo-300'
+                      : 'bg-slate-100 text-slate-500 dark:bg-slate-800 dark:text-slate-400'
+                  }`}
+                >
+                  {aiSourceView === 'merged' ? '可编辑' : '只读'}
+                </span>
+                <span className="text-[11px] font-mono tabular-nums text-slate-400 dark:text-slate-500 hidden sm:inline">
+                  {lineCount} 行 · {charCount.toLocaleString()} 字符
                 </span>
                 {aiSourceView === 'merged' && isModified && (
                   <button
                     type="button"
                     onClick={handleResetToPreview}
-                    title="重置为 AI 建议初版"
-                    className="p-1 rounded text-slate-500 hover:text-indigo-600 dark:hover:text-indigo-400 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+                    title="还原为 AI 生成结果"
+                    className="p-1 rounded-md text-slate-500 hover:text-indigo-600 dark:hover:text-indigo-400 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
                   >
                     <RotateCcw className="w-3.5 h-3.5" />
                   </button>
@@ -265,8 +297,8 @@ export function AiMergeModal({
                 <button
                   type="button"
                   onClick={handleCopyCode}
-                  title="复制当前文本"
-                  className="p-1 rounded text-slate-500 hover:text-slate-800 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+                  title="复制当前内容"
+                  className="p-1 rounded-md text-slate-500 hover:text-slate-800 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
                 >
                   {copiedCode ? (
                     <Check className="w-3.5 h-3.5 text-emerald-600" />
@@ -277,48 +309,48 @@ export function AiMergeModal({
               </div>
             </div>
 
-            {/* Code / Text Area with Line Numbers */}
-            <div className="flex-1 relative overflow-auto p-4 flex font-mono text-xs leading-5">
-              {/* Line Numbers Column */}
-              <div className="select-none pr-3 text-right text-slate-400 dark:text-slate-600 border-r border-slate-200 dark:border-slate-800 shrink-0 font-mono text-[11px]">
-                {Array.from({ length: Math.max(lineCount, 1) }).map((_, i) => (
-                  <div key={i} className="leading-5 h-5">
-                    {i + 1}
-                  </div>
-                ))}
+            {/* Code / Text Area Viewport */}
+            <div className="relative flex-1 min-h-0 flex flex-col overflow-hidden">
+              <div className="flex-1 overflow-auto py-3 px-2 flex font-mono text-xs leading-5">
+                {/* Line Numbers Gutter */}
+                <div className="select-none pr-3 pl-2 text-right text-slate-400/80 dark:text-slate-600 border-r border-slate-200/80 dark:border-slate-800 shrink-0 font-mono text-[11px] tabular-nums">
+                  {Array.from({ length: lineCount }).map((_, i) => (
+                    <div key={i} className="leading-5 h-5">
+                      {i + 1}
+                    </div>
+                  ))}
+                </div>
+
+                {/* Synchronized Editor / Readonly Display */}
+                <div className="flex-1 pl-3 pr-2 min-w-0">
+                  {aiSourceView === 'merged' ? (
+                    <textarea
+                      value={localDraftContent}
+                      onChange={(e) => setLocalDraftContent(e.target.value)}
+                      disabled={isBusyMerging || isBusyApplying}
+                      style={{ height: `${Math.max(lineCount * 20, 360)}px` }}
+                      className="w-full bg-transparent resize-none border-none outline-none overflow-hidden font-mono text-xs text-slate-800 dark:text-slate-200 leading-5 focus:ring-0 p-0 selection:bg-indigo-500/20"
+                      placeholder="// 合并结果将显示在此处，支持直接编辑微调..."
+                      spellCheck={false}
+                    />
+                  ) : (
+                    <pre className="w-full whitespace-pre font-mono text-xs text-slate-700 dark:text-slate-300 leading-5 p-0 select-text m-0">
+                      {currentViewContent || (
+                        <span className="text-slate-400 italic">内容为空</span>
+                      )}
+                    </pre>
+                  )}
+                </div>
               </div>
 
-              {/* Editor / Readonly Display Column */}
-              <div className="flex-1 pl-3 min-w-0">
-                {aiSourceView === 'merged' ? (
-                  <textarea
-                    value={localDraftContent}
-                    onChange={(e) => setLocalDraftContent(e.target.value)}
-                    disabled={session.status === 'merging' || session.status === 'applying'}
-                    className="w-full h-full min-h-[460px] bg-transparent resize-none border-none outline-none font-mono text-xs text-slate-800 dark:text-slate-200 leading-5 focus:ring-0 p-0 selection:bg-indigo-500/20"
-                    placeholder="// 此处显示合并后的代码文件，支持随时手工微调编辑..."
-                    spellCheck={false}
-                  />
-                ) : (
-                  <pre className="w-full h-full min-h-[460px] whitespace-pre font-mono text-xs text-slate-700 dark:text-slate-300 leading-5 p-0 select-text m-0">
-                    {currentViewContent || (
-                      <span className="text-slate-400 italic">内容为空</span>
-                    )}
-                  </pre>
-                )}
-              </div>
-
-              {/* Loading overlay on editor while merging */}
-              {session.status === 'merging' && (
-                <div className="absolute inset-3 bg-white/80 dark:bg-slate-900/80 backdrop-blur-[2px] rounded-xl flex flex-col items-center justify-center gap-3 z-10 animate-in fade-in">
-                  <LoaderCircle className="w-7 h-7 text-indigo-600 animate-spin" />
-                  <div className="text-center">
-                    <p className="text-xs font-medium text-slate-800 dark:text-slate-200">
-                      AI 正在执行合并或微调代码...
-                    </p>
-                    <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-1">
-                      结合双方代码与微调指令进行综合合并
-                    </p>
+              {/* Non-scrolling Loading Overlay on Editor */}
+              {isBusyMerging && (
+                <div className="absolute inset-0 bg-white/75 dark:bg-slate-900/75 backdrop-blur-[2px] flex items-center justify-center z-10 animate-in fade-in duration-150">
+                  <div className="flex items-center gap-3 px-4 py-2.5 rounded-xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 shadow-soft-md">
+                    <LoaderCircle className="w-4 h-4 text-indigo-600 dark:text-indigo-400 animate-spin shrink-0" />
+                    <span className="text-xs font-medium text-slate-800 dark:text-slate-200">
+                      正在生成合并代码…
+                    </span>
                   </div>
                 </div>
               )}
@@ -327,41 +359,53 @@ export function AiMergeModal({
 
           {/* Right Column: Agent Interaction & Chinese Suggestions (5 cols) */}
           <div className="lg:col-span-5 flex flex-col min-h-0 bg-white dark:bg-slate-900">
-            <div className="px-5 py-3 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between shrink-0 bg-slate-50/50 dark:bg-slate-950/40">
+            <div className="px-4 py-2.5 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between shrink-0 bg-slate-50/40 dark:bg-slate-950/40">
               <div className="flex items-center gap-2">
                 <Bot className="w-4 h-4 text-indigo-600 dark:text-indigo-400" />
                 <h4 className="text-xs font-semibold text-slate-900 dark:text-slate-100">
                   AI 合并对话与修改指导
                 </h4>
               </div>
-              <span className="text-[11px] text-slate-500 font-mono">
-                {session.messages.length} 条对话
-              </span>
+              {session.messages.length > 0 && (
+                <span className="text-[11px] text-slate-400 dark:text-slate-500 font-mono tabular-nums">
+                  {session.messages.length} 条记录
+                </span>
+              )}
             </div>
 
             {/* Message Stream */}
-            <div className="flex-1 overflow-y-auto p-4 space-y-3.5 min-h-[280px]">
-              {/* Fallback if messages list is empty while merging */}
-              {session.messages.length === 0 && session.status === 'merging' && (
-                <div className="flex items-center gap-2 text-xs text-indigo-600 dark:text-indigo-400 p-4">
-                  <LoaderCircle className="w-4 h-4 animate-spin" />
-                  <span>正在分析文件差异并生成中文合并建议...</span>
+            <div className="flex-1 overflow-y-auto p-4 space-y-3.5 min-h-0">
+              {/* Initial Analysis Loading State (Single Unified Card) */}
+              {session.messages.length === 0 && isBusyMerging && (
+                <div className="flex items-start gap-2.5 animate-in fade-in duration-150">
+                  <div className="w-6 h-6 rounded-lg bg-indigo-50 dark:bg-indigo-950 text-indigo-600 dark:text-indigo-400 border border-indigo-200 dark:border-indigo-800 flex items-center justify-center shrink-0 mt-0.5">
+                    <LoaderCircle className="w-3.5 h-3.5 animate-spin" />
+                  </div>
+                  <div className="flex-1 rounded-xl border border-indigo-100 dark:border-indigo-900/50 bg-indigo-50/30 dark:bg-indigo-950/20 p-3.5 space-y-2.5">
+                    <div className="text-xs font-medium text-indigo-900 dark:text-indigo-300">
+                      正在比对两端差异并生成合并说明…
+                    </div>
+                    <div className="space-y-2">
+                      <div className="h-2.5 w-4/5 rounded bg-indigo-200/50 dark:bg-indigo-800/40 animate-pulse" />
+                      <div className="h-2.5 w-3/5 rounded bg-indigo-200/40 dark:bg-indigo-800/30 animate-pulse" />
+                    </div>
+                  </div>
                 </div>
               )}
 
               {/* Fallback if messages list is empty but suggestions exist */}
-              {session.messages.length === 0 && session.suggestions && (
+              {session.messages.length === 0 && !isBusyMerging && session.suggestions && (
                 <div className="flex items-start gap-2.5">
                   <div className="w-6 h-6 rounded-lg bg-indigo-50 dark:bg-indigo-950 text-indigo-600 dark:text-indigo-400 border border-indigo-200 dark:border-indigo-800 flex items-center justify-center shrink-0 mt-0.5">
                     <Bot className="w-3.5 h-3.5" />
                   </div>
-                  <div className="flex-1 space-y-2">
+                  <div className="flex-1">
                     <div className="rounded-xl border border-indigo-100 dark:border-indigo-900/60 bg-indigo-50/40 dark:bg-indigo-950/30 p-3.5 text-xs text-slate-800 dark:text-slate-200 leading-relaxed shadow-soft-sm">
-                      <div className="font-semibold text-indigo-900 dark:text-indigo-300 mb-1 flex items-center gap-1.5">
+                      <div className="font-semibold text-indigo-900 dark:text-indigo-300 mb-1.5 flex items-center gap-1.5">
                         <Sparkles className="w-3.5 h-3.5 text-indigo-600" />
-                        <span>AI 合并建议与差异说明</span>
+                        <span>合并建议与差异说明</span>
                       </div>
-                      <div className="whitespace-pre-wrap font-sans text-slate-700 dark:text-slate-300 text-[12px] leading-relaxed">
+                      <div className="whitespace-pre-wrap font-sans text-slate-700 dark:text-slate-300 text-xs leading-relaxed">
                         {session.suggestions}
                       </div>
                     </div>
@@ -371,20 +415,21 @@ export function AiMergeModal({
 
               {/* Chat Thread */}
               {session.messages.map((msg, index) => {
-                const isInitialSuggestion = msg.id === 'init' || (index === 0 && msg.role === 'assistant');
+                const isInitialSuggestion =
+                  msg.id === 'init' || (index === 0 && msg.role === 'assistant');
                 if (isInitialSuggestion) {
                   return (
                     <div key={msg.id} className="flex items-start gap-2.5">
                       <div className="w-6 h-6 rounded-lg bg-indigo-50 dark:bg-indigo-950 text-indigo-600 dark:text-indigo-400 border border-indigo-200 dark:border-indigo-800 flex items-center justify-center shrink-0 mt-0.5">
                         <Bot className="w-3.5 h-3.5" />
                       </div>
-                      <div className="flex-1 space-y-2">
+                      <div className="flex-1">
                         <div className="rounded-xl border border-indigo-100 dark:border-indigo-900/60 bg-indigo-50/40 dark:bg-indigo-950/30 p-3.5 text-xs text-slate-800 dark:text-slate-200 leading-relaxed shadow-soft-sm">
-                          <div className="font-semibold text-indigo-900 dark:text-indigo-300 mb-1 flex items-center gap-1.5">
+                          <div className="font-semibold text-indigo-900 dark:text-indigo-300 mb-1.5 flex items-center gap-1.5">
                             <Sparkles className="w-3.5 h-3.5 text-indigo-600" />
-                            <span>AI 合并建议与差异说明</span>
+                            <span>合并建议与差异说明</span>
                           </div>
-                          <div className="whitespace-pre-wrap font-sans text-slate-700 dark:text-slate-300 text-[12px] leading-relaxed">
+                          <div className="whitespace-pre-wrap font-sans text-slate-700 dark:text-slate-300 text-xs leading-relaxed">
                             {msg.content}
                           </div>
                         </div>
@@ -426,15 +471,20 @@ export function AiMergeModal({
                 );
               })}
 
-              {session.status === 'merging' && (
-                <div className="flex items-center gap-2 text-xs text-indigo-600 dark:text-indigo-400 pl-8">
-                  <LoaderCircle className="w-3.5 h-3.5 animate-spin" />
-                  <span>Agent 正在根据指令微调合并代码...</span>
+              {/* Follow-up Refine Loading State (only when conversation already exists) */}
+              {session.messages.length > 0 && isBusyMerging && (
+                <div className="flex items-center gap-2.5">
+                  <div className="w-6 h-6 rounded-lg bg-indigo-50 dark:bg-indigo-950 text-indigo-600 dark:text-indigo-400 border border-indigo-200 dark:border-indigo-800 flex items-center justify-center shrink-0">
+                    <LoaderCircle className="w-3.5 h-3.5 animate-spin" />
+                  </div>
+                  <div className="rounded-xl bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 px-3.5 py-2 text-xs text-slate-600 dark:text-slate-300">
+                    正在根据指令微调合并代码…
+                  </div>
                 </div>
               )}
 
               {session.error && (
-                <div className="rounded-xl border border-rose-300 dark:border-rose-900 bg-rose-50/90 dark:bg-rose-950/50 p-4 text-xs text-rose-950 dark:text-rose-100 shadow-sm space-y-2.5 animate-in fade-in">
+                <div className="rounded-xl border border-rose-300 dark:border-rose-900 bg-rose-50/90 dark:bg-rose-950/50 p-3.5 text-xs text-rose-950 dark:text-rose-100 shadow-sm space-y-2.5 animate-in fade-in">
                   <div className="flex items-center gap-2 font-semibold text-rose-900 dark:text-rose-300">
                     <AlertTriangle className="w-4 h-4 shrink-0 text-rose-600 dark:text-rose-400" />
                     <span>执行遇到问题</span>
@@ -453,15 +503,11 @@ export function AiMergeModal({
                     <Button
                       variant="secondary"
                       size="sm"
-                      onClick={() => handleSendInstruction()}
-                      disabled={session.status === 'applying' || session.status === 'merging'}
+                      onClick={() => void handleSendInstruction()}
+                      disabled={isBusyApplying || isBusyMerging}
                       className="bg-white dark:bg-slate-900 border-rose-300 dark:border-rose-800 text-rose-700 dark:text-rose-300 hover:bg-rose-50"
                     >
-                      {session.status === 'applying' ? (
-                        <LoaderCircle className="w-3.5 h-3.5 animate-spin mr-1" />
-                      ) : (
-                        <RotateCcw className="w-3.5 h-3.5 mr-1" />
-                      )}
+                      <RotateCcw className="w-3.5 h-3.5 mr-1" />
                       <span>重试</span>
                     </Button>
                   </div>
@@ -473,19 +519,18 @@ export function AiMergeModal({
 
             {/* Quick Directive Chips & Agent Command Input */}
             <div className="p-3.5 border-t border-slate-200 dark:border-slate-800 bg-slate-50/60 dark:bg-slate-950/60 space-y-2.5 shrink-0">
-              {/* Quick Directive Chips */}
-              <div className="flex items-center gap-1.5 flex-wrap text-[11px]">
-                <span className="text-slate-400 mr-1 select-none font-medium">快捷指令:</span>
+              {/* 2x2 Quick Directives Grid */}
+              <div className="grid grid-cols-2 gap-1.5">
                 {quickChips.map((chip) => (
                   <button
                     key={chip}
                     type="button"
-                    disabled={session.status === 'merging'}
+                    disabled={isBusyMerging}
                     onClick={() => {
                       setAgentInstruction(chip);
                       inputRef.current?.focus();
                     }}
-                    className="px-2.5 py-1 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:border-indigo-400 dark:hover:border-indigo-600 hover:text-indigo-600 dark:hover:text-indigo-400 transition-colors disabled:opacity-50 shadow-soft-sm font-medium"
+                    className="px-2.5 py-1.5 rounded-lg border border-slate-200/90 dark:border-slate-700/90 bg-white dark:bg-slate-800/90 text-left text-[11px] text-slate-600 dark:text-slate-300 hover:border-indigo-400 dark:hover:border-indigo-500 hover:text-indigo-600 dark:hover:text-indigo-300 transition-colors disabled:opacity-40 truncate font-medium"
                   >
                     {chip}
                   </button>
@@ -505,19 +550,19 @@ export function AiMergeModal({
                       void handleSendInstruction();
                     }
                   }}
-                  disabled={session.status === 'merging'}
-                  placeholder="向 AI 下达调整指令，例如：把第20行配置改为远端..."
-                  className="flex-1 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-3.5 py-2 text-xs text-slate-900 dark:text-slate-100 outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/20 disabled:opacity-50"
+                  disabled={isBusyMerging}
+                  placeholder="输入微调指令，如：把第 20 行配置改为远端版本…"
+                  className="flex-1 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-3.5 py-2 text-xs text-slate-900 dark:text-slate-100 outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/15 disabled:opacity-50 transition-all"
                 />
                 <Button
                   variant="primary"
                   size="md"
-                  disabled={!agentInstruction.trim() || session.status === 'merging'}
+                  disabled={!agentInstruction.trim() || isBusyMerging}
                   onClick={() => void handleSendInstruction()}
-                  className="gap-1.5 shrink-0 px-4"
+                  className="gap-1.5 shrink-0 px-3.5 py-2"
                 >
                   <Send className="w-3.5 h-3.5" />
-                  <span>发送指令</span>
+                  <span>发送</span>
                 </Button>
               </div>
             </div>
@@ -525,22 +570,30 @@ export function AiMergeModal({
         </div>
 
         {/* Modal Footer Controls */}
-        <div className="flex items-center justify-between border-t border-slate-200 px-6 py-3.5 dark:border-slate-800 bg-slate-50/90 dark:bg-slate-950/90 shrink-0">
+        <div className="flex items-center justify-between border-t border-slate-200 px-5 py-3 dark:border-slate-800 bg-slate-50/90 dark:bg-slate-950/90 shrink-0">
           <div className="flex items-center gap-2 text-xs text-slate-500 dark:text-slate-400">
-            <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-            <span>合并状态在全局后台保持，切换到其他页面后可随时在顶部或冲突列表点击返回。</span>
+            {isModified ? (
+              <span className="inline-flex items-center gap-1.5 text-amber-600 dark:text-amber-400 font-medium">
+                <span className="w-1.5 h-1.5 rounded-full bg-amber-500" />
+                已手动编辑合并结果
+              </span>
+            ) : (
+              <span className="text-slate-400 dark:text-slate-500 font-mono text-[11px] tabular-nums">
+                {lineCount} 行 · {charCount.toLocaleString()} 字符
+              </span>
+            )}
           </div>
 
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2.5">
             <Button
               variant="secondary"
               size="md"
               onClick={onClose}
-              disabled={session.status === 'merging' || session.status === 'applying'}
+              disabled={isBusyApplying}
               className="gap-1.5"
             >
               <Minimize2 className="h-3.5 w-3.5" />
-              <span>后台运行 (暂存)</span>
+              <span>后台暂存</span>
             </Button>
             <Button
               variant="danger"
@@ -552,27 +605,23 @@ export function AiMergeModal({
                   onCancel();
                 }
               }}
-              disabled={session.status === 'merging' || session.status === 'applying'}
+              disabled={isBusyApplying}
             >
-              放弃本次合并
+              放弃合并
             </Button>
             <Button
               variant="primary"
               size="md"
               onClick={() => void onApply(localDraftContent)}
-              disabled={
-                session.status === 'merging' ||
-                session.status === 'applying' ||
-                !localDraftContent.trim()
-              }
+              disabled={isBusyMerging || isBusyApplying || !localDraftContent.trim()}
               className="gap-1.5 shadow-soft-sm"
             >
-              {session.status === 'applying' ? (
+              {isBusyApplying ? (
                 <LoaderCircle className="h-4 w-4 animate-spin" />
               ) : (
                 <Check className="h-4 w-4" />
               )}
-              <span>{session.status === 'applying' ? '写入两端中…' : '确认写入两端'}</span>
+              <span>{isBusyApplying ? '写入两端中…' : '确认写入两端'}</span>
             </Button>
           </div>
         </div>
@@ -589,7 +638,7 @@ export function AiMergeModal({
               </h4>
             </div>
             <p className="text-xs text-slate-600 dark:text-slate-400 leading-relaxed">
-              您对代码已做出的修改或 AI 调整尚未保存。放弃后将清除当前会话状态。
+              当前合并结果包含未保存的修改，确认放弃后将清除本次合并会话。
             </p>
             <div className="flex items-center justify-end gap-3 pt-2">
               <Button

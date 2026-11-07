@@ -188,30 +188,30 @@ export function WebDavManager({ accounts, onRefresh }: WebDavManagerProps) {
                   <ShieldCheck className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
                   <span>服务端兼容性探测结果 (Runtime Profile)</span>
                 </div>
-                <div className="grid grid-cols-2 gap-2 text-[11px] font-mono text-slate-600 dark:text-slate-400">
+                <div className="grid grid-cols-2 gap-2 text-xs text-slate-600 dark:text-slate-400">
                   <div className="bg-slate-50 dark:bg-slate-800/60 p-2 rounded-lg border border-slate-200 dark:border-slate-700 flex justify-between">
                     <span>ETag 强校验:</span>
-                    <span className="text-emerald-700 dark:text-emerald-300 font-bold">{acc.capabilities.etagType}</span>
+                    <span className="font-mono tabular-nums text-emerald-700 dark:text-emerald-300 font-semibold">{acc.capabilities.etagType}</span>
                   </div>
                   <div className="bg-slate-50 dark:bg-slate-800/60 p-2 rounded-lg border border-slate-200 dark:border-slate-700 flex justify-between">
                     <span>If-Match 保护:</span>
-                    <span className="text-emerald-700 dark:text-emerald-300 font-bold">
+                    <span className="text-emerald-700 dark:text-emerald-300 font-semibold">
                       {acc.capabilities.supportsIfMatch ? '支持' : '不支持'}
                     </span>
                   </div>
                   <div className="bg-slate-50 dark:bg-slate-800/60 p-2 rounded-lg border border-slate-200 dark:border-slate-700 flex justify-between">
                     <span>独占锁写保护:</span>
-                    <span className={acc.capabilities.supportsLock ? 'text-emerald-700 dark:text-emerald-300 font-bold' : 'text-slate-500 font-bold'}>
+                    <span className={acc.capabilities.supportsLock ? 'text-emerald-700 dark:text-emerald-300 font-semibold' : 'text-slate-500 font-semibold'}>
                       {acc.capabilities.supportsLock ? '实测通过' : '未验证'}
                     </span>
                   </div>
                   <div className="bg-slate-50 dark:bg-slate-800/60 p-2 rounded-lg border border-slate-200 dark:border-slate-700 flex justify-between">
                     <span>PROPFIND Depth 1:</span>
-                    <span className="text-emerald-700 dark:text-emerald-300 font-bold">通过</span>
+                    <span className="text-emerald-700 dark:text-emerald-300 font-semibold">通过</span>
                   </div>
                   <div className="bg-slate-50 dark:bg-slate-800/60 p-2 rounded-lg border border-slate-200 dark:border-slate-700 flex justify-between">
                     <span>吞吐带宽:</span>
-                    <span className="text-indigo-700 dark:text-indigo-300 font-bold">
+                    <span className="font-mono tabular-nums text-indigo-700 dark:text-indigo-300 font-semibold">
                       {typeof acc.capabilities.maxUploadSpeedMbs === 'number' ? `~${acc.capabilities.maxUploadSpeedMbs} MB/s` : '未测量'}
                     </span>
                   </div>
@@ -296,7 +296,7 @@ export function WebDavManager({ accounts, onRefresh }: WebDavManagerProps) {
               size="md"
               onClick={handleTestConnection}
               disabled={testing}
-              className="w-full gap-2 font-mono"
+              className="w-full gap-2 font-medium"
             >
               <Gauge className="w-4 h-4 text-indigo-600 dark:text-indigo-400" />
               {testing ? '正在探测 PROPFIND、条件写入与 MOVE 能力…' : '探测服务端能力'}
@@ -305,18 +305,18 @@ export function WebDavManager({ accounts, onRefresh }: WebDavManagerProps) {
 
           {/* Test Results Display */}
           {testResult && (
-            <div className="bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-300 dark:border-emerald-700/60 rounded-xl p-3.5 space-y-2 font-mono text-xs text-emerald-800 dark:text-emerald-300">
+            <div className="bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-300 dark:border-emerald-700/60 rounded-xl p-3.5 space-y-2 text-xs text-emerald-800 dark:text-emerald-300">
               <div className="font-semibold flex items-center gap-2 text-emerald-900 dark:text-emerald-200">
                 <CheckCircle2 className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
                 探测成功！已成功识别服务端特性：
               </div>
-              <div>• Server 标头: {testResult.serverHeader}</div>
-              <div>• ETag 强语义: {testResult.etagType}</div>
+              <div>• Server 标头: <span className="font-mono">{testResult.serverHeader}</span></div>
+              <div>• ETag 强语义: <span className="font-mono">{testResult.etagType}</span></div>
               <div>• 并发写防护 If-Match: {testResult.supportsIfMatch ? '支持' : '不支持'}</div>
               <div>• WebDAV 独占锁写保护: {testResult.supportsLock ? '已验证' : '未验证'}</div>
-              <div>• 安全新建: {testResult.safeCreateOnly ? (testResult.supportsIfNoneMatch ? 'If-None-Match' : '独占锁') : '未验证'}</div>
+              <div>• 安全新建: <span className="font-mono">{testResult.safeCreateOnly ? (testResult.supportsIfNoneMatch ? 'If-None-Match' : '独占锁') : '未验证'}</span></div>
               <div>• 受保护的 MOVE: {testResult.safeMoveNoOverwrite ? '支持' : '未验证'}</div>
-              <div>• 测得带宽: {typeof testResult.maxUploadSpeedMbs === 'number' ? `~${testResult.maxUploadSpeedMbs} MB/s` : '未测量'}</div>
+              <div>• 测得带宽: <span className="font-mono tabular-nums">{typeof testResult.maxUploadSpeedMbs === 'number' ? `~${testResult.maxUploadSpeedMbs} MB/s` : '未测量'}</span></div>
               {testResult.probeCleanupWarning && (
                 <div className="text-amber-700 dark:text-amber-300">• {testResult.probeCleanupWarning}</div>
               )}
@@ -324,7 +324,7 @@ export function WebDavManager({ accounts, onRefresh }: WebDavManagerProps) {
           )}
 
           {testError && (
-            <div className="bg-rose-50 dark:bg-rose-950/50 border border-rose-300 dark:border-rose-800 rounded-xl p-3 font-mono text-xs text-rose-800 dark:text-rose-300 flex items-center gap-2">
+            <div className="bg-rose-50 dark:bg-rose-950/50 border border-rose-300 dark:border-rose-800 rounded-xl p-3 text-xs text-rose-800 dark:text-rose-300 flex items-center gap-2">
               <AlertCircle className="w-4 h-4 text-rose-600 dark:text-rose-400 shrink-0" />
               <span>探测失败: {testError}</span>
             </div>

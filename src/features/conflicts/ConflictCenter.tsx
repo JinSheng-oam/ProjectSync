@@ -184,14 +184,14 @@ export function ConflictCenter({
                     <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100 font-mono truncate">
                       {activeConflict.relativePath}
                     </h3>
-                    <span className="text-xs font-mono px-2 py-0.5 rounded bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700">
-                      项目: {activeProjectName || activeConflict.rootId}
+                    <span className="text-xs px-2 py-0.5 rounded bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700">
+                      项目: <span className="font-mono">{activeProjectName || activeConflict.rootId}</span>
                     </span>
                   </div>
-                  <div className="text-xs text-amber-700 dark:text-amber-400 font-mono flex items-center gap-2">
-                    <span>分歧类型: {activeConflict.conflictType}</span>
+                  <div className="text-xs text-amber-700 dark:text-amber-400 flex items-center gap-2">
+                    <span>分歧类型: <span className="font-mono">{activeConflict.conflictType}</span></span>
                     <span>•</span>
-                    <span>拦截时间: {new Date(activeConflict.detectedAt).toLocaleString()}</span>
+                    <span>拦截时间: <span className="font-mono tabular-nums">{new Date(activeConflict.detectedAt).toLocaleString()}</span></span>
                   </div>
                 </div>
                 <Button

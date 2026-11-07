@@ -40,28 +40,31 @@ export default {
       },
       fontFamily: {
         mono: [
-          'JetBrains Mono',
           'Cascadia Code',
+          'Consolas',
+          'JetBrains Mono',
           'Fira Code',
           'ui-monospace',
           'SF Mono',
-          'Consolas',
           'Liberation Mono',
           'Menlo',
+          'Microsoft YaHei UI',
+          'Microsoft YaHei',
+          'PingFang SC',
           'monospace'
         ],
         sans: [
-          '-apple-system',
-          'BlinkMacSystemFont',
           'Segoe UI Variable Text',
           'Segoe UI',
-          'system-ui',
-          'PingFang SC',
-          'Hiragino Sans GB',
+          '-apple-system',
+          'BlinkMacSystemFont',
           'Microsoft YaHei UI',
           'Microsoft YaHei',
+          'PingFang SC',
+          'Hiragino Sans GB',
           'Source Han Sans SC',
           'Noto Sans SC',
+          'system-ui',
           'sans-serif'
         ]
       },

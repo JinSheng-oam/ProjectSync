@@ -299,11 +299,11 @@ export function AddProjectWizard({
                 <ShieldCheck className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
                 WebDAV 特性检测:
               </div>
-              <div className="font-mono text-[11px]">• 标识: {selectedAccount.capabilities.serverHeader}</div>
-              <div className="font-mono text-[11px]">• ETag 强校验: {selectedAccount.capabilities.etagType}</div>
-              <div className="font-mono text-[11px]">• If-Match 条件写入: {selectedAccount.capabilities.supportsIfMatch ? '支持 (并发保护)' : '不支持'}</div>
-              <div className="font-mono text-[11px]">• WebDAV 独占锁写保护: {selectedAccount.capabilities.supportsLock ? '已验证' : '未验证'}</div>
-              <div className="font-mono text-[11px]">• 安全新建: {selectedAccount.capabilities.safeCreateOnly ? (selectedAccount.capabilities.supportsIfNoneMatch ? 'If-None-Match' : '独占锁') : '未验证'}</div>
+              <div className="text-xs">• 标识: <span className="font-mono">{selectedAccount.capabilities.serverHeader}</span></div>
+              <div className="text-xs">• ETag 强校验: <span className="font-mono">{selectedAccount.capabilities.etagType}</span></div>
+              <div className="text-xs">• If-Match 条件写入: <span className="font-medium">{selectedAccount.capabilities.supportsIfMatch ? '支持 (并发保护)' : '不支持'}</span></div>
+              <div className="text-xs">• WebDAV 独占锁写保护: <span className="font-medium">{selectedAccount.capabilities.supportsLock ? '已验证' : '未验证'}</span></div>
+              <div className="text-xs">• 安全新建: <span className="font-mono">{selectedAccount.capabilities.safeCreateOnly ? (selectedAccount.capabilities.supportsIfNoneMatch ? 'If-None-Match' : '独占锁') : '未验证'}</span></div>
             </div>
           )}
         </div>

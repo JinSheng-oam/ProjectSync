@@ -5,9 +5,6 @@ import {
   Play,
   Wifi,
   WifiOff,
-  Minus,
-  Square,
-  X,
   Bell,
   Sun,
   Moon,
@@ -53,33 +50,6 @@ export function TopHeader({
     } else {
       onPauseAll();
       setAllPaused(true);
-    }
-  };
-
-  const handleMinimize = async () => {
-    try {
-      const { getCurrentWindow } = await import('@tauri-apps/api/window');
-      await getCurrentWindow().minimize();
-    } catch {
-      // browser mock mode
-    }
-  };
-
-  const handleMaximize = async () => {
-    try {
-      const { getCurrentWindow } = await import('@tauri-apps/api/window');
-      await getCurrentWindow().toggleMaximize();
-    } catch {
-      // browser mock mode
-    }
-  };
-
-  const handleClose = async () => {
-    try {
-      const { getCurrentWindow } = await import('@tauri-apps/api/window');
-      await getCurrentWindow().hide();
-    } catch {
-      // browser mock mode
     }
   };
 
@@ -132,7 +102,7 @@ export function TopHeader({
         </button>
       )}
 
-      {/* Global Controls & Desktop Window Mock */}
+      {/* Global Controls */}
       <div className="flex items-center justify-end gap-2 shrink-0">
         {/* Light / Dark Mode Toggle Button */}
         <button
@@ -188,34 +158,6 @@ export function TopHeader({
           <RefreshCw className={`w-3.5 h-3.5 ${isSyncingAny ? 'animate-spin' : ''}`} />
           <span>全部同步</span>
         </Button>
-
-        {/* Desktop Window Titlebar Controls */}
-        <div className="flex items-center ml-1 border-l border-slate-200 dark:border-slate-800 pl-2 text-slate-500 dark:text-slate-400">
-          <button
-            type="button"
-            onClick={handleMinimize}
-            title="最小化到托盘"
-            className="p-1.5 hover:text-slate-900 dark:hover:text-slate-100 hover:bg-slate-100 dark:hover:bg-slate-800 rounded transition-colors"
-          >
-            <Minus className="w-3.5 h-3.5" />
-          </button>
-          <button
-            type="button"
-            onClick={handleMaximize}
-            title="窗口最大化"
-            className="p-1.5 hover:text-slate-900 dark:hover:text-slate-100 hover:bg-slate-100 dark:hover:bg-slate-800 rounded transition-colors"
-          >
-            <Square className="w-3.5 h-3.5" />
-          </button>
-          <button
-            type="button"
-            onClick={handleClose}
-            title="关闭窗口 (隐藏到系统托盘常驻)"
-            className="p-1.5 hover:text-white hover:bg-rose-600 rounded transition-colors"
-          >
-            <X className="w-3.5 h-3.5" />
-          </button>
-        </div>
       </div>
     </header>
   );
