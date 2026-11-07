@@ -25,7 +25,10 @@ Thumbs.db
 
 # ProjectSync Development Documents (per user rule: dev docs must not be uploaded to GitHub)
 docs/
-*.md
+/AGENTS.md
+/PRODUCT.md
+/DESIGN.md
+/design-qa.md
 /MANIFEST.json
 /tests/M0_ACCEPTANCE.csv
 /sql/

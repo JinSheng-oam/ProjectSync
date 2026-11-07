@@ -1,24 +1,11 @@
 import { useEffect, useState, useRef } from 'react';
 import { createPortal } from 'react-dom';
-import {
-  Sparkles,
-  Cpu,
-  Minimize2,
-  X,
-  Copy,
-  Check,
-  RotateCcw,
-  HardDrive,
-  Cloud,
-  FileCheck2,
-  User,
-  Bot,
-  Send,
-  LoaderCircle,
-  AlertTriangle,
-} from 'lucide-react';
+import { Sparkles, Cpu, Minimize2, X, Copy, Check, LoaderCircle, AlertTriangle } from 'lucide-react';
 import { Button } from '../../components/common/UIComponents';
 import { AiMergeSession } from '../../stores/syncStore';
+
+import { AiMergeEditor } from './AiMergeEditor';
+import { AiMergeConversation } from './AiMergeConversation';
 
 interface AiMergeModalProps {
   session: AiMergeSession | null;
@@ -222,351 +209,33 @@ export function AiMergeModal({
 
         {/* Modal Main Body: 7 Cols Editor + 5 Cols Agent Interaction */}
         <div className="flex-1 grid grid-cols-1 lg:grid-cols-12 min-h-0 overflow-hidden divide-y lg:divide-y-0 lg:divide-x divide-slate-200 dark:divide-slate-800">
-          {/* Left Column: Code Editor & Version Compare (7 cols) */}
-          <div className="lg:col-span-7 flex flex-col min-h-0 overflow-hidden bg-slate-50/40 dark:bg-slate-950/40">
-            {/* View Switcher & File Stats Header */}
-            <div className="flex items-center justify-between gap-2 border-b border-slate-200 dark:border-slate-800 px-4 py-2 bg-white dark:bg-slate-900 shrink-0">
-              <div className="flex items-center gap-1 p-0.5 rounded-lg bg-slate-100 dark:bg-slate-800/90 border border-slate-200/80 dark:border-slate-700/80 text-xs">
-                <button
-                  type="button"
-                  onClick={() => setAiSourceView('merged')}
-                  className={`flex items-center gap-1.5 px-2.5 py-1 rounded-md transition-all font-medium whitespace-nowrap ${
-                    aiSourceView === 'merged'
-                      ? 'bg-white dark:bg-slate-700 text-indigo-600 dark:text-indigo-300 shadow-sm'
-                      : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
-                  }`}
-                >
-                  <FileCheck2 className="w-3.5 h-3.5 shrink-0" />
-                  <span>合并结果</span>
-                  {isModified && (
-                    <span
-                      title="已手动修改"
-                      className="w-1.5 h-1.5 rounded-full bg-amber-500"
-                    />
-                  )}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setAiSourceView('local')}
-                  className={`flex items-center gap-1.5 px-2.5 py-1 rounded-md transition-all font-medium whitespace-nowrap ${
-                    aiSourceView === 'local'
-                      ? 'bg-white dark:bg-slate-700 text-indigo-600 dark:text-indigo-300 shadow-sm'
-                      : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
-                  }`}
-                >
-                  <HardDrive className="w-3.5 h-3.5 shrink-0" />
-                  <span>本地版本</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setAiSourceView('remote')}
-                  className={`flex items-center gap-1.5 px-2.5 py-1 rounded-md transition-all font-medium whitespace-nowrap ${
-                    aiSourceView === 'remote'
-                      ? 'bg-white dark:bg-slate-700 text-indigo-600 dark:text-indigo-300 shadow-sm'
-                      : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
-                  }`}
-                >
-                  <Cloud className="w-3.5 h-3.5 shrink-0" />
-                  <span>远端版本</span>
-                </button>
-              </div>
-
-              <div className="flex items-center gap-2 shrink-0">
-                <span
-                  className={`text-[11px] px-1.5 py-0.5 rounded font-medium ${
-                    aiSourceView === 'merged'
-                      ? 'bg-indigo-50 text-indigo-600 dark:bg-indigo-950/60 dark:text-indigo-300'
-                      : 'bg-slate-100 text-slate-500 dark:bg-slate-800 dark:text-slate-400'
-                  }`}
-                >
-                  {aiSourceView === 'merged' ? '可编辑' : '只读'}
-                </span>
-                <span className="text-[11px] font-mono tabular-nums text-slate-400 dark:text-slate-500 hidden sm:inline">
-                  {lineCount} 行 · {charCount.toLocaleString()} 字符
-                </span>
-                {aiSourceView === 'merged' && isModified && (
-                  <button
-                    type="button"
-                    onClick={handleResetToPreview}
-                    title="还原为 AI 生成结果"
-                    className="p-1 rounded-md text-slate-500 hover:text-indigo-600 dark:hover:text-indigo-400 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
-                  >
-                    <RotateCcw className="w-3.5 h-3.5" />
-                  </button>
-                )}
-                <button
-                  type="button"
-                  onClick={handleCopyCode}
-                  title="复制当前内容"
-                  className="p-1 rounded-md text-slate-500 hover:text-slate-800 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
-                >
-                  {copiedCode ? (
-                    <Check className="w-3.5 h-3.5 text-emerald-600" />
-                  ) : (
-                    <Copy className="w-3.5 h-3.5" />
-                  )}
-                </button>
-              </div>
-            </div>
-
-            {/* Code / Text Area Viewport */}
-            <div className="relative flex-1 min-h-0 flex flex-col overflow-hidden">
-              <div className="flex-1 overflow-auto py-3 px-2 flex font-mono text-xs leading-5">
-                {/* Line Numbers Gutter */}
-                <div className="select-none pr-3 pl-2 text-right text-slate-400/80 dark:text-slate-600 border-r border-slate-200/80 dark:border-slate-800 shrink-0 font-mono text-[11px] tabular-nums">
-                  {Array.from({ length: lineCount }).map((_, i) => (
-                    <div key={i} className="leading-5 h-5">
-                      {i + 1}
-                    </div>
-                  ))}
-                </div>
-
-                {/* Synchronized Editor / Readonly Display */}
-                <div className="flex-1 pl-3 pr-2 min-w-0">
-                  {aiSourceView === 'merged' ? (
-                    <textarea
-                      value={localDraftContent}
-                      onChange={(e) => setLocalDraftContent(e.target.value)}
-                      disabled={isBusyMerging || isBusyApplying}
-                      style={{ height: `${Math.max(lineCount * 20, 360)}px` }}
-                      className="w-full bg-transparent resize-none border-none outline-none overflow-hidden font-mono text-xs text-slate-800 dark:text-slate-200 leading-5 focus:ring-0 p-0 selection:bg-indigo-500/20"
-                      placeholder="// 合并结果将显示在此处，支持直接编辑微调..."
-                      spellCheck={false}
-                    />
-                  ) : (
-                    <pre className="w-full whitespace-pre font-mono text-xs text-slate-700 dark:text-slate-300 leading-5 p-0 select-text m-0">
-                      {currentViewContent || (
-                        <span className="text-slate-400 italic">内容为空</span>
-                      )}
-                    </pre>
-                  )}
-                </div>
-              </div>
-
-              {/* Non-scrolling Loading Overlay on Editor */}
-              {isBusyMerging && (
-                <div className="absolute inset-0 bg-white/75 dark:bg-slate-900/75 backdrop-blur-[2px] flex items-center justify-center z-10 animate-in fade-in duration-150">
-                  <div className="flex items-center gap-3 px-4 py-2.5 rounded-xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 shadow-soft-md">
-                    <LoaderCircle className="w-4 h-4 text-indigo-600 dark:text-indigo-400 animate-spin shrink-0" />
-                    <span className="text-xs font-medium text-slate-800 dark:text-slate-200">
-                      正在生成合并代码…
-                    </span>
-                  </div>
-                </div>
-              )}
-            </div>
-          </div>
-
-          {/* Right Column: Agent Interaction & Chinese Suggestions (5 cols) */}
-          <div className="lg:col-span-5 flex flex-col min-h-0 bg-white dark:bg-slate-900">
-            <div className="px-4 py-2.5 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between shrink-0 bg-slate-50/40 dark:bg-slate-950/40">
-              <div className="flex items-center gap-2">
-                <Bot className="w-4 h-4 text-indigo-600 dark:text-indigo-400" />
-                <h4 className="text-xs font-semibold text-slate-900 dark:text-slate-100">
-                  AI 合并对话与修改指导
-                </h4>
-              </div>
-              {session.messages.length > 0 && (
-                <span className="text-[11px] text-slate-400 dark:text-slate-500 font-mono tabular-nums">
-                  {session.messages.length} 条记录
-                </span>
-              )}
-            </div>
-
-            {/* Message Stream */}
-            <div className="flex-1 overflow-y-auto p-4 space-y-3.5 min-h-0">
-              {/* Initial Analysis Loading State (Single Unified Card) */}
-              {session.messages.length === 0 && isBusyMerging && (
-                <div className="flex items-start gap-2.5 animate-in fade-in duration-150">
-                  <div className="w-6 h-6 rounded-lg bg-indigo-50 dark:bg-indigo-950 text-indigo-600 dark:text-indigo-400 border border-indigo-200 dark:border-indigo-800 flex items-center justify-center shrink-0 mt-0.5">
-                    <LoaderCircle className="w-3.5 h-3.5 animate-spin" />
-                  </div>
-                  <div className="flex-1 rounded-xl border border-indigo-100 dark:border-indigo-900/50 bg-indigo-50/30 dark:bg-indigo-950/20 p-3.5 space-y-2.5">
-                    <div className="text-xs font-medium text-indigo-900 dark:text-indigo-300">
-                      正在比对两端差异并生成合并说明…
-                    </div>
-                    <div className="space-y-2">
-                      <div className="h-2.5 w-4/5 rounded bg-indigo-200/50 dark:bg-indigo-800/40 animate-pulse" />
-                      <div className="h-2.5 w-3/5 rounded bg-indigo-200/40 dark:bg-indigo-800/30 animate-pulse" />
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              {/* Fallback if messages list is empty but suggestions exist */}
-              {session.messages.length === 0 && !isBusyMerging && session.suggestions && (
-                <div className="flex items-start gap-2.5">
-                  <div className="w-6 h-6 rounded-lg bg-indigo-50 dark:bg-indigo-950 text-indigo-600 dark:text-indigo-400 border border-indigo-200 dark:border-indigo-800 flex items-center justify-center shrink-0 mt-0.5">
-                    <Bot className="w-3.5 h-3.5" />
-                  </div>
-                  <div className="flex-1">
-                    <div className="rounded-xl border border-indigo-100 dark:border-indigo-900/60 bg-indigo-50/40 dark:bg-indigo-950/30 p-3.5 text-xs text-slate-800 dark:text-slate-200 leading-relaxed shadow-soft-sm">
-                      <div className="font-semibold text-indigo-900 dark:text-indigo-300 mb-1.5 flex items-center gap-1.5">
-                        <Sparkles className="w-3.5 h-3.5 text-indigo-600" />
-                        <span>合并建议与差异说明</span>
-                      </div>
-                      <div className="whitespace-pre-wrap font-sans text-slate-700 dark:text-slate-300 text-xs leading-relaxed">
-                        {session.suggestions}
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              {/* Chat Thread */}
-              {session.messages.map((msg, index) => {
-                const isInitialSuggestion =
-                  msg.id === 'init' || (index === 0 && msg.role === 'assistant');
-                if (isInitialSuggestion) {
-                  return (
-                    <div key={msg.id} className="flex items-start gap-2.5">
-                      <div className="w-6 h-6 rounded-lg bg-indigo-50 dark:bg-indigo-950 text-indigo-600 dark:text-indigo-400 border border-indigo-200 dark:border-indigo-800 flex items-center justify-center shrink-0 mt-0.5">
-                        <Bot className="w-3.5 h-3.5" />
-                      </div>
-                      <div className="flex-1">
-                        <div className="rounded-xl border border-indigo-100 dark:border-indigo-900/60 bg-indigo-50/40 dark:bg-indigo-950/30 p-3.5 text-xs text-slate-800 dark:text-slate-200 leading-relaxed shadow-soft-sm">
-                          <div className="font-semibold text-indigo-900 dark:text-indigo-300 mb-1.5 flex items-center gap-1.5">
-                            <Sparkles className="w-3.5 h-3.5 text-indigo-600" />
-                            <span>合并建议与差异说明</span>
-                          </div>
-                          <div className="whitespace-pre-wrap font-sans text-slate-700 dark:text-slate-300 text-xs leading-relaxed">
-                            {msg.content}
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-                  );
-                }
-
-                return (
-                  <div
-                    key={msg.id}
-                    className={`flex items-start gap-2.5 ${
-                      msg.role === 'user' ? 'flex-row-reverse' : ''
-                    }`}
-                  >
-                    <div
-                      className={`w-6 h-6 rounded-lg flex items-center justify-center shrink-0 mt-0.5 text-xs ${
-                        msg.role === 'user'
-                          ? 'bg-slate-800 text-white dark:bg-slate-200 dark:text-slate-900 shadow-soft-sm'
-                          : 'bg-indigo-50 dark:bg-indigo-950 text-indigo-600 dark:text-indigo-400 border border-indigo-200 dark:border-indigo-800'
-                      }`}
-                    >
-                      {msg.role === 'user' ? (
-                        <User className="w-3.5 h-3.5" />
-                      ) : (
-                        <Bot className="w-3.5 h-3.5" />
-                      )}
-                    </div>
-                    <div
-                      className={`max-w-[85%] rounded-xl px-3.5 py-2.5 text-xs leading-relaxed ${
-                        msg.role === 'user'
-                          ? 'bg-indigo-600 text-white shadow-soft-sm'
-                          : 'bg-slate-100 dark:bg-slate-800 text-slate-800 dark:text-slate-200 border border-slate-200 dark:border-slate-700'
-                      }`}
-                    >
-                      <div className="whitespace-pre-wrap">{msg.content}</div>
-                    </div>
-                  </div>
-                );
-              })}
-
-              {/* Follow-up Refine Loading State (only when conversation already exists) */}
-              {session.messages.length > 0 && isBusyMerging && (
-                <div className="flex items-center gap-2.5">
-                  <div className="w-6 h-6 rounded-lg bg-indigo-50 dark:bg-indigo-950 text-indigo-600 dark:text-indigo-400 border border-indigo-200 dark:border-indigo-800 flex items-center justify-center shrink-0">
-                    <LoaderCircle className="w-3.5 h-3.5 animate-spin" />
-                  </div>
-                  <div className="rounded-xl bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 px-3.5 py-2 text-xs text-slate-600 dark:text-slate-300">
-                    正在根据指令微调合并代码…
-                  </div>
-                </div>
-              )}
-
-              {session.error && (
-                <div className="rounded-xl border border-rose-300 dark:border-rose-900 bg-rose-50/90 dark:bg-rose-950/50 p-3.5 text-xs text-rose-950 dark:text-rose-100 shadow-sm space-y-2.5 animate-in fade-in">
-                  <div className="flex items-center gap-2 font-semibold text-rose-900 dark:text-rose-300">
-                    <AlertTriangle className="w-4 h-4 shrink-0 text-rose-600 dark:text-rose-400" />
-                    <span>执行遇到问题</span>
-                  </div>
-                  <div className="text-[11px] leading-relaxed pl-6 break-all">
-                    {session.error}
-                  </div>
-                  <div className="flex items-center justify-between pt-2 border-t border-rose-200/80 dark:border-rose-900/60 text-[11px]">
-                    <button
-                      type="button"
-                      onClick={onOpenAiSettings}
-                      className="text-indigo-600 dark:text-indigo-400 hover:underline font-medium"
-                    >
-                      前往 AI 设置检查配置 →
-                    </button>
-                    <Button
-                      variant="secondary"
-                      size="sm"
-                      onClick={() => void handleSendInstruction()}
-                      disabled={isBusyApplying || isBusyMerging}
-                      className="bg-white dark:bg-slate-900 border-rose-300 dark:border-rose-800 text-rose-700 dark:text-rose-300 hover:bg-rose-50"
-                    >
-                      <RotateCcw className="w-3.5 h-3.5 mr-1" />
-                      <span>重试</span>
-                    </Button>
-                  </div>
-                </div>
-              )}
-
-              <div ref={messagesEndRef} />
-            </div>
-
-            {/* Quick Directive Chips & Agent Command Input */}
-            <div className="p-3.5 border-t border-slate-200 dark:border-slate-800 bg-slate-50/60 dark:bg-slate-950/60 space-y-2.5 shrink-0">
-              {/* 2x2 Quick Directives Grid */}
-              <div className="grid grid-cols-2 gap-1.5">
-                {quickChips.map((chip) => (
-                  <button
-                    key={chip}
-                    type="button"
-                    disabled={isBusyMerging}
-                    onClick={() => {
-                      setAgentInstruction(chip);
-                      inputRef.current?.focus();
-                    }}
-                    className="px-2.5 py-1.5 rounded-lg border border-slate-200/90 dark:border-slate-700/90 bg-white dark:bg-slate-800/90 text-left text-[11px] text-slate-600 dark:text-slate-300 hover:border-indigo-400 dark:hover:border-indigo-500 hover:text-indigo-600 dark:hover:text-indigo-300 transition-colors disabled:opacity-40 truncate font-medium"
-                  >
-                    {chip}
-                  </button>
-                ))}
-              </div>
-
-              {/* Prompt Input & Send */}
-              <div className="flex items-center gap-2">
-                <input
-                  ref={inputRef}
-                  type="text"
-                  value={agentInstruction}
-                  onChange={(e) => setAgentInstruction(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter' && !e.shiftKey) {
-                      e.preventDefault();
-                      void handleSendInstruction();
-                    }
-                  }}
-                  disabled={isBusyMerging}
-                  placeholder="输入微调指令，如：把第 20 行配置改为远端版本…"
-                  className="flex-1 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-3.5 py-2 text-xs text-slate-900 dark:text-slate-100 outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/15 disabled:opacity-50 transition-all"
-                />
-                <Button
-                  variant="primary"
-                  size="md"
-                  disabled={!agentInstruction.trim() || isBusyMerging}
-                  onClick={() => void handleSendInstruction()}
-                  className="gap-1.5 shrink-0 px-3.5 py-2"
-                >
-                  <Send className="w-3.5 h-3.5" />
-                  <span>发送</span>
-                </Button>
-              </div>
-            </div>
-          </div>
+          <AiMergeEditor
+            aiSourceView={aiSourceView}
+            setAiSourceView={setAiSourceView}
+            isModified={isModified}
+            lineCount={lineCount}
+            charCount={charCount}
+            handleResetToPreview={handleResetToPreview}
+            handleCopyCode={handleCopyCode}
+            copiedCode={copiedCode}
+            localDraftContent={localDraftContent}
+            setLocalDraftContent={setLocalDraftContent}
+            isBusyMerging={isBusyMerging}
+            isBusyApplying={isBusyApplying}
+            currentViewContent={currentViewContent}
+          />
+          <AiMergeConversation
+            session={session}
+            isBusyMerging={isBusyMerging}
+            isBusyApplying={isBusyApplying}
+            onOpenAiSettings={onOpenAiSettings}
+            handleSendInstruction={handleSendInstruction}
+            messagesEndRef={messagesEndRef}
+            inputRef={inputRef}
+            quickChips={quickChips}
+            agentInstruction={agentInstruction}
+            setAgentInstruction={setAgentInstruction}
+          />
         </div>
 
         {/* Modal Footer Controls */}
