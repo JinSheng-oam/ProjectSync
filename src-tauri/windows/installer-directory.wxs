@@ -1,0 +1,59 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Wix xmlns="http://schemas.microsoft.com/wix/2006/wi">
+  <Fragment>
+    <CustomAction Id="ProjectSyncResolveInstallDirectory" Script="vbscript" Execute="immediate" Return="check"><![CDATA[
+      On Error Resume Next
+      Set fileSystem = CreateObject("Scripting.FileSystemObject")
+      Set shell = CreateObject("WScript.Shell")
+      installDirectory = Session.Property("INSTALLDIR")
+
+      If fileSystem.FolderExists(installDirectory) Then
+        Set installFolder = fileSystem.GetFolder(installDirectory)
+        If installFolder.Files.Count + installFolder.SubFolders.Count > 0 Then
+          If Not IsProjectSyncInstall(installDirectory, fileSystem, shell) Then
+            candidate = fileSystem.BuildPath(installDirectory, "ProjectSync")
+            suffix = 2
+
+            Do While fileSystem.FolderExists(candidate)
+              If IsProjectSyncInstall(candidate, fileSystem, shell) Then Exit Do
+              Set candidateFolder = fileSystem.GetFolder(candidate)
+              If candidateFolder.Files.Count + candidateFolder.SubFolders.Count = 0 Then Exit Do
+
+              candidate = fileSystem.BuildPath(installDirectory, "ProjectSync (" & suffix & ")")
+              suffix = suffix + 1
+            Loop
+
+            Session.Property("INSTALLDIR") = candidate
+          End If
+        End If
+      End If
+
+      Function IsProjectSyncInstall(path, fileSystem, shell)
+        IsProjectSyncInstall = False
+        If Not fileSystem.FileExists(fileSystem.BuildPath(path, "projectsync.exe")) Then Exit Function
+        If fileSystem.FileExists(fileSystem.BuildPath(path, "uninstall.exe")) Then
+          IsProjectSyncInstall = True
+          Exit Function
+        End If
+
+        On Error Resume Next
+        registeredPath = shell.RegRead("HKCU\Software\projectsync\ProjectSync\InstallDir")
+        If Err.Number <> 0 Then
+          Err.Clear
+          registeredPath = shell.RegRead("HKLM\Software\projectsync\ProjectSync\InstallDir")
+        End If
+        If Err.Number = 0 Then
+          registeredPath = LCase(Replace(registeredPath, "/", "\"))
+          path = LCase(Replace(path, "/", "\"))
+          If Right(registeredPath, 1) = "\" Then registeredPath = Left(registeredPath, Len(registeredPath) - 1)
+          If Right(path, 1) = "\" Then path = Left(path, Len(path) - 1)
+          IsProjectSyncInstall = (registeredPath = path)
+        End If
+      End Function
+    ]]></CustomAction>
+
+    <InstallExecuteSequence>
+      <Custom Action="ProjectSyncResolveInstallDirectory" Before="InstallFiles">NOT Installed</Custom>
+    </InstallExecuteSequence>
+  </Fragment>
+</Wix>

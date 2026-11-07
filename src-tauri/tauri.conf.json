@@ -37,6 +37,14 @@
     ],
     "targets": ["nsis", "msi"],
     "shortDescription": "Safe bidirectional project file sync over WebDAV",
-    "category": "Utility"
+    "category": "Utility",
+    "windows": {
+      "nsis": {
+        "installerHooks": "./windows/installer-hooks.nsh"
+      },
+      "wix": {
+        "fragmentPaths": ["./windows/installer-directory.wxs"]
+      }
+    }
   }
 }
