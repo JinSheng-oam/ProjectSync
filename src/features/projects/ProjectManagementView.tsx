@@ -109,9 +109,6 @@ export function ProjectManagementView({
                 双向同步绑定
               </span>
             </h2>
-            <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
-              管理本地工程目录与 WebDAV 远端存储的增量同步绑定及运行状态。
-            </p>
           </div>
         </div>
 
@@ -169,7 +166,7 @@ export function ProjectManagementView({
         <section className="min-h-[300px] bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-8 text-center flex flex-col items-center justify-center shadow-soft-sm transition-colors">
           <img src={emptySyncIllustration} alt="" className="w-48 h-28 object-contain mb-3" />
           <h3 className="text-base font-semibold text-slate-900 dark:text-slate-100">还没有同步项目</h3>
-          <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">添加项目后即可实时管理本地与远端同步。</p>
+
           <Button variant="primary" size="sm" onClick={onOpenWizard} className="mt-4 gap-1.5">
             <Plus className="w-3.5 h-3.5" />
             <span>立即添加</span>
@@ -179,7 +176,6 @@ export function ProjectManagementView({
         <section className="min-h-[200px] bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-8 text-center flex flex-col items-center justify-center shadow-soft-sm transition-colors">
           <Search className="w-6 h-6 text-slate-400 mb-2" />
           <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100">未检索到项目</h3>
-          <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">请尝试调整搜索词或状态筛选条件。</p>
         </section>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">

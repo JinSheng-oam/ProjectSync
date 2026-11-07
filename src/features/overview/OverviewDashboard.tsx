@@ -129,9 +129,6 @@ export function OverviewDashboard({
                   安全拦截中
                 </span>
               </div>
-              <p className="text-xs text-slate-700 dark:text-slate-300 mt-0.5">
-                本地与 WebDAV 同时产生修改。为防止数据被静默覆盖，请前往冲突中心查看差异并选择处理策略。
-              </p>
             </div>
           </div>
           <Button
@@ -163,9 +160,6 @@ export function OverviewDashboard({
             <img src={emptySyncIllustration} alt="" className="w-52 h-32 object-contain mb-3" />
             <div className="space-y-1.5">
               <h3 className="text-lg font-semibold text-slate-900 dark:text-slate-100">暂无同步项目</h3>
-              <p className="text-xs text-slate-600 dark:text-slate-400 max-w-md mx-auto leading-relaxed">
-                将本地工作区关联到 WebDAV 目录，并按需配置文件过滤规则，即可开启双向增量同步。
-              </p>
             </div>
             <Button variant="primary" size="md" onClick={onOpenWizard} className="mt-4 px-5">
               <span>+ 添加同步项目</span>

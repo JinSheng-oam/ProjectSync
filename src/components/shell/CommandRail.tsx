@@ -100,10 +100,6 @@ export function CommandRail({
                   v1.0
                 </span>
               </div>
-              <div className="text-xs text-slate-500 dark:text-slate-400 flex items-center gap-1.5 mt-0.5">
-                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 dark:bg-emerald-400" />
-                双向增量同步
-              </div>
             </div>
           </div>
         </div>

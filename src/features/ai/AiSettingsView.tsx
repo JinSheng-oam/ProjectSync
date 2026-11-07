@@ -8,11 +8,7 @@ import {
   LoaderCircle,
   RefreshCw,
   Send,
-  ShieldCheck,
   Sparkles,
-  HelpCircle,
-  Cpu,
-  Lock,
 } from 'lucide-react';
 import { Button } from '../../components/common/UIComponents';
 import { api } from '../../services/api';
@@ -151,9 +147,6 @@ export function AiSettingsView() {
                 </span>
               )}
             </h2>
-            <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
-              配置 OpenAI 兼容端点、模型密钥与合并提示词，驱动类 Agent 冲突交互合并。
-            </p>
           </div>
         </div>
         <Button variant="primary" size="md" onClick={handleSave} disabled={saving} className="gap-2 shrink-0">
@@ -184,7 +177,7 @@ export function AiSettingsView() {
       {/* Main 2-Column Responsive Workspace Grid (8 cols form + 4 cols information & guidelines) */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 items-start">
         {/* Left Form (8 Cols) */}
-        <div className="lg:col-span-8 space-y-5">
+        <div className="lg:col-span-12 space-y-5">
           {/* Section 1: API Connection & Models */}
           <section className="space-y-4 rounded-2xl border border-slate-200 bg-white p-5 shadow-soft-sm transition-colors dark:border-slate-800 dark:bg-slate-900">
             <div className="flex items-center justify-between gap-3 border-b border-slate-100 pb-3 dark:border-slate-800">
@@ -193,9 +186,6 @@ export function AiSettingsView() {
                   <Bot className="h-4 w-4 text-indigo-600 dark:text-indigo-400" />
                   API 接口与模型配置
                 </h3>
-                <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
-                  支持 OpenAI 官方及所有兼容格式的服务（如 DeepSeek、通义千问、Ollama、SiliconFlow 等）。
-                </p>
               </div>
               <Button
                 variant="secondary"
@@ -289,13 +279,6 @@ export function AiSettingsView() {
                 <span>保存时清空并移除当前存储的 API 密钥</span>
               </label>
             )}
-
-            <div className="flex items-start gap-2 rounded-xl border border-slate-200 bg-slate-50 p-3 text-[11px] leading-relaxed text-slate-600 dark:border-slate-700 dark:bg-slate-800/50 dark:text-slate-400">
-              <ShieldCheck className="mt-0.5 h-4 w-4 shrink-0 text-emerald-600 dark:text-emerald-400" />
-              <span>
-                API 密钥存入 Windows 凭据管理器（Credential Manager），不会明文写入 SQLite 数据库或返回前端界面。
-              </span>
-            </div>
           </section>
 
           {/* Section 2: Merge Prompt Instructions */}
@@ -304,11 +287,8 @@ export function AiSettingsView() {
               <div>
                 <h3 className="flex items-center gap-2 text-sm font-semibold text-slate-900 dark:text-slate-100">
                   <Sparkles className="h-4 w-4 text-amber-500" />
-                  冲突合并系统要求与提示词
+                  冲突合并
                 </h3>
-                <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
-                  随冲突双方文本共同发送给模型，用于约束合并行为。生成后支持类 Agent 继续下达修改指令。
-                </p>
               </div>
               <button
                 type="button"
@@ -320,7 +300,7 @@ export function AiSettingsView() {
             </div>
 
             <label className="block space-y-1.5">
-              <span className="text-xs font-medium text-slate-700 dark:text-slate-300">合并系统要求 (Prompt)</span>
+              <span className="text-xs font-medium text-slate-700 dark:text-slate-300">合并提示词</span>
               <textarea
                 rows={4}
                 maxLength={4000}
@@ -329,94 +309,9 @@ export function AiSettingsView() {
                 className={inputStyle}
               />
             </label>
-
-            <div className="grid grid-cols-1 gap-3 text-xs md:grid-cols-3">
-              <PolicyCard label="中文分析建议" value="自动生成决策解释" />
-              <PolicyCard label="类 Agent 连续微调" value="支持多轮次交互修改" />
-              <PolicyCard label="双端安全备份" value="两端自动移入回收站" />
-            </div>
           </section>
         </div>
-
-        {/* Right Info Sidebar (4 Cols) */}
-        <div className="lg:col-span-4 space-y-5">
-          {/* Card 1: Capabilities */}
-          <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-soft-sm transition-colors dark:border-slate-800 dark:bg-slate-900 space-y-3">
-            <div className="flex items-center gap-2 text-xs font-semibold text-slate-900 dark:text-slate-100">
-              <Cpu className="w-4 h-4 text-indigo-600 dark:text-indigo-400" />
-              <span>AI 冲突合并核心机制</span>
-            </div>
-            <ul className="text-xs text-slate-600 dark:text-slate-400 space-y-2.5 leading-relaxed">
-              <li className="flex items-start gap-2">
-                <span className="text-emerald-600 font-bold">•</span>
-                <span>
-                  <strong>中文建议与分析</strong>：合并时不仅输出合成文件，还会主动列出差异简述与保留决策，帮助您快速审阅。
-                </span>
-              </li>
-              <li className="flex items-start gap-2">
-                <span className="text-indigo-600 font-bold">•</span>
-                <span>
-                  <strong>类 Agent 连续交互修改</strong>：如对初步结果不满意，可在审阅抽屉内像对话一样继续下达微调指令。
-                </span>
-              </li>
-              <li className="flex items-start gap-2">
-                <span className="text-amber-600 font-bold">•</span>
-                <span>
-                  <strong>后台平稳运行</strong>：合并任务在全局后台执行，即使切换到其他页面，也不会被中断，随时可回退查看。
-                </span>
-              </li>
-            </ul>
-          </div>
-
-          {/* Card 2: Compatible Endpoints */}
-          <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-soft-sm transition-colors dark:border-slate-800 dark:bg-slate-900 space-y-3">
-            <div className="flex items-center gap-2 text-xs font-semibold text-slate-900 dark:text-slate-100">
-              <HelpCircle className="w-4 h-4 text-slate-500 dark:text-slate-400" />
-              <span>推荐端点范例</span>
-            </div>
-            <div className="space-y-2 text-xs text-slate-600 dark:text-slate-400">
-              <div className="p-2.5 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200/60 dark:border-slate-700/60 space-y-1">
-                <div className="font-semibold text-slate-800 dark:text-slate-200">DeepSeek (性价比首选)</div>
-                <code className="text-[11px] font-mono text-indigo-600 dark:text-indigo-400 block truncate">
-                  https://api.deepseek.com/v1
-                </code>
-              </div>
-              <div className="p-2.5 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200/60 dark:border-slate-700/60 space-y-1">
-                <div className="font-semibold text-slate-800 dark:text-slate-200">本地 Ollama (完全私有)</div>
-                <code className="text-[11px] font-mono text-indigo-600 dark:text-indigo-400 block truncate">
-                  http://localhost:11434/v1
-                </code>
-              </div>
-              <div className="p-2.5 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200/60 dark:border-slate-700/60 space-y-1">
-                <div className="font-semibold text-slate-800 dark:text-slate-200">OpenAI 官方</div>
-                <code className="text-[11px] font-mono text-indigo-600 dark:text-indigo-400 block truncate">
-                  https://api.openai.com/v1
-                </code>
-              </div>
-            </div>
-          </div>
-
-          {/* Card 3: Security */}
-          <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-soft-sm transition-colors dark:border-slate-800 dark:bg-slate-900 space-y-2.5 text-xs text-slate-600 dark:text-slate-400">
-            <div className="flex items-center gap-2 font-semibold text-slate-900 dark:text-slate-100">
-              <Lock className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
-              <span>隐私与安全防线</span>
-            </div>
-            <p className="leading-relaxed">
-              请求直接由本地客户端发送至您所填写的模型地址，不经过任何第三方服务器中转。文件写入前始终先进行条件锁保护，杜绝并发覆盖。
-            </p>
-          </div>
-        </div>
       </div>
-    </div>
-  );
-}
-
-function PolicyCard({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 dark:border-slate-700 dark:bg-slate-800/40">
-      <div className="text-[10px] uppercase tracking-wide text-slate-500 dark:text-slate-400">{label}</div>
-      <div className="mt-1 font-medium text-slate-800 dark:text-slate-200">{value}</div>
     </div>
   );
 }

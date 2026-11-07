@@ -447,7 +447,7 @@ export function ProjectDetailView({
                   排除 Git 已跟踪文件
                 </span>
                 <span className="block text-[11px] leading-relaxed text-slate-500 dark:text-slate-400">
-                  保存后下次同步生效：跳过 Git 索引中已跟踪的文件，不上传或下载，也不会删除两端已有文件；未跟踪文件仍按同步规则处理。此设置只作用于本机项目绑定；需要本机安装 Git。
+                  下次同步生效，仅限本机，需安装 Git。
                 </span>
               </span>
             </label>
@@ -468,9 +468,7 @@ export function ProjectDetailView({
               <AlertTriangle className="w-4 h-4 text-rose-600 dark:text-rose-400" />
               危险操作区
             </h3>
-            <p className="text-xs text-slate-600 dark:text-slate-400 leading-normal">
-              解绑该项目将停止本地监听器与远端同步。本地与远端已存在的真实文件均不会被删除，仅移除调度绑定关系。
-            </p>
+
             <Button
               variant="danger"
               size="sm"

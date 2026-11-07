@@ -93,7 +93,6 @@ export function SettingsView() {
           </div>
           <div>
             <h2 className="text-base font-semibold text-slate-900 dark:text-slate-100">系统配置与引擎参数</h2>
-            <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">设备身份、开机自启行为与底层同步调度防抖参数</p>
           </div>
         </div>
         <Button variant="primary" size="md" onClick={handleSave} disabled={saving} className="gap-2">
@@ -113,8 +112,8 @@ export function SettingsView() {
           <label className="text-xs text-slate-700 dark:text-slate-300 font-medium" htmlFor="device-name">设备名称</label>
           <input id="device-name" value={deviceName} maxLength={64} onChange={(event) => setDeviceName(event.target.value)} className="w-full bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-2 text-xs text-slate-900 dark:text-slate-100 focus:outline-none focus:border-indigo-500" />
         </div>
-        <ToggleRow title="登录 Windows 后自动启动" description="将 ProjectSync 注册到当前用户的系统启动项" checked={autostart} onChange={setAutostart} />
-        <ToggleRow title="启动后最小化到托盘" description="开机启动时在系统托盘静默常驻，继续监听并按周期轮询" checked={startMinimized} onChange={setStartMinimized} />
+        <ToggleRow title="登录 Windows 后自动启动" checked={autostart} onChange={setAutostart} />
+        <ToggleRow title="启动后最小化到托盘" checked={startMinimized} onChange={setStartMinimized} />
       </section>
 
       {api.isTauri && (
@@ -137,18 +136,16 @@ export function SettingsView() {
           <NumberField label="本地变更防抖时间（毫秒）" value={defaultDebounce} min={100} max={30000} onChange={setDefaultDebounce} />
           <NumberField label="网络错误最多重试次数" value={retryLimit} min={1} max={20} onChange={setRetryLimit} />
         </div>
-        <p className="text-[11px] text-slate-500 dark:text-slate-400">网络重试使用 2 秒起步的指数退避，最长等待 300 秒。每个同步项目可单独覆盖轮询与防抖参数。</p>
       </section>
     </div>
   );
 }
 
-function ToggleRow(props: { title: string; description: string; checked: boolean; onChange: (value: boolean) => void }) {
+function ToggleRow(props: { title: string; checked: boolean; onChange: (value: boolean) => void }) {
   return (
     <label className="flex items-center justify-between p-3.5 rounded-xl bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700/80 cursor-pointer hover:bg-slate-100/70 dark:hover:bg-slate-800/80 transition-colors">
       <div>
         <div className="text-xs text-slate-900 dark:text-slate-100 font-medium">{props.title}</div>
-        <div className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">{props.description}</div>
       </div>
       <input type="checkbox" checked={props.checked} onChange={(event) => props.onChange(event.target.checked)} className="rounded w-4 h-4 bg-white dark:bg-slate-900 border-slate-300 dark:border-slate-600 text-indigo-600 focus:ring-0 cursor-pointer" />
     </label>

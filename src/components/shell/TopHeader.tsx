@@ -97,7 +97,7 @@ export function TopHeader({
           ) : (
             <span className="flex items-center gap-1.5 text-xs text-slate-600 dark:text-slate-400">
               <span className="w-2 h-2 rounded-full bg-emerald-500 dark:bg-emerald-400" />
-              就绪 · BLAKE3 校验已开启
+              就绪
             </span>
           )}
         </div>

@@ -160,7 +160,6 @@ export function AddProjectWizard({
       isOpen={isOpen}
       onClose={onClose}
       title="添加同步项目"
-      subtitle="关联本地工作区与 WebDAV 远端路径，并配置文件过滤规则"
       maxWidth="max-w-3xl"
       headerExtra={
         <div className="flex items-center justify-between">
@@ -327,7 +326,6 @@ export function AddProjectWizard({
                 className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-2 text-xs text-slate-900 dark:text-slate-100 focus:outline-none focus:border-indigo-500 font-medium"
                 placeholder="输入项目名称"
               />
-              <p className="text-[11px] text-slate-500 dark:text-slate-400">默认使用目录名，可手动修改。</p>
             </div>
 
             <div className="space-y-1.5 min-w-0">
@@ -350,9 +348,6 @@ export function AddProjectWizard({
                   浏览文件夹
                 </Button>
               </div>
-              <p className="text-[11px] text-slate-500 dark:text-slate-400">
-                监听该目录的文件变更，并实时计算 BLAKE3 校验和。
-              </p>
             </div>
           </div>
 
@@ -386,7 +381,7 @@ export function AddProjectWizard({
               placeholder="/projects/MyDevApp"
             />
             <p className="text-[11px] text-slate-500 dark:text-slate-400">
-              若该远端路径不存在，ProjectSync 将自动发送 <code>MKCOL</code> 创建目录。
+              目录不存在时将自动创建。
             </p>
           </div>
 
@@ -439,7 +434,7 @@ export function AddProjectWizard({
                 排除 Git 已跟踪文件
               </span>
               <span className="block text-[11px] leading-relaxed text-slate-500 dark:text-slate-400">
-                启用后跳过 Git 索引中已跟踪的文件，不上传或下载，也不会删除两端已有文件；未跟踪文件仍按上方规则同步。Git 仓库建议开启；需要本机安装 Git。
+                仅限本机，需安装 Git。
               </span>
             </span>
           </label>
@@ -507,7 +502,7 @@ export function AddProjectWizard({
               <div className="bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-700/60 rounded-xl p-3 text-xs text-amber-800 dark:text-amber-300 flex items-center gap-2">
                 <AlertTriangle className="w-4 h-4 text-amber-600 dark:text-amber-400 shrink-0" />
                 <span>
-                  初始同步提示：确认后将写入同步基准，并启动双向监控。
+                  确认后立即开始同步。
                 </span>
               </div>
               {createError && (

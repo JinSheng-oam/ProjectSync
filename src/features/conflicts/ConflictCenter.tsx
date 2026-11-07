@@ -106,9 +106,6 @@ export function ConflictCenter({
                 安全拦截已生效
               </span>
             </h2>
-            <p className="text-xs text-slate-600 dark:text-slate-400 mt-1 max-w-2xl leading-relaxed">
-              安全保护机制：系统<strong>严禁静默覆盖不同内容的文件</strong>。当本地与远程 WebDAV 发生并发修改或存在内容分歧时，写操作将被挂起，需手动选择处理方案。
-            </p>
           </div>
         </div>
 
@@ -124,9 +121,6 @@ export function ConflictCenter({
             <CheckCircle className="w-6 h-6" />
           </div>
           <h3 className="text-base font-semibold text-slate-900 dark:text-slate-100">当前没有未决冲突</h3>
-          <p className="text-xs text-slate-600 dark:text-slate-400 max-w-md mx-auto">
-            本地工作目录与 WebDAV 远端文件完全一致，暂无冲突。
-          </p>
         </div>
       ) : (
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 items-start">
@@ -468,7 +462,6 @@ export function ConflictCenter({
               </div>
               <div>
                 <h3 className="text-base font-semibold text-slate-900 dark:text-slate-100">{confirmResolution.title}</h3>
-                <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">请核对本次操作的影响范围</p>
               </div>
             </div>
 

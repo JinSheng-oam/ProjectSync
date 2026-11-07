@@ -124,9 +124,6 @@ export function WebDavManager({ accounts, onRefresh }: WebDavManagerProps) {
                 标准 WebDAV 兼容
               </span>
             </h2>
-            <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
-              账号凭据通过系统凭据管理器安全存储，不会以明文形式保存在配置文件中。
-            </p>
           </div>
         </div>
 
@@ -230,7 +227,6 @@ export function WebDavManager({ accounts, onRefresh }: WebDavManagerProps) {
         isOpen={isModalOpen}
         onClose={() => setIsModalOpen(false)}
         title={editingAccountId ? '编辑 WebDAV 节点' : '添加 WebDAV 远端节点'}
-        subtitle="填写服务器连接参数，执行兼容性与并发保护能力探测"
         maxWidth="max-w-xl"
       >
         <div className="space-y-4">

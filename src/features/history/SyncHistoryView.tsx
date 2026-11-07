@@ -52,9 +52,6 @@ export function SyncHistoryView({ history }: { history: HistoryItemDto[] }) {
           </div>
           <div>
             <h2 className="text-base font-semibold text-slate-900 dark:text-slate-100">全量同步审计日志</h2>
-            <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
-              记录本地与 WebDAV 之间的文件上传、下载、冲突副本生成与删除备份。
-            </p>
           </div>
         </div>
 
