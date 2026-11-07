@@ -49,6 +49,7 @@ export function AddProjectWizard({
   const [remoteBrowseRefresh, setRemoteBrowseRefresh] = useState(0);
 
   const [rules, setRules] = useState<SyncRuleDto[]>(recommendedRules);
+  const [excludeGitTracked, setExcludeGitTracked] = useState(false);
 
   // Step 5 Preview State
   const [previewData, setPreviewData] = useState<InitialSyncPreviewDto | null>(null);
@@ -74,6 +75,10 @@ export function AddProjectWizard({
     setRemotePathCustomized(true);
   }, [isOpen, remoteProject]);
 
+  useEffect(() => {
+    if (isOpen) setExcludeGitTracked(false);
+  }, [isOpen, remoteProject]);
+
   // Load preview when entering Step 5
   const handleGoToStep5 = async () => {
     setPreviewData(null);
@@ -81,7 +86,13 @@ export function AddProjectWizard({
     setLoadingPreview(true);
     setCurrentStep(5);
     try {
-      const data = await api.previewInitialSync(selectedAccountId, localPath, remotePath, rules);
+      const data = await api.previewInitialSync(
+        selectedAccountId,
+        localPath,
+        remotePath,
+        rules,
+        excludeGitTracked,
+      );
       setPreviewData(data);
     } catch (err: unknown) {
       console.error(err);
@@ -131,6 +142,7 @@ export function AddProjectWizard({
         localPath,
         remotePath,
         rules,
+        excludeGitTracked,
       });
       onProjectCreated();
       onClose();
@@ -413,7 +425,25 @@ export function AddProjectWizard({
       )}
 
       {currentStep === 4 && (
-        <div className="py-2"><RuleEditor rules={rules} onChange={setRules} localPath={localPath} /></div>
+        <div className="py-2 space-y-4">
+          <RuleEditor rules={rules} onChange={setRules} localPath={localPath} />
+          <label className="flex items-start gap-3 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/50 p-3 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={excludeGitTracked}
+              onChange={(event) => setExcludeGitTracked(event.target.checked)}
+              className="mt-0.5 h-4 w-4 accent-indigo-600"
+            />
+            <span className="space-y-1">
+              <span className="block text-xs font-medium text-slate-800 dark:text-slate-100">
+                排除 Git 已跟踪文件
+              </span>
+              <span className="block text-[11px] leading-relaxed text-slate-500 dark:text-slate-400">
+                启用后跳过 Git 索引中已跟踪的文件，不上传或下载，也不会删除两端已有文件；未跟踪文件仍按上方规则同步。Git 仓库建议开启；需要本机安装 Git。
+              </span>
+            </span>
+          </label>
+        </div>
       )}
 
       {/* Step 5: Initial Sync Preview & Safety Gate */}

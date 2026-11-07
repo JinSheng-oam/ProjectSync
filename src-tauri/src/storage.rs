@@ -5,6 +5,7 @@ use sqlx::{
 };
 use std::{
     borrow::Cow,
+    collections::HashSet,
     path::{Path, PathBuf},
     time::Duration,
 };
@@ -253,8 +254,8 @@ impl Database {
     pub async fn create_root(&self, root: &RootRecord, rules: &[SyncRuleDto]) -> AppResult<()> {
         let mut tx = self.pool.begin().await?;
         let now = unix_ms();
-        sqlx::query("INSERT INTO sync_roots(id,remote_project_id,account_id,name,local_path,remote_path,enabled,sync_mode,conflict_policy,delete_policy,poll_interval_seconds,debounce_ms,max_parallel_transfers,initial_sync_completed,initial_sync_confirmed,sync_status,created_at,updated_at) VALUES(?,?,?,?,?,?,1,'BIDIRECTIONAL','KEEP_BOTH','TRASH',?,?,2,0,1,'IDLE',?,?)")
-            .bind(&root.id).bind(&root.remote_project_id).bind(&root.account_id).bind(&root.name).bind(root.local_path.to_string_lossy().as_ref()).bind(&root.remote_path).bind(root.poll_interval_seconds as i64).bind(root.debounce_ms as i64).bind(now).bind(now).execute(&mut *tx).await?;
+        sqlx::query("INSERT INTO sync_roots(id,remote_project_id,account_id,name,local_path,remote_path,enabled,sync_mode,conflict_policy,delete_policy,poll_interval_seconds,debounce_ms,max_parallel_transfers,initial_sync_completed,initial_sync_confirmed,exclude_git_tracked,sync_status,created_at,updated_at) VALUES(?,?,?,?,?,?,1,'BIDIRECTIONAL','KEEP_BOTH','TRASH',?,?,2,0,1,?,'IDLE',?,?)")
+            .bind(&root.id).bind(&root.remote_project_id).bind(&root.account_id).bind(&root.name).bind(root.local_path.to_string_lossy().as_ref()).bind(&root.remote_path).bind(root.poll_interval_seconds as i64).bind(root.debounce_ms as i64).bind(root.exclude_git_tracked as i64).bind(now).bind(now).execute(&mut *tx).await?;
         for rule in rules {
             sqlx::query("INSERT INTO sync_rules(root_id,rule_type,pattern,priority,enabled,created_at) VALUES(?,?,?,?,?,?)")
                 .bind(&root.id).bind(match rule.rule_type { RuleType::Include => "INCLUDE", RuleType::Exclude => "EXCLUDE" }).bind(&rule.pattern).bind(rule.priority).bind(rule.enabled as i64).bind(now).execute(&mut *tx).await?;
@@ -269,9 +270,10 @@ impl Database {
         name: &str,
         poll: u32,
         debounce: u32,
+        exclude_git_tracked: bool,
     ) -> AppResult<()> {
-        let result = sqlx::query("UPDATE sync_roots SET name=?,poll_interval_seconds=?,debounce_ms=?,updated_at=? WHERE id=? AND deleted_at IS NULL")
-            .bind(name.trim()).bind(poll.clamp(10, 86_400) as i64).bind(debounce.clamp(100, 30_000) as i64).bind(unix_ms()).bind(id).execute(&self.pool).await?;
+        let result = sqlx::query("UPDATE sync_roots SET name=?,poll_interval_seconds=?,debounce_ms=?,exclude_git_tracked=?,updated_at=? WHERE id=? AND deleted_at IS NULL")
+            .bind(name.trim()).bind(poll.clamp(10, 86_400) as i64).bind(debounce.clamp(100, 30_000) as i64).bind(exclude_git_tracked as i64).bind(unix_ms()).bind(id).execute(&self.pool).await?;
         if result.rows_affected() == 0 {
             return Err(AppError::new("ROOT_NOT_FOUND", "同步项目不存在"));
         }
@@ -627,6 +629,46 @@ impl Database {
             let result = sqlx::query(
                 "UPDATE sync_tasks SET status='CANCELLED',last_error_code='CONFLICT_COPY_IGNORED',last_error_message='自动生成的冲突副本已排除本地同步；远端副本保留。',next_retry_at=NULL,updated_at=?,completed_at=? WHERE id=? AND root_id=? AND status IN ('PENDING','RETRY_WAIT','RUNNING','FAILED','BLOCKED')",
             )
+            .bind(now)
+            .bind(now)
+            .bind(id)
+            .bind(root_id)
+            .execute(&self.pool)
+            .await?;
+            cancelled += result.rows_affected();
+        }
+        Ok(cancelled)
+    }
+
+    pub async fn cancel_tasks_for_paths(
+        &self,
+        root_id: &str,
+        paths: &HashSet<String>,
+        error_code: &str,
+        error_message: &str,
+    ) -> AppResult<u64> {
+        if paths.is_empty() {
+            return Ok(0);
+        }
+        let rows = sqlx::query(
+            "SELECT id,relative_path FROM sync_tasks WHERE root_id=? AND status IN ('PENDING','RETRY_WAIT','RUNNING','FAILED','BLOCKED')",
+        )
+        .bind(root_id)
+        .fetch_all(&self.pool)
+        .await?;
+        let now = unix_ms();
+        let mut cancelled = 0;
+        for row in rows {
+            let relative_path: String = row.get("relative_path");
+            if !paths.contains(&crate::security::path_key(&relative_path)) {
+                continue;
+            }
+            let id: String = row.get("id");
+            let result = sqlx::query(
+                "UPDATE sync_tasks SET status='CANCELLED',last_error_code=?,last_error_message=?,next_retry_at=NULL,updated_at=?,completed_at=? WHERE id=? AND root_id=? AND status IN ('PENDING','RETRY_WAIT','RUNNING','FAILED','BLOCKED')",
+            )
+            .bind(error_code)
+            .bind(error_message)
             .bind(now)
             .bind(now)
             .bind(id)
@@ -1031,6 +1073,7 @@ fn root_from_row(r: &sqlx::sqlite::SqliteRow) -> AppResult<RootRecord> {
         local_path: r.get::<String, _>("local_path").into(),
         remote_path: r.get("remote_path"),
         enabled: r.get::<i64, _>("enabled") != 0,
+        exclude_git_tracked: r.get::<i64, _>("exclude_git_tracked") != 0,
         status: r.get("sync_status"),
         poll_interval_seconds: r.get::<i64, _>("poll_interval_seconds").max(10) as u32,
         debounce_ms: r.get::<i64, _>("debounce_ms").max(100) as u32,
@@ -1058,6 +1101,7 @@ fn root_dto_from_row(r: &sqlx::sqlite::SqliteRow) -> AppResult<SyncRootDto> {
         local_path: r.get("local_path"),
         remote_path: r.get("remote_path"),
         enabled: r.get::<i64, _>("enabled") != 0,
+        exclude_git_tracked: r.get::<i64, _>("exclude_git_tracked") != 0,
         status,
         poll_interval_seconds: r.get::<i64, _>("poll_interval_seconds").max(0) as u32,
         debounce_ms: r.get::<i64, _>("debounce_ms").max(0) as u32,

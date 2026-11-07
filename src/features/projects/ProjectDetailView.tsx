@@ -60,12 +60,14 @@ export function ProjectDetailView({
   // Advanced settings state
   const [pollInterval, setPollInterval] = useState(root?.pollIntervalSeconds || 30);
   const [debounceMs, setDebounceMs] = useState(root?.debounceMs || 500);
+  const [excludeGitTracked, setExcludeGitTracked] = useState(root?.excludeGitTracked ?? false);
 
   useEffect(() => {
     if (!root) return;
     setProjectName(root.name);
     setPollInterval(root.pollIntervalSeconds);
     setDebounceMs(root.debounceMs);
+    setExcludeGitTracked(root.excludeGitTracked);
   }, [rootId]);
 
   useEffect(() => {
@@ -122,6 +124,7 @@ export function ProjectDetailView({
         name: projectName.trim() || root.name,
         pollIntervalSeconds: Math.max(5, pollInterval),
         debounceMs: Math.max(100, debounceMs),
+        excludeGitTracked,
       });
       await onRefresh();
       alert('项目参数已成功保存');
@@ -431,6 +434,23 @@ export function ProjectDetailView({
                 className="w-full bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-2 text-xs font-mono text-slate-900 dark:text-slate-100 focus:outline-none focus:border-indigo-500"
               />
             </div>
+
+            <label className="flex items-start gap-3 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/50 p-3 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={excludeGitTracked}
+                onChange={(event) => setExcludeGitTracked(event.target.checked)}
+                className="mt-0.5 h-4 w-4 accent-indigo-600"
+              />
+              <span className="space-y-1">
+                <span className="block text-xs font-medium text-slate-800 dark:text-slate-100">
+                  排除 Git 已跟踪文件
+                </span>
+                <span className="block text-[11px] leading-relaxed text-slate-500 dark:text-slate-400">
+                  保存后下次同步生效：跳过 Git 索引中已跟踪的文件，不上传或下载，也不会删除两端已有文件；未跟踪文件仍按同步规则处理。此设置只作用于本机项目绑定；需要本机安装 Git。
+                </span>
+              </span>
+            </label>
 
             <div className="pt-2">
               <Button

@@ -43,6 +43,7 @@ export interface SyncRootDto {
   localPath: string;
   remotePath: string;
   enabled: boolean;
+  excludeGitTracked: boolean;
   status: SyncRootStatus;
   pollIntervalSeconds: number;
   debounceMs: number;

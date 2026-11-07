@@ -7,7 +7,7 @@ use crate::{
         SyncStatusDto, SyncSummaryDto, TaskDto, WebDavAccountDto, WebDavAccountInput,
         WebDavCapabilities,
     },
-    filesystem::{scan_local, RuleEngine},
+    filesystem::{scan_local_cached_excluding, RuleEngine},
     security::{normalize_remote_path, validate_relative_path, validate_webdav_url},
     webdav::href_to_dav_path,
 };
@@ -24,6 +24,12 @@ pub struct CreateRootInput {
     pub local_path: String,
     pub remote_path: String,
     pub rules: Vec<SyncRuleDto>,
+    #[serde(default = "default_exclude_git_tracked")]
+    pub exclude_git_tracked: bool,
+}
+
+fn default_exclude_git_tracked() -> bool {
+    false
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -32,6 +38,8 @@ pub struct UpdateRootInput {
     pub name: String,
     pub poll_interval_seconds: u32,
     pub debounce_ms: u32,
+    #[serde(default)]
+    pub exclude_git_tracked: bool,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -391,6 +399,7 @@ pub async fn create_sync_root(
                 data.local_path,
                 data.remote_path,
                 data.rules,
+                data.exclude_git_tracked,
             )
             .await?;
         if let Err(error) = state.install_watcher(&root) {
@@ -421,6 +430,7 @@ pub async fn update_sync_root(
             &data.name,
             data.poll_interval_seconds,
             data.debounce_ms,
+            data.exclude_git_tracked,
         )
         .await)
 }
@@ -472,10 +482,17 @@ pub async fn preview_initial_sync(
     local_path: String,
     remote_path: String,
     rules: Vec<SyncRuleDto>,
+    exclude_git_tracked: Option<bool>,
 ) -> ApiResult<InitialSyncPreviewDto> {
     api(state
         .sync
-        .preview(&account_id, &local_path, &remote_path, &rules)
+        .preview(
+            &account_id,
+            &local_path,
+            &remote_path,
+            &rules,
+            exclude_git_tracked.unwrap_or(false),
+        )
         .await)
 }
 
@@ -589,11 +606,16 @@ pub async fn preview_rule_impact(
     api(async {
         let root = state.db.root(&root_id).await?;
         let old_rules = state.db.rules(&root_id).await?;
-        let old = scan_local(&root.local_path, &old_rules)?
+        let git_tracked_paths = if root.exclude_git_tracked {
+            crate::git::tracked_paths(&root.local_path)?
+        } else {
+            HashSet::new()
+        };
+        let old = scan_local_cached_excluding(&root.local_path, &old_rules, &[], &git_tracked_paths)?
             .into_iter()
             .map(|entry| entry.relative_path)
             .collect::<HashSet<_>>();
-        let new = scan_local(&root.local_path, &rules)?
+        let new = scan_local_cached_excluding(&root.local_path, &rules, &[], &git_tracked_paths)?
             .into_iter()
             .map(|entry| entry.relative_path)
             .collect::<HashSet<_>>();

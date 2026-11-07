@@ -4,6 +4,7 @@ use crate::{
 };
 use globset::{GlobBuilder, GlobSet, GlobSetBuilder};
 use std::{
+    collections::HashSet,
     fs::{self, File, OpenOptions},
     io::{Read, Seek, SeekFrom, Write},
     path::{Path, PathBuf},
@@ -84,6 +85,15 @@ pub fn scan_local_cached(
     rules: &[SyncRuleDto],
     cache: &[crate::domain::BaselineEntry],
 ) -> AppResult<Vec<LocalEntry>> {
+    scan_local_cached_excluding(root, rules, cache, &HashSet::new())
+}
+
+pub fn scan_local_cached_excluding(
+    root: &Path,
+    rules: &[SyncRuleDto],
+    cache: &[crate::domain::BaselineEntry],
+    excluded_paths: &HashSet<String>,
+) -> AppResult<Vec<LocalEntry>> {
     let root = fs::canonicalize(root)
         .map_err(|e| AppError::new("LOCAL_ROOT_INVALID", format!("无法访问本地同步目录：{e}")))?;
     if !root.is_dir() {
@@ -126,6 +136,9 @@ pub fn scan_local_cached(
                 .split('/')
                 .any(|part| part.eq_ignore_ascii_case(".projectsync"))
             {
+                return false;
+            }
+            if excluded_paths.contains(&path_key(&relative)) {
                 return false;
             }
             if file_type.is_file() && is_generated_conflict_copy(&relative) {

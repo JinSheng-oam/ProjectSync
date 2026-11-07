@@ -5,6 +5,7 @@ mod commands;
 mod credentials;
 mod domain;
 mod filesystem;
+mod git;
 mod security;
 mod startup;
 mod storage;

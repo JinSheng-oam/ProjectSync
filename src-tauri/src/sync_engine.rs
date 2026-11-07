@@ -8,8 +8,8 @@ use crate::{
     },
     filesystem::{
         atomic_replace, copy_to_trash, ensure_safe_parent, hash_file, move_to_trash, scan_local,
-        scan_local_cached, is_generated_conflict_copy, move_generated_conflict_copies_to_trash,
-        RuleEngine,
+        scan_local_cached_excluding, is_generated_conflict_copy,
+        move_generated_conflict_copies_to_trash, RuleEngine,
     },
     security::{normalize_remote_path, path_key, unix_ms, validate_relative_path},
     storage::Database,
@@ -290,6 +290,7 @@ impl SyncCoordinator {
         local_path: String,
         remote_path: String,
         rules: Vec<SyncRuleDto>,
+        exclude_git_tracked: bool,
     ) -> AppResult<crate::domain::SyncRootDto> {
         let name = name.trim().to_owned();
         if name.is_empty() {
@@ -447,6 +448,7 @@ impl SyncCoordinator {
             local_path: local,
             remote_path,
             enabled: true,
+            exclude_git_tracked,
             status: "IDLE".to_owned(),
             poll_interval_seconds,
             debounce_ms,
@@ -472,6 +474,7 @@ impl SyncCoordinator {
         local_path: &str,
         remote_path: &str,
         rules: &[SyncRuleDto],
+        exclude_git_tracked: bool,
     ) -> AppResult<InitialSyncPreviewDto> {
         let _ = RuleEngine::compile(rules)?;
         let local_root = fs::canonicalize(local_path).map_err(|e| {
@@ -483,9 +486,23 @@ impl SyncCoordinator {
         let normalized_remote = normalize_remote_path(remote_path)?;
         let (account, client) = self.client_for(account_id).await?;
         let capabilities = account.capabilities.unwrap_or_else(unsafe_capabilities);
-        let local = scan_local(&local_root, rules)?;
+        let git_tracked_paths = if exclude_git_tracked {
+            crate::git::tracked_paths(&local_root)?
+        } else {
+            HashSet::new()
+        };
+        let local = scan_local_cached_excluding(&local_root, rules, &[], &git_tracked_paths)?;
         let remote =
-            match scan_remote(&client, &normalized_remote, rules, &self.data_dir, &[]).await {
+            match scan_remote(
+                &client,
+                &normalized_remote,
+                rules,
+                &self.data_dir,
+                &[],
+                &git_tracked_paths,
+            )
+            .await
+            {
                 Ok(entries) => entries,
                 Err(error) if error.code == "DAV_NOT_FOUND" => Vec::new(),
                 Err(error) => return Err(error),
@@ -630,6 +647,29 @@ impl SyncCoordinator {
 
     async fn sync_locked(&self, root: &RootRecord, summary: &mut SyncSummaryDto) -> AppResult<()> {
         self.ensure_sync_active(&root.id).await?;
+        let git_tracked_paths = if root.exclude_git_tracked {
+            crate::git::tracked_paths(&root.local_path)?
+        } else {
+            HashSet::new()
+        };
+        if !git_tracked_paths.is_empty() {
+            let cancelled_git_tasks = self
+                .db
+                .cancel_tasks_for_paths(
+                    &root.id,
+                    &git_tracked_paths,
+                    "GIT_TRACKED_FILE_EXCLUDED",
+                    "此文件已由 Git 跟踪，当前项目设置为跳过 Git 已跟踪文件。",
+                )
+                .await?;
+            if cancelled_git_tasks > 0 {
+                tracing::info!(
+                    root_id = %root.id,
+                    count = cancelled_git_tasks,
+                    "cancelled tasks for Git-tracked files excluded from sync"
+                );
+            }
+        }
         let cancelled_conflict_copy_tasks =
             self.db.cancel_generated_conflict_copy_tasks(&root.id).await?;
         if cancelled_conflict_copy_tasks > 0 {
@@ -656,13 +696,18 @@ impl SyncCoordinator {
         let rule_engine = RuleEngine::compile(&rules)?;
         let ignored = old_baseline
             .iter()
-            .filter(|entry| !rule_engine.includes(&entry.relative_path))
+            .filter(|entry| {
+                !rule_engine.includes(&entry.relative_path)
+                    || git_tracked_paths.contains(&entry.path_key)
+            })
             .map(|entry| entry.relative_path.clone())
             .collect::<Vec<_>>();
         let reenabled = old_baseline
             .iter()
             .filter(|entry| {
-                entry.sync_state == "IGNORED" && rule_engine.includes(&entry.relative_path)
+                entry.sync_state == "IGNORED"
+                    && rule_engine.includes(&entry.relative_path)
+                    && !git_tracked_paths.contains(&entry.path_key)
             })
             .map(|entry| entry.relative_path.clone())
             .collect::<Vec<_>>();
@@ -670,7 +715,12 @@ impl SyncCoordinator {
             .apply_rule_state(&root.id, &ignored, &reenabled)
             .await?;
         self.db.set_root_status(&root.id, "SCANNING_LOCAL").await?;
-        let local = scan_local_cached(&root.local_path, &rules, &old_baseline)?;
+        let local = scan_local_cached_excluding(
+            &root.local_path,
+            &rules,
+            &old_baseline,
+            &git_tracked_paths,
+        )?;
         self.ensure_sync_active(&root.id).await?;
         self.db.set_root_status(&root.id, "SCANNING_REMOTE").await?;
         let remote = scan_remote(
@@ -679,6 +729,7 @@ impl SyncCoordinator {
             &rules,
             &self.data_dir,
             &old_baseline,
+            &git_tracked_paths,
         )
         .await?;
         let line_ending_equivalent = line_ending_equivalent_paths(
@@ -2661,6 +2712,7 @@ async fn scan_remote(
     rules: &[SyncRuleDto],
     data_dir: &Path,
     cache: &[crate::domain::BaselineEntry],
+    excluded_paths: &HashSet<String>,
 ) -> AppResult<Vec<RemoteEntry>> {
     let root_path = normalize_remote_path(root_path)?;
     let rule_engine = RuleEngine::compile(rules)?;
@@ -2705,10 +2757,13 @@ async fn scan_remote(
             if is_generated_conflict_copy(&relative) {
                 continue;
             }
+            let key = path_key(&relative);
+            if excluded_paths.contains(&key) {
+                continue;
+            }
             if !rule_engine.includes(&relative) {
                 continue;
             }
-            let key = path_key(&relative);
             if let Some(previous) = case_names.insert(key.clone(), relative.clone()) {
                 return Err(AppError::new(
                     "CASE_COLLISION",
@@ -2868,6 +2923,9 @@ fn build_plan(
             .or_else(|| b.map(|v| v.relative_path.as_str()))
             .unwrap_or_default()
             .to_owned();
+        if b.is_some_and(|entry| entry.sync_state == "IGNORED") {
+            continue;
+        }
         if rule_engine
             .as_ref()
             .is_some_and(|engine| !engine.includes(&path))

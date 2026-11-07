@@ -208,7 +208,7 @@ class MockEngine {
     return newAcc;
   }
 
-  async previewInitialSync(_accountId: string, _localPath: string, _remotePath: string, _rules: SyncRuleDto[]): Promise<InitialSyncPreviewDto> {
+  async previewInitialSync(_accountId: string, _localPath: string, _remotePath: string, _rules: SyncRuleDto[], _excludeGitTracked: boolean): Promise<InitialSyncPreviewDto> {
     await this.delay(600);
     return {
       rootId: 'preview_root',
@@ -235,6 +235,7 @@ class MockEngine {
     localPath: string;
     remotePath: string;
     rules: SyncRuleDto[];
+    excludeGitTracked: boolean;
   }): Promise<SyncRootDto> {
     await this.delay(400);
     const newRoot: SyncRootDto = {
@@ -245,6 +246,7 @@ class MockEngine {
       localPath: data.localPath,
       remotePath: data.remotePath,
       enabled: true,
+      excludeGitTracked: data.excludeGitTracked,
       status: 'IDLE',
       pollIntervalSeconds: 30,
       debounceMs: 500,
@@ -260,6 +262,13 @@ class MockEngine {
   async getSyncRules(rootId: string): Promise<SyncRuleDto[]> {
     await this.delay(100);
     return [...(this.rules[rootId] || [])];
+  }
+
+  async updateSyncRoot(rootId: string, data: { name: string; pollIntervalSeconds: number; debounceMs: number; excludeGitTracked: boolean }): Promise<void> {
+    await this.delay(100);
+    const root = this.roots.find((item) => item.id === rootId);
+    if (!root) throw new Error('同步项目不存在');
+    Object.assign(root, data);
   }
 
   async replaceSyncRules(rootId: string, newRules: SyncRuleDto[]): Promise<void> {
@@ -392,12 +401,12 @@ export const api = {
     return mockEngine.createWebDavAccount(account);
   },
 
-  async previewInitialSync(accountId: string, localPath: string, remotePath: string, rules: SyncRuleDto[]): Promise<InitialSyncPreviewDto> {
+  async previewInitialSync(accountId: string, localPath: string, remotePath: string, rules: SyncRuleDto[], excludeGitTracked: boolean): Promise<InitialSyncPreviewDto> {
     if (isTauriEnv) {
       const { invoke } = await import('@tauri-apps/api/core');
-      return invoke('preview_initial_sync', { accountId, localPath, remotePath, rules });
+      return invoke('preview_initial_sync', { accountId, localPath, remotePath, rules, excludeGitTracked });
     }
-    return mockEngine.previewInitialSync(accountId, localPath, remotePath, rules);
+    return mockEngine.previewInitialSync(accountId, localPath, remotePath, rules, excludeGitTracked);
   },
 
   async createSyncRoot(data: {
@@ -406,6 +415,7 @@ export const api = {
     localPath: string;
     remotePath: string;
     rules: SyncRuleDto[];
+    excludeGitTracked: boolean;
   }): Promise<SyncRootDto> {
     if (isTauriEnv) {
       const { invoke } = await import('@tauri-apps/api/core');
@@ -472,10 +482,12 @@ export const api = {
     return invoke('browse_remote_directory', { accountId, path });
   },
 
-  async updateSyncRoot(rootId: string, data: { name: string; pollIntervalSeconds: number; debounceMs: number }): Promise<void> {
-    if (!isTauriEnv) return;
-    const { invoke } = await import('@tauri-apps/api/core');
-    return invoke('update_sync_root', { rootId, data });
+  async updateSyncRoot(rootId: string, data: { name: string; pollIntervalSeconds: number; debounceMs: number; excludeGitTracked: boolean }): Promise<void> {
+    if (isTauriEnv) {
+      const { invoke } = await import('@tauri-apps/api/core');
+      return invoke('update_sync_root', { rootId, data });
+    }
+    return mockEngine.updateSyncRoot(rootId, data);
   },
 
   async deleteSyncRoot(rootId: string): Promise<void> {
