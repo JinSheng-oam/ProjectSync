@@ -20,4 +20,4 @@ AI 同步范围建议会发送相对路径和需求；AI 冲突合并会向配�
 
 构建 NSIS 或 MSI 安装包可运行 `.\build-installer.ps1`。本地开发页面使用 `http://localhost:1421`；浏览器预览使用模拟数据，真实 WebDAV 同步在桌面应用中运行。
 
-建议等同步结束，再在 PowerShell 7 中运行 `.\reinstall.ps1`。已安装的 MSI 由 Windows Installer 原位修复（不升级）；当前用户的 NSIS 使用本地已有安装包。脚本会先请求当前安装的 ProjectSync 退出；退出失败时停止。脚本不会自动打包。可先加 `-WhatIf` 查看选中的操作。
+运行 `reinstall.bat` 或在 PowerShell 7 中运行 `.\reinstall.ps1`，会从当前源码重新打包。脚本按现有安装选择 MSI 或 NSIS（全新安装默认 NSIS），打包成功后请求 ProjectSync 退出，再安装新生成的包。可加 `-WhatIf` 查看计划。

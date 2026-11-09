@@ -1,6 +1,10 @@
 ﻿#Requires -Version 7.0
 
-param([switch]$NsisOnly)
+[CmdletBinding(DefaultParameterSetName = 'All')]
+param(
+    [Parameter(ParameterSetName = 'NSIS')][switch]$NsisOnly,
+    [Parameter(ParameterSetName = 'MSI')][switch]$MsiOnly
+)
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
@@ -71,6 +75,7 @@ Write-Host 'Building ProjectSync installers...'
 
 $buildArgs = @('tauri', 'build')
 if ($NsisOnly) { $buildArgs += @('--bundles', 'nsis') }
+if ($MsiOnly) { $buildArgs += @('--bundles', 'msi') }
 & $pnpmCommand.Source @buildArgs
 if ($LASTEXITCODE -ne 0) {
     exit $LASTEXITCODE
@@ -82,6 +87,7 @@ $artifactDirectories = @(
     @{ Path = (Join-Path $bundleRoot 'msi'); Pattern = 'ProjectSync_*_x64_en-US.msi' }
 )
 if ($NsisOnly) { $artifactDirectories = @($artifactDirectories[0]) }
+if ($MsiOnly) { $artifactDirectories = @($artifactDirectories[1]) }
 $artifacts = foreach ($directory in $artifactDirectories) {
     $artifact = Get-ChildItem -LiteralPath $directory.Path -File -Filter $directory.Pattern |
         Sort-Object LastWriteTime -Descending |
