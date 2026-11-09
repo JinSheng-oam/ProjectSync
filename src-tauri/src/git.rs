@@ -57,7 +57,16 @@ pub fn tracked_paths(sync_root: &Path) -> AppResult<HashSet<String>> {
 }
 
 fn run_git(root: &Path, args: &[&str]) -> AppResult<Output> {
-    Command::new("git")
+    let mut command = Command::new("git");
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+
+        // The installed GUI has no console; prevent Git from opening one during scans.
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        command.creation_flags(CREATE_NO_WINDOW);
+    }
+    command
         .arg("-C")
         .arg(git_compatible_path(root))
         .args(args)
