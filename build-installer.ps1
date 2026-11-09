@@ -65,6 +65,7 @@ if (-not $rustToolchain) {
 }
 
 $env:RUSTUP_TOOLCHAIN = $rustToolchain
+& (Join-Path $projectRoot 'initialize-msvc.ps1')
 Write-Host "Using Rust toolchain: $rustToolchain"
 Write-Host 'Building ProjectSync installers...'
 

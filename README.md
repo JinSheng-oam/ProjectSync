@@ -12,7 +12,7 @@ AI 同步范围建议会发送相对路径和需求；AI 冲突合并会向配�
 
 ## 从源码运行
 
-准备 Windows、PowerShell 7、Node.js、pnpm 和 Rust MSVC 工具链。运行：
+准备 Windows、PowerShell 7、Node.js、pnpm 和 Rust MSVC 工具链。通过 Visual Studio Installer 安装「使用 C++ 的桌面开发」，包含 MSVC x64/x86 和 Windows SDK。启动和打包脚本会自动加载编译环境。运行：
 
 ```powershell
 .\start.ps1
