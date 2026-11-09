@@ -19,3 +19,5 @@ AI 同步范围建议会发送相对路径和需求；AI 冲突合并会向配�
 ```
 
 构建 NSIS 或 MSI 安装包可运行 `.\build-installer.ps1`。本地开发页面使用 `http://localhost:1421`；浏览器预览使用模拟数据，真实 WebDAV 同步在桌面应用中运行。
+
+等同步结束并从系统托盘退出 ProjectSync，再双击 `reinstall.bat`。脚本先从当前源码构建 NSIS 安装包，再静默覆盖安装并保留应用数据。打包失败时停止；如果原来使用 MSI 安装，请用原 MSI 安装包修复。

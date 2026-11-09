@@ -1,5 +1,7 @@
 ﻿#Requires -Version 7.0
 
+param([switch]$NsisOnly)
+
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
@@ -64,9 +66,11 @@ if (-not $rustToolchain) {
 
 $env:RUSTUP_TOOLCHAIN = $rustToolchain
 Write-Host "Using Rust toolchain: $rustToolchain"
-Write-Host 'Building the NSIS and MSI installers...'
+Write-Host 'Building ProjectSync installers...'
 
-& $pnpmCommand.Source tauri build
+$buildArgs = @('tauri', 'build')
+if ($NsisOnly) { $buildArgs += @('--bundles', 'nsis') }
+& $pnpmCommand.Source @buildArgs
 if ($LASTEXITCODE -ne 0) {
     exit $LASTEXITCODE
 }
@@ -76,6 +80,7 @@ $artifactDirectories = @(
     @{ Path = (Join-Path $bundleRoot 'nsis'); Pattern = 'ProjectSync_*_x64-setup.exe' },
     @{ Path = (Join-Path $bundleRoot 'msi'); Pattern = 'ProjectSync_*_x64_en-US.msi' }
 )
+if ($NsisOnly) { $artifactDirectories = @($artifactDirectories[0]) }
 $artifacts = foreach ($directory in $artifactDirectories) {
     $artifact = Get-ChildItem -LiteralPath $directory.Path -File -Filter $directory.Pattern |
         Sort-Object LastWriteTime -Descending |
