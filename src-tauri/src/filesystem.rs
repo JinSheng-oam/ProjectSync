@@ -63,7 +63,7 @@ impl RuleEngine {
             && (!self.has_include || self.includes.is_match(path))
     }
 
-    fn is_excluded(&self, path: &str, is_directory: bool) -> bool {
+    pub(crate) fn is_excluded(&self, path: &str, is_directory: bool) -> bool {
         if path
             .split('/')
             .any(|part| part.eq_ignore_ascii_case(".projectsync"))

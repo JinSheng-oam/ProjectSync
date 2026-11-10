@@ -10,6 +10,8 @@ ProjectSync 是 Windows 桌面同步工具，将本地项目目录与 WebDAV 双
 
 AI 同步范围建议会发送相对路径和需求；AI 冲突合并会向配置的服务发送冲突文件文本。Git 排除按本机项目绑定保存。
 
+冲突合并也支持 Codex CLI：先在终端安装并登录 Codex CLI，再到「AI 设置 → 冲突合并」选择 Codex CLI，测试连接后保存。合并结果仍须审阅并确认写入；AI 同步范围建议继续使用兼容 API。
+
 ## 从源码运行
 
 准备 Windows、PowerShell 7、Node.js、pnpm 和 Rust MSVC 工具链。通过 Visual Studio Installer 安装「使用 C++ 的桌面开发」，包含 MSVC x64/x86 和 Windows SDK。启动和打包脚本会自动加载编译环境。运行：

@@ -27,6 +27,7 @@ export { mockEngine } from './mockEngine';
 const isTauriEnv = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
 
 let mockAiSettings: AiSettingsDto = {
+  useCodexForMerge: false,
   endpoint: 'https://api.openai.com/v1',
   model: 'gpt-4o-mini',
   hasApiKey: false,
@@ -357,6 +358,7 @@ export const api = {
   async saveAiSettings(settings: SaveAiSettingsInput): Promise<AiSettingsDto> {
     if (!isTauriEnv) {
       mockAiSettings = {
+        useCodexForMerge: settings.useCodexForMerge,
         endpoint: settings.endpoint.trim(),
         model: settings.model.trim(),
         hasApiKey: settings.clearApiKey ? false : Boolean(settings.apiKey?.trim()) || mockAiSettings.hasApiKey,
@@ -369,7 +371,8 @@ export const api = {
     return invoke<AiSettingsDto>('save_ai_settings', { settings });
   },
 
-  async testAiSettings(input?: { endpoint: string; model: string; apiKey?: string }): Promise<AiConnectionTestDto> {
+  async testAiSettings(input?: { endpoint: string; model: string; apiKey?: string; useCodexForMerge?: boolean }): Promise<AiConnectionTestDto> {
+    if (!isTauriEnv && input?.useCodexForMerge) throw new Error('请在桌面版测试 Codex CLI。');
     if (!isTauriEnv) return { message: '连接成功，模型返回：OK', model: input?.model || mockAiSettings.model, latencyMs: 320 };
     const { invoke } = await import('@tauri-apps/api/core');
     return invoke<AiConnectionTestDto>('test_ai_settings', { input });

@@ -223,6 +223,7 @@ export interface RuleImpactDto {
 export interface DiscoveredProject { accountId: string; remotePath: string; remoteProjectId: string | null; name: string; }
 
 export interface AiSettingsDto {
+  useCodexForMerge: boolean;
   endpoint: string;
   model: string;
   hasApiKey: boolean;
@@ -231,6 +232,7 @@ export interface AiSettingsDto {
 }
 
 export interface SaveAiSettingsInput {
+  useCodexForMerge: boolean;
   endpoint: string;
   model: string;
   apiKey?: string;

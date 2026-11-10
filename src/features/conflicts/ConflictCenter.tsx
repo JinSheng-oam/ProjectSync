@@ -23,7 +23,9 @@ interface ConflictCenterProps {
   onResolve: (conflictId: string, resolution: ConflictResolution) => Promise<void>;
   onExcludeFile: (conflictId: string) => Promise<void>;
   aiSession?: AiMergeSession | null;
-  onStartAiMerge: (conflict: ConflictItemDto) => Promise<void>;
+  aiMergeQueue: string[];
+  onEnqueueAiMerges: (ids: string[]) => void;
+  onClearAiMergeQueue: () => void;
   onOpenAiMergeModal: () => void;
   onOpenAiSettings: () => void;
 }
@@ -34,11 +36,14 @@ export function ConflictCenter({
   onResolve,
   onExcludeFile,
   aiSession,
-  onStartAiMerge,
+  aiMergeQueue,
+  onEnqueueAiMerges,
+  onClearAiMergeQueue,
   onOpenAiMergeModal,
   onOpenAiSettings,
 }: ConflictCenterProps) {
   const unresolvedConflicts = conflicts.filter((c) => c.status === 'UNRESOLVED');
+  const [checkedIds, setCheckedIds] = useState<string[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(
     unresolvedConflicts.length > 0 ? unresolvedConflicts[0].id : null
   );
@@ -52,7 +57,7 @@ export function ConflictCenter({
   const [aiSettings, setAiSettings] = useState<AiSettingsDto | null>(null);
   const [excludeConfirmation, setExcludeConfirmation] = useState<{ id: string; path: string } | null>(null);
 
-  const activeConflict = conflicts.find((c) => c.id === selectedId) || unresolvedConflicts[0];
+  const activeConflict = unresolvedConflicts.find((c) => c.id === selectedId) || unresolvedConflicts[0];
   const activeProjectName = activeConflict
     ? roots.find((root) => root.id === activeConflict.rootId)?.name
     : undefined;
@@ -90,6 +95,14 @@ export function ConflictCenter({
   };
 
   const isAiMergingThis = Boolean(aiSession && aiSession.conflictId === activeConflict?.id);
+  const aiConfigured = Boolean(aiSettings?.configured || aiSettings?.useCodexForMerge);
+  const queuedIds = new Set(aiMergeQueue);
+  const selectableIds = unresolvedConflicts
+    .filter((item) => item.id !== aiSession?.conflictId && !queuedIds.has(item.id))
+    .map((item) => item.id);
+  const selectedBatch = selectableIds.filter((id) => checkedIds.includes(id));
+  const allChecked = selectableIds.length > 0 && selectedBatch.length === selectableIds.length;
+  const isActiveQueued = activeConflict ? queuedIds.has(activeConflict.id) : false;
 
   return (
     <div className="space-y-6 max-w-7xl mx-auto">
@@ -133,6 +146,42 @@ export function ConflictCenter({
               </span>
             </div>
 
+            <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 px-4 py-2 dark:border-slate-800">
+              <label className="flex items-center gap-1.5 text-xs text-slate-600 dark:text-slate-300">
+                <input
+                  type="checkbox"
+                  checked={allChecked}
+                  disabled={selectableIds.length === 0}
+                  onChange={() => setCheckedIds(allChecked ? [] : selectableIds)}
+                  className="accent-indigo-600"
+                />
+                全选
+              </label>
+              <Button
+                variant="secondary"
+                size="sm"
+                disabled={selectedBatch.length === 0}
+                onClick={() => {
+                  if (!aiConfigured) {
+                    onOpenAiSettings();
+                    return;
+                  }
+                  onEnqueueAiMerges(selectedBatch);
+                  setCheckedIds([]);
+                }}
+              >
+                <Sparkles className="h-3.5 w-3.5" />
+                批量 AI 合并{selectedBatch.length > 0 ? `（${selectedBatch.length}）` : ''}
+              </Button>
+            </div>
+            {aiMergeQueue.length > 0 && (
+              <div className="flex items-center justify-between gap-2 border-b border-slate-200 px-4 py-2 text-xs text-slate-600 dark:border-slate-800 dark:text-slate-300">
+                <span role="status">{aiMergeQueue.length} 个文件排队</span>
+                <button type="button" onClick={onClearAiMergeQueue} className="text-indigo-700 hover:underline dark:text-indigo-300">
+                  清空等待队列
+                </button>
+              </div>
+            )}
             <div className="divide-y divide-slate-100 dark:divide-slate-800 max-h-[600px] overflow-y-auto">
               {unresolvedConflicts.map((item) => {
                 const isSelected = item.id === (activeConflict?.id || selectedId);
@@ -148,16 +197,29 @@ export function ConflictCenter({
                     }`}
                   >
                     <div className="flex items-center justify-between gap-2">
-                      <span className="text-xs font-mono font-medium truncate max-w-[180px]" title={item.relativePath}>
-                        {item.relativePath}
-                      </span>
+                      <div className="flex min-w-0 items-center gap-2">
+                        <input
+                          type="checkbox"
+                          aria-label={`选择 ${item.relativePath}`}
+                          checked={checkedIds.includes(item.id) && !hasSession && !queuedIds.has(item.id)}
+                          disabled={Boolean(hasSession) || queuedIds.has(item.id)}
+                          onClick={(event) => event.stopPropagation()}
+                          onChange={(event) => {
+                            const checked = event.target.checked;
+                            setCheckedIds((ids) => checked ? [...ids, item.id] : ids.filter((id) => id !== item.id));
+                          }}
+                          className="accent-indigo-600"
+                        />
+                        <span className="truncate text-xs font-mono font-medium" title={item.relativePath}>{item.relativePath}</span>
+                      </div>
                       <div className="flex items-center gap-1 shrink-0">
                         {hasSession && (
                           <span className="px-1.5 py-0.5 rounded text-[11px] font-medium bg-indigo-100 text-indigo-700 dark:bg-indigo-950 dark:text-indigo-300 flex items-center gap-0.5">
                             <Sparkles className="w-2.5 h-2.5" />
-                            {aiSession.status === 'merging' ? '合并中' : 'AI待审'}
+                            {aiSession.status === 'merging' ? '合并中' : aiSession.status === 'error' ? '合并失败' : 'AI 待审'}
                           </span>
                         )}
+                        {queuedIds.has(item.id) && <span className="text-[11px] text-indigo-600 dark:text-indigo-300">排队中</span>}
                         <span className="text-[11px] font-mono px-2 py-0.5 rounded-md bg-amber-100 dark:bg-amber-950 text-amber-900 dark:text-amber-200 border border-amber-300 dark:border-amber-700">
                           {item.conflictType}
                         </span>
@@ -329,19 +391,19 @@ export function ConflictCenter({
                     className={`p-3.5 rounded-xl border space-y-1.5 shadow-soft-sm transition-all cursor-pointer ${
                       isAiMergingThis
                         ? 'border-indigo-500 bg-indigo-50/80 dark:border-indigo-500 dark:bg-indigo-950/40 ring-2 ring-indigo-500/20'
-                        : aiSettings?.configured
+                        : aiConfigured
                         ? 'border-amber-300 bg-amber-50/70 hover:bg-amber-100/70 dark:border-amber-700 dark:bg-amber-950/20 dark:hover:bg-amber-950/40'
                         : 'border-slate-200 bg-slate-50/70 dark:border-slate-800 dark:bg-slate-900/60'
                     }`}
                     onClick={() => {
-                      if (!aiSettings?.configured) {
+                      if (!aiConfigured) {
                         onOpenAiSettings();
                         return;
                       }
                       if (isAiMergingThis) {
                         onOpenAiMergeModal();
-                      } else {
-                        void onStartAiMerge(activeConflict);
+                      } else if (!isActiveQueued) {
+                        onEnqueueAiMerges([activeConflict.id]);
                       }
                     }}
                   >
@@ -352,8 +414,8 @@ export function ConflictCenter({
                           {isAiMergingThis ? aiSession?.status === 'merging'
                               ? 'AI 正在后台合并中…'
                               : '查看 AI 合并审阅面板'
-                            : aiSettings?.configured
-                            ? 'AI 智能合并与建议'
+                            : aiConfigured
+                            ? isActiveQueued ? '已加入队列' : aiSession ? '加入 AI 合并队列' : 'AI 智能合并与建议'
                             : '配置 AI 合并'}
                         </span>
                       </span>
@@ -364,9 +426,11 @@ export function ConflictCenter({
                     <p className="text-[11px] leading-normal text-slate-600 dark:text-slate-400">
                       {isAiMergingThis
                         ? '已保留合并状态，点击即可继续与 AI Agent 交互微调并确认写入。'
-                        : aiSettings?.configured
-                        ? 'AI 给出中文合并建议，支持类 Agent 连续下达指令调整文件；切换页面不受影响。'
-                        : '需要先在 AI 设置中保存接口和模型。'}
+                        : isActiveQueued
+                        ? '当前文件将在前面的文件评审结束后处理。'
+                        : aiConfigured
+                        ? '生成合并草稿，审阅后逐个确认写入。'
+                        : '请先选择并保存 AI 合并后端。'}
                     </p>
                   </div>
 

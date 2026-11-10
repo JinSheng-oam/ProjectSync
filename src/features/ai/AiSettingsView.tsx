@@ -20,6 +20,7 @@ export function AiSettingsView() {
   const [settings, setSettings] = useState<AiSettingsDto | null>(null);
   const [endpoint, setEndpoint] = useState('');
   const [model, setModel] = useState('');
+  const [useCodexForMerge, setUseCodexForMerge] = useState(false);
   const [apiKey, setApiKey] = useState('');
   const [clearApiKey, setClearApiKey] = useState(false);
   const [mergePrompt, setMergePrompt] = useState(FALLBACK_PROMPT);
@@ -35,6 +36,7 @@ export function AiSettingsView() {
     setSettings(value);
     setEndpoint(value.endpoint);
     setModel(value.model);
+    setUseCodexForMerge(value.useCodexForMerge);
     setMergePrompt(value.mergePrompt || FALLBACK_PROMPT);
     setApiKey('');
     setClearApiKey(false);
@@ -61,6 +63,7 @@ export function AiSettingsView() {
     setTestResult('');
     try {
       const result = await api.saveAiSettings({
+        useCodexForMerge,
         endpoint,
         model,
         apiKey: apiKey || undefined,
@@ -77,12 +80,13 @@ export function AiSettingsView() {
     }
   };
 
-  const handleTest = async () => {
+  const handleTest = async (useCodex = false) => {
     setTesting(true);
     setError('');
     setTestResult('');
     try {
       const result = await api.testAiSettings({
+        useCodexForMerge: useCodex,
         endpoint: endpoint.trim(),
         model: model.trim(),
         apiKey: apiKey.trim() || undefined,
@@ -119,6 +123,7 @@ export function AiSettingsView() {
   const hasUnsavedChanges = settings
     ? endpoint !== settings.endpoint
       || model !== settings.model
+      || useCodexForMerge !== settings.useCodexForMerge
       || mergePrompt !== settings.mergePrompt
       || apiKey.length > 0
       || clearApiKey
@@ -135,9 +140,9 @@ export function AiSettingsView() {
           <div>
             <h2 className="flex items-center gap-2 text-base font-semibold text-slate-900 dark:text-slate-100">
               <span>AI 服务与冲突合并设置</span>
-              {settings?.configured && (
+              {(settings?.configured || settings?.useCodexForMerge) && (
                 <span className="rounded-md border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-xs font-medium text-emerald-700 dark:border-emerald-800 dark:bg-emerald-950 dark:text-emerald-300">
-                  已就绪
+                  已配置
                 </span>
               )}
               {hasUnsavedChanges && (
@@ -169,7 +174,7 @@ export function AiSettingsView() {
       {testing && (
         <div role="status" aria-live="polite" className="flex items-center gap-2 rounded-xl border border-indigo-200 bg-indigo-50 p-3.5 text-xs text-indigo-800 dark:border-indigo-900 dark:bg-indigo-950/30 dark:text-indigo-300">
           <LoaderCircle className="h-4 w-4 animate-spin" />
-          <span>正在测试与模型 {model || '（未填写）'} 的连通性，请稍候...</span>
+          <span>正在测试连接，请稍候…</span>
         </div>
       )}
 
@@ -189,7 +194,7 @@ export function AiSettingsView() {
               <Button
                 variant="secondary"
                 size="sm"
-                onClick={handleTest}
+                onClick={() => void handleTest()}
                 disabled={testing || !endpoint.trim() || !model.trim()}
                 className="gap-1.5 shrink-0"
               >
@@ -298,6 +303,29 @@ export function AiSettingsView() {
               </button>
             </div>
 
+            <div className="flex items-end gap-3">
+              <label className="block grow space-y-1.5">
+                <span className="text-xs font-medium text-slate-700 dark:text-slate-300">合并后端</span>
+                <select
+                  value={useCodexForMerge ? 'codex' : 'api'}
+                  onChange={(event) => setUseCodexForMerge(event.target.value === 'codex')}
+                  className={inputStyle}
+                >
+                  <option value="api">OpenAI 兼容 API</option>
+                  <option value="codex">Codex CLI</option>
+                </select>
+              </label>
+              {useCodexForMerge && (
+                <Button variant="secondary" size="sm" onClick={() => void handleTest(true)} disabled={testing}>
+                  测试 Codex CLI
+                </Button>
+              )}
+            </div>
+            {useCodexForMerge && (
+              <p className="text-xs text-slate-500 dark:text-slate-400">
+                使用本机已登录的 Codex CLI 处理冲突文件文本。AI 同步范围建议仍使用上方 API 配置。
+              </p>
+            )}
             <label className="block space-y-1.5">
               <span className="text-xs font-medium text-slate-700 dark:text-slate-300">合并提示词</span>
               <textarea

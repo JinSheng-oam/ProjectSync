@@ -148,19 +148,21 @@ pub(super) async fn scan_remote(
     let mut visited = BTreeSet::new();
     let mut entries = Vec::new();
     let mut case_names = HashMap::<String, String>::new();
+    let prefix = format!("{}/", root_path.trim_end_matches('/'));
+    let staging_dir = data_dir.join("staging");
     while let Some(directory) = directories.pop() {
         if !visited.insert(directory.clone()) {
             continue;
         }
         let props = client.propfind(&directory, 1).await?;
+        let mut downloads = Vec::new();
         for prop in props {
             let dav_path = href_to_dav_path(client, &prop.path, &directory)?;
             if dav_path == directory || dav_path == format!("{}/", directory.trim_end_matches('/'))
             {
                 continue;
             }
-            let prefix = format!("{}/", root_path.trim_end_matches('/'));
-            let relative = dav_path.strip_prefix(&prefix).ok_or_else(|| {
+            let relative = dav_path.strip_prefix(prefix.as_str()).ok_or_else(|| {
                 AppError::new(
                     "DAV_INVALID_RESPONSE",
                     "PROPFIND 返回了同步根目录之外的文件",
@@ -175,7 +177,9 @@ pub(super) async fn scan_remote(
             }
             let relative = validate_relative_path(relative)?;
             if prop.is_collection {
-                directories.push(dav_path);
+                if !rule_engine.is_excluded(&relative, true) {
+                    directories.push(dav_path);
+                }
                 continue;
             }
             if is_generated_conflict_copy(&relative) {
@@ -198,29 +202,54 @@ pub(super) async fn scan_remote(
                 .get(&key)
                 .copied()
                 .filter(|old| can_reuse_remote_hash(old, prop.etag.as_deref(), prop.size));
-            let (hash, size) = if let Some(old) = cached {
-                (old.remote_hash.clone().unwrap_or_default(), prop.size)
-            } else {
-                let staging = data_dir
-                    .join("staging")
-                    .join(format!("remote-scan-{}.bin", uuid::Uuid::new_v4()));
-                if let Some(parent) = staging.parent() {
-                    tokio::fs::create_dir_all(parent).await?;
-                }
-                let size = client.get_to_file(&dav_path, &staging).await?;
-                let hash = hash_file(&staging)?;
-                let _ = tokio::fs::remove_file(staging).await;
-                (hash, size)
-            };
-            entries.push(RemoteEntry {
+            let entry = RemoteEntry {
                 relative_path: relative,
                 path_key: key,
-                hash,
-                size,
+                hash: cached.and_then(|old| old.remote_hash.clone()).unwrap_or_default(),
+                size: prop.size,
                 modified_at: prop.modified_at,
                 etag: prop.etag,
                 is_collection: false,
-            });
+            };
+            if cached.is_some() {
+                entries.push(entry);
+            } else {
+                downloads.push((dav_path, entry));
+            }
+        }
+        if !downloads.is_empty() {
+            tokio::fs::create_dir_all(&staging_dir).await?;
+            let mut jobs = futures_util::stream::iter(downloads)
+                .map(|(dav_path, mut entry)| {
+                    let staging = staging_dir.join(format!("remote-scan-{}.bin", uuid::Uuid::new_v4()));
+                    async move {
+                        let result = async {
+                            entry.size = client.get_to_file(&dav_path, &staging).await?;
+                            let hash_path = staging.clone();
+                            entry.hash = tokio::task::spawn_blocking(move || hash_file(&hash_path))
+                                .await
+                                .map_err(|error| AppError::new("LOCAL_FILE_READ", error.to_string()))??;
+                            Ok::<_, AppError>(entry)
+                        }
+                        .await;
+                        let _ = tokio::fs::remove_file(staging).await;
+                        result
+                    }
+                })
+                .buffer_unordered(4);
+            // Drain in-flight downloads so each job can remove its staging file.
+            let mut failure = None;
+            while let Some(result) = jobs.next().await {
+                match result {
+                    Ok(entry) => entries.push(entry),
+                    Err(error) => {
+                        failure.get_or_insert(error);
+                    }
+                }
+            }
+            if let Some(error) = failure {
+                return Err(error);
+            }
         }
     }
     Ok(entries)

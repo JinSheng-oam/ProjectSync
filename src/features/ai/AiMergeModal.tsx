@@ -9,6 +9,7 @@ import { AiMergeConversation } from './AiMergeConversation';
 
 interface AiMergeModalProps {
   session: AiMergeSession | null;
+  waitingCount: number;
   projectName?: string;
   onRefine: (instruction: string, currentContent?: string) => Promise<void>;
   onApply: (finalContent?: string) => Promise<void>;
@@ -19,6 +20,7 @@ interface AiMergeModalProps {
 
 export function AiMergeModal({
   session,
+  waitingCount,
   projectName = 'ProjectSync',
   onRefine,
   onApply,
@@ -174,6 +176,9 @@ export function AiMergeModal({
           </div>
 
           <div className="flex items-center gap-1.5 shrink-0">
+            {waitingCount > 0 && (
+              <span className="text-xs text-slate-500 dark:text-slate-400">还有 {waitingCount} 个排队</span>
+            )}
             {session.preview?.model && (
               <span className="hidden md:flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2.5 py-1 font-mono text-[11px] text-slate-600 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300 mr-1">
                 <Cpu className="w-3.5 h-3.5 text-indigo-500" />
@@ -191,7 +196,7 @@ export function AiMergeModal({
             </button>
             <button
               type="button"
-              disabled={isBusyApplying}
+              disabled={isBusyApplying || isBusyMerging}
               onClick={() => {
                 if (isModified) {
                   setConfirmCancel(true);
@@ -199,7 +204,7 @@ export function AiMergeModal({
                   onCancel();
                 }
               }}
-              title="关闭并放弃合并"
+              title={waitingCount > 0 ? '跳过当前文件' : '关闭并放弃合并'}
               className="p-1.5 rounded-lg border border-slate-200 dark:border-slate-700 text-slate-500 hover:text-rose-600 dark:text-slate-400 dark:hover:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/40 transition-colors disabled:opacity-40"
             >
               <X className="w-4 h-4" />
@@ -274,9 +279,9 @@ export function AiMergeModal({
                   onCancel();
                 }
               }}
-              disabled={isBusyApplying}
+              disabled={isBusyApplying || isBusyMerging}
             >
-              放弃合并
+              {waitingCount > 0 ? '跳过当前文件' : '放弃合并'}
             </Button>
             <Button
               variant="primary"

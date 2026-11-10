@@ -99,9 +99,9 @@ fn parse_ai_merge_response(response: &str) -> (String, Option<String>) {
 
 impl SyncCoordinator {
     pub async fn preview_ai_merge(&self, conflict_id: &str) -> AppResult<AiMergePreviewDto> {
-        let config = load_config(&self.db)
+        let config = load_merge_config(&self.db)
             .await?
-            .ok_or_else(|| AppError::new("AI_NOT_CONFIGURED", "请先在 AI 设置中配置接口和模型"))?;
+            .ok_or_else(|| AppError::new("AI_NOT_CONFIGURED", "请先在 AI 设置中配置冲突合并后端"))?;
         let (root_id, path, local_hash, remote_hash, _base_hash, expected_etag) =
             self.db.conflict_record(conflict_id).await?;
         let local_hash = local_hash
@@ -193,7 +193,7 @@ impl SyncCoordinator {
 在说明中指出关键取舍。遇到无法可靠判断的地方，写明“待人工确认”，指出具体段落、字段或符号，并简述候选稿采用了哪一侧及原因。没有此类问题时无需加这一项。
 输出必须包含以下两个区块，标签各占一行。先在 <merged_file> 与 </merged_file> 之间给出完整文件，再在 <analysis> 与 </analysis> 之间给出简短中文说明。标签外不要输出内容。文件区块保留原有缩进和格式，不添加外层 Markdown 围栏、解释、占位符或省略号。"#;
 
-        let raw_response = request_chat(
+        let raw_response = request_merge(
             &config,
             system_prompt,
             &user_message,
@@ -269,9 +269,9 @@ impl SyncCoordinator {
         instruction: &str,
         current_content: Option<&str>,
     ) -> AppResult<AiMergePreviewDto> {
-        let config = load_config(&self.db)
+        let config = load_merge_config(&self.db)
             .await?
-            .ok_or_else(|| AppError::new("AI_NOT_CONFIGURED", "请先在 AI 设置中配置接口和模型"))?;
+            .ok_or_else(|| AppError::new("AI_NOT_CONFIGURED", "请先在 AI 设置中配置冲突合并后端"))?;
         let preview_path = ai_merge_preview_path(&self.data_dir, preview_id)?;
         let preview_bytes = tokio::fs::read(&preview_path).await.map_err(|_| {
             AppError::new("AI_MERGE_PREVIEW_EXPIRED", "AI 合并预览已失效，请重新生成")
@@ -340,7 +340,7 @@ impl SyncCoordinator {
 如果请求有歧义或缺少必要材料，保留无法可靠修改的部分，在说明中标明“待人工确认”及原因。简述本轮实际修改，不声称已运行测试或验证。
 输出必须包含以下两个区块，标签各占一行。先在 <merged_file> 与 </merged_file> 之间给出完整文件，再在 <analysis> 与 </analysis> 之间给出简短中文说明。标签外不要输出内容。文件区块保留原有缩进和格式，不添加外层 Markdown 围栏、解释、占位符或省略号。"#;
 
-        let response = request_chat(&config, system_prompt, &user_message, Some(16_384)).await?;
+        let response = request_merge(&config, system_prompt, &user_message, Some(16_384)).await?;
         let (merged_content, suggestions) = parse_ai_merge_response(&response);
 
         if merged_content.trim().is_empty() {

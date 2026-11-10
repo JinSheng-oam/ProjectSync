@@ -9,6 +9,8 @@ use serde_json::{json, Value};
 use tauri::State;
 use zeroize::Zeroize;
 
+mod codex;
+
 const AI_KEY_REFERENCE: &str = "ProjectSync/AI/Default";
 const DEFAULT_MERGE_PROMPT: &str =
     include_str!("../../src/features/ai/default-merge-prompt.txt");
@@ -24,6 +26,7 @@ pub struct AiConfig {
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AiSettingsDto {
+    pub use_codex_for_merge: bool,
     pub endpoint: String,
     pub model: String,
     pub has_api_key: bool,
@@ -34,6 +37,8 @@ pub struct AiSettingsDto {
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SaveAiSettingsInput {
+    #[serde(default)]
+    pub use_codex_for_merge: bool,
     pub endpoint: String,
     pub model: String,
     pub api_key: Option<String>,
@@ -59,6 +64,8 @@ pub struct AiModelListInput {
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AiTestInput {
+    #[serde(default)]
+    pub use_codex_for_merge: bool,
     pub endpoint: String,
     pub model: String,
     pub api_key: Option<String>,
@@ -75,9 +82,13 @@ pub async fn save_ai_settings(
     mut settings: SaveAiSettingsInput,
 ) -> ApiResult<AiSettingsDto> {
     let result = async {
-        let endpoint = validate_base_endpoint(settings.endpoint.trim())?;
+        let endpoint = if settings.use_codex_for_merge && settings.endpoint.trim().is_empty() {
+            String::new()
+        } else {
+            validate_base_endpoint(settings.endpoint.trim())?
+        };
         let model = settings.model.trim();
-        if model.is_empty() || model.len() > 200 {
+        if (!settings.use_codex_for_merge && model.is_empty()) || model.len() > 200 {
             return Err(AppError::new(
                 "AI_SETTINGS_INVALID",
                 "模型名称必须为 1 至 200 个字符",
@@ -111,6 +122,7 @@ pub async fn save_ai_settings(
             }
             CredentialStore::set(AI_KEY_REFERENCE, api_key.trim())?;
         }
+        state.db.set_setting("aiMergeProvider", if settings.use_codex_for_merge { "codex" } else { "api" }).await?;
         read_settings(&state.db).await
     }
     .await;
@@ -126,6 +138,15 @@ pub async fn test_ai_settings(
     mut input: Option<AiTestInput>,
 ) -> ApiResult<AiConnectionTestDto> {
     let result = async {
+        if input.as_ref().is_some_and(|value| value.use_codex_for_merge) {
+            let started = std::time::Instant::now();
+            let reply = codex::request("You are a connectivity check. Reply with OK only.", "Connection test.", 45).await?;
+            return Ok(AiConnectionTestDto {
+                message: format!("Codex CLI 连接成功：{}", truncate(&reply, 80)),
+                model: "Codex CLI".to_owned(),
+                latency_ms: started.elapsed().as_millis() as u64,
+            });
+        }
         let saved = load_config(&state.db).await?;
         let endpoint = input
             .as_ref()
@@ -215,6 +236,38 @@ pub async fn load_config(db: &Database) -> AppResult<Option<AiConfig>> {
         api_key,
         merge_prompt,
     }))
+}
+
+pub struct MergeConfig {
+    pub model: String,
+    pub merge_prompt: String,
+    api: Option<AiConfig>,
+}
+
+pub async fn load_merge_config(db: &Database) -> AppResult<Option<MergeConfig>> {
+    if db.setting("aiMergeProvider").await?.as_deref() == Some("codex") {
+        return Ok(Some(MergeConfig {
+            model: "Codex CLI".to_owned(),
+            merge_prompt: db.setting("aiMergePrompt").await?
+                .filter(|value| !value.trim().is_empty())
+                .unwrap_or_else(|| DEFAULT_MERGE_PROMPT.to_owned()),
+            api: None,
+        }));
+    }
+    Ok(load_config(db).await?.map(|api| MergeConfig {
+        model: api.model.clone(),
+        merge_prompt: api.merge_prompt.clone(),
+        api: Some(api),
+    }))
+}
+
+pub async fn request_merge(
+    config: &MergeConfig, system: &str, user: &str, max_output_tokens: Option<u32>,
+) -> AppResult<String> {
+    match &config.api {
+        Some(api) => request_chat(api, system, user, max_output_tokens).await,
+        None => codex::request(system, user, 180).await,
+    }
 }
 
 pub async fn request_chat(
@@ -382,6 +435,7 @@ async fn read_settings(db: &Database) -> AppResult<AiSettingsDto> {
         Err(error) => return Err(error),
     };
     Ok(AiSettingsDto {
+        use_codex_for_merge: db.setting("aiMergeProvider").await?.as_deref() == Some("codex"),
         configured: !endpoint.trim().is_empty() && !model.trim().is_empty(),
         endpoint,
         model,

@@ -41,7 +41,9 @@ export function App() {
     handleResolveConflict,
     handleExcludeConflictFile,
     aiSession,
-    startAiMerge,
+    aiMergeQueue,
+    enqueueAiMerges,
+    clearAiMergeQueue,
     refineAiMerge,
     applyAiMerge,
     setAiSessionOpen,
@@ -165,7 +167,9 @@ export function App() {
                   onResolve={handleResolveConflict}
                   onExcludeFile={handleExcludeConflictFile}
                   aiSession={aiSession}
-                  onStartAiMerge={startAiMerge}
+                  aiMergeQueue={aiMergeQueue}
+                  onEnqueueAiMerges={enqueueAiMerges}
+                  onClearAiMergeQueue={clearAiMergeQueue}
                   onOpenAiMergeModal={() => setAiSessionOpen(true)}
                   onOpenAiSettings={() => setCurrentNav('ai')}
                 />
@@ -201,7 +205,9 @@ export function App() {
 
       {/* Global AI Merge & Agent Workspace Modal */}
       <AiMergeModal
+        key={aiSession?.conflictId}
         session={aiSession}
+        waitingCount={aiMergeQueue.length}
         projectName={roots.find((r) => r.id === conflicts.find((c) => c.id === aiSession?.conflictId)?.rootId)?.name || 'ProjectSync'}
         onRefine={refineAiMerge}
         onApply={applyAiMerge}

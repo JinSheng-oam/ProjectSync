@@ -14,7 +14,7 @@ use remote_files::{
 use scan::{line_ending_equivalent_paths, scan_remote};
 
 use crate::{
-    ai::{load_config, request_chat},
+    ai::{load_merge_config, request_merge},
     credentials::CredentialStore,
     domain::{
         AiMergePreviewDto, AppError, AppResult, ConflictResolution, HistoryEntry,
