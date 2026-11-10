@@ -10,6 +10,8 @@ import {
 import { HistoryItemDto } from '../../types/dto';
 import { Button } from '../../components/common/UIComponents';
 
+import { SelectMenu } from '../../components/common/SelectMenu';
+
 export function SyncHistoryView({ history }: { history: HistoryItemDto[] }) {
   const [searchTerm, setSearchTerm] = useState('');
   const [actionFilter, setActionFilter] = useState<string>('ALL');
@@ -83,29 +85,17 @@ export function SyncHistoryView({ history }: { history: HistoryItemDto[] }) {
 
         <div className="flex items-center gap-2 text-xs">
           <Filter className="w-3.5 h-3.5 text-slate-500 dark:text-slate-400" />
-          <select
-            value={actionFilter}
-            onChange={(e) => setActionFilter(e.target.value)}
-            className="bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 rounded-xl px-2.5 py-1.5 text-slate-800 dark:text-slate-200 focus:outline-none focus:border-indigo-500 font-mono"
-          >
-            <option value="ALL">全部动作</option>
-            <option value="UploadUpdate">UploadUpdate</option>
-            <option value="DownloadUpdate">DownloadUpdate</option>
-            <option value="CreateConflictCopy">CreateConflictCopy</option>
-            <option value="AiMerge">AiMerge</option>
-            <option value="MoveLocalToTrash">MoveLocalToTrash</option>
-          </select>
-
-          <select
-            value={statusFilter}
-            onChange={(e) => setStatusFilter(e.target.value)}
-            className="bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 rounded-xl px-2.5 py-1.5 text-slate-800 dark:text-slate-200 focus:outline-none focus:border-indigo-500"
-          >
-            <option value="ALL">全部状态</option>
-            <option value="SUCCESS">成功</option>
-            <option value="BLOCKED">已拦截</option>
-            <option value="FAILED">失败</option>
-          </select>
+          <SelectMenu label="同步动作" value={actionFilter} onChange={setActionFilter} options={[
+            { value: 'ALL', label: '全部动作' },
+            ...['UploadUpdate', 'DownloadUpdate', 'CreateConflictCopy', 'AiMerge', 'MoveLocalToTrash']
+              .map((action) => ({ value: action, label: action })),
+          ]} />
+          <SelectMenu label="同步状态" value={statusFilter} onChange={setStatusFilter} options={[
+            { value: 'ALL', label: '全部状态' },
+            { value: 'SUCCESS', label: '成功' },
+            { value: 'BLOCKED', label: '已拦截' },
+            { value: 'FAILED', label: '失败' },
+          ]} />
         </div>
       </div>
 

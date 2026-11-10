@@ -355,6 +355,8 @@ pub struct PreviewItemDto {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ConflictItemDto {
+    pub has_local_version: bool,
+    pub has_remote_version: bool,
     pub id: String,
     pub root_id: String,
     pub relative_path: String,

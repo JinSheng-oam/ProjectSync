@@ -315,7 +315,7 @@ export function useSyncStore() {
     const id = aiMergeQueue[0];
     const conflict = conflicts.find((item) => item.id === id && item.status === 'UNRESOLVED');
     setAiMergeQueue((queue) => queue.filter((item) => item !== id));
-    if (conflict) void generateAiMerge(conflict);
+    if (conflict?.hasLocalVersion && conflict.hasRemoteVersion) void generateAiMerge(conflict);
   }, [aiMergeQueue, aiSession, conflicts, generateAiMerge]);
 
   const refineAiMerge = async (instruction: string, currentContent?: string) => {

@@ -11,6 +11,7 @@ import {
   Sparkles,
 } from 'lucide-react';
 import { Button } from '../../components/common/UIComponents';
+import { SelectMenu } from '../../components/common/SelectMenu';
 import { api } from '../../services/api';
 import { AiSettingsDto } from '../../types/dto';
 
@@ -304,17 +305,18 @@ export function AiSettingsView() {
             </div>
 
             <div className="flex items-end gap-3">
-              <label className="block grow space-y-1.5">
+              <div className="grow space-y-1.5">
                 <span className="text-xs font-medium text-slate-700 dark:text-slate-300">合并后端</span>
-                <select
+                <SelectMenu
+                  label="合并后端"
                   value={useCodexForMerge ? 'codex' : 'api'}
-                  onChange={(event) => setUseCodexForMerge(event.target.value === 'codex')}
-                  className={inputStyle}
-                >
-                  <option value="api">OpenAI 兼容 API</option>
-                  <option value="codex">Codex CLI</option>
-                </select>
-              </label>
+                  onChange={(value) => setUseCodexForMerge(value === 'codex')}
+                  options={[
+                    { value: 'api', label: 'OpenAI 兼容 API' },
+                    { value: 'codex', label: 'Codex CLI' },
+                  ]}
+                />
+              </div>
               {useCodexForMerge && (
                 <Button variant="secondary" size="sm" onClick={() => void handleTest(true)} disabled={testing}>
                   测试 Codex CLI

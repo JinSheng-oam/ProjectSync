@@ -105,9 +105,9 @@ impl SyncCoordinator {
         let (root_id, path, local_hash, remote_hash, _base_hash, expected_etag) =
             self.db.conflict_record(conflict_id).await?;
         let local_hash = local_hash
-            .ok_or_else(|| AppError::new("AI_MERGE_UNSUPPORTED", "本地冲突版本不存在"))?;
+            .ok_or_else(|| AppError::new("AI_MERGE_UNSUPPORTED", "本地冲突版本不存在，无法合并。请在冲突中心手动裁决。"))?;
         let remote_hash = remote_hash
-            .ok_or_else(|| AppError::new("AI_MERGE_UNSUPPORTED", "远端冲突版本不存在"))?;
+            .ok_or_else(|| AppError::new("AI_MERGE_UNSUPPORTED", "远端冲突版本不存在，无法合并。请在冲突中心手动裁决。"))?;
         let root = self.db.root(&root_id).await?;
         let target = ensure_safe_parent(&root.local_path, &path)?;
         let local_meta = fs::metadata(&target)

@@ -98,11 +98,13 @@ export function ConflictCenter({
   const aiConfigured = Boolean(aiSettings?.configured || aiSettings?.useCodexForMerge);
   const queuedIds = new Set(aiMergeQueue);
   const selectableIds = unresolvedConflicts
-    .filter((item) => item.id !== aiSession?.conflictId && !queuedIds.has(item.id))
+    .filter((item) => item.hasLocalVersion && item.hasRemoteVersion &&
+      item.id !== aiSession?.conflictId && !queuedIds.has(item.id))
     .map((item) => item.id);
   const selectedBatch = selectableIds.filter((id) => checkedIds.includes(id));
   const allChecked = selectableIds.length > 0 && selectedBatch.length === selectableIds.length;
   const isActiveQueued = activeConflict ? queuedIds.has(activeConflict.id) : false;
+  const missingVersion = activeConflict && (!activeConflict.hasLocalVersion ? '本地' : !activeConflict.hasRemoteVersion ? '远端' : null);
 
   return (
     <div className="space-y-6 max-w-7xl mx-auto">
@@ -155,7 +157,7 @@ export function ConflictCenter({
                   onChange={() => setCheckedIds(allChecked ? [] : selectableIds)}
                   className="accent-indigo-600"
                 />
-                全选
+                全选可合并文件
               </label>
               <Button
                 variant="secondary"
@@ -186,6 +188,7 @@ export function ConflictCenter({
               {unresolvedConflicts.map((item) => {
                 const isSelected = item.id === (activeConflict?.id || selectedId);
                 const hasSession = aiSession && aiSession.conflictId === item.id;
+                const canMerge = item.hasLocalVersion && item.hasRemoteVersion;
                 return (
                   <div
                     key={item.id}
@@ -201,8 +204,8 @@ export function ConflictCenter({
                         <input
                           type="checkbox"
                           aria-label={`选择 ${item.relativePath}`}
-                          checked={checkedIds.includes(item.id) && !hasSession && !queuedIds.has(item.id)}
-                          disabled={Boolean(hasSession) || queuedIds.has(item.id)}
+                          checked={canMerge && checkedIds.includes(item.id) && !hasSession && !queuedIds.has(item.id)}
+                          disabled={!canMerge || Boolean(hasSession) || queuedIds.has(item.id)}
                           onClick={(event) => event.stopPropagation()}
                           onChange={(event) => {
                             const checked = event.target.checked;
@@ -228,7 +231,7 @@ export function ConflictCenter({
 
                     <div className="flex items-center justify-between text-[11px] text-slate-600 dark:text-slate-400 font-mono">
                       <span>{new Date(item.detectedAt).toLocaleTimeString()}</span>
-                      <span>{(item.localVersion.sizeBytes / 1024).toFixed(1)} KB</span>
+                      <span>{!item.hasLocalVersion ? '本地版本缺失' : !item.hasRemoteVersion ? '远端版本缺失' : `${(item.localVersion.sizeBytes / 1024).toFixed(1)} KB`}</span>
                     </div>
                   </div>
                 );
@@ -391,11 +394,12 @@ export function ConflictCenter({
                     className={`p-3.5 rounded-xl border space-y-1.5 shadow-soft-sm transition-all cursor-pointer ${
                       isAiMergingThis
                         ? 'border-indigo-500 bg-indigo-50/80 dark:border-indigo-500 dark:bg-indigo-950/40 ring-2 ring-indigo-500/20'
-                        : aiConfigured
+                        : aiConfigured && !missingVersion
                         ? 'border-amber-300 bg-amber-50/70 hover:bg-amber-100/70 dark:border-amber-700 dark:bg-amber-950/20 dark:hover:bg-amber-950/40'
                         : 'border-slate-200 bg-slate-50/70 dark:border-slate-800 dark:bg-slate-900/60'
                     }`}
                     onClick={() => {
+                      if (missingVersion) return;
                       if (!aiConfigured) {
                         onOpenAiSettings();
                         return;
@@ -414,7 +418,7 @@ export function ConflictCenter({
                           {isAiMergingThis ? aiSession?.status === 'merging'
                               ? 'AI 正在后台合并中…'
                               : '查看 AI 合并审阅面板'
-                            : aiConfigured
+                            : missingVersion ? '无法 AI 合并' : aiConfigured
                             ? isActiveQueued ? '已加入队列' : aiSession ? '加入 AI 合并队列' : 'AI 智能合并与建议'
                             : '配置 AI 合并'}
                         </span>
@@ -426,6 +430,8 @@ export function ConflictCenter({
                     <p className="text-[11px] leading-normal text-slate-600 dark:text-slate-400">
                       {isAiMergingThis
                         ? '已保留合并状态，点击即可继续与 AI Agent 交互微调并确认写入。'
+                        : missingVersion
+                        ? `${missingVersion}版本不存在，请选择保留现存版本或手动裁决。`
                         : isActiveQueued
                         ? '当前文件将在前面的文件评审结束后处理。'
                         : aiConfigured

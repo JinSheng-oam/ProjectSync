@@ -124,6 +124,8 @@ export const INITIAL_RULES: Record<string, SyncRuleDto[]> = {
 export const INITIAL_CONFLICTS: ConflictItemDto[] = [
   {
     id: 'conf_sync_algo_01',
+    hasLocalVersion: true,
+    hasRemoteVersion: true,
     rootId: 'root_project_sync',
     relativePath: 'docs/03_SYNC_ALGORITHM.md',
     conflictType: 'ConcurrentModification',
@@ -149,6 +151,8 @@ export const INITIAL_CONFLICTS: ConflictItemDto[] = [
   },
   {
     id: 'conf_cursor_rule_02',
+    hasLocalVersion: true,
+    hasRemoteVersion: true,
     rootId: 'root_sample_assets',
     relativePath: '.cursor/rules/rust-safety.mdc',
     conflictType: 'InitialSyncDifferent',

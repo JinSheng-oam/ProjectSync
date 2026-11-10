@@ -29,6 +29,7 @@ impl Database {
         rows.iter()
             .map(|r| {
                 let local_hash: Option<String> = r.get("local_hash");
+                let remote_hash: Option<String> = r.get("remote_hash");
                 let base_hash: Option<String> = r.get("base_hash");
                 let local_size = r
                     .get::<Option<i64>, _>("local_size")
@@ -39,6 +40,8 @@ impl Database {
                     .unwrap_or_default()
                     .max(0) as u64;
                 Ok(ConflictItemDto {
+                    has_local_version: local_hash.is_some(),
+                    has_remote_version: remote_hash.is_some(),
                     id: r.get("id"),
                     root_id: r.get("root_id"),
                     relative_path: r.get("relative_path"),

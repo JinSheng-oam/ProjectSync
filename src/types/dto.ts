@@ -101,6 +101,8 @@ export interface WebDavAccountDto {
 }
 
 export interface ConflictItemDto {
+  hasLocalVersion: boolean;
+  hasRemoteVersion: boolean;
   id: string;
   rootId: string;
   relativePath: string;
