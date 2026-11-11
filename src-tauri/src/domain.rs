@@ -547,6 +547,7 @@ pub struct BaselineEntry {
     pub baseline_state: String,
     pub sync_state: String,
     pub base_hash: Option<String>,
+    pub base_remote_hash: Option<String>,
     pub base_size: u64,
     pub base_mtime_ms: i64,
     pub local_exists: bool,
@@ -569,4 +570,16 @@ pub struct PlannedAction {
     pub remote: Option<RemoteEntry>,
     pub expected_remote_etag: Option<String>,
     pub reason: String,
+}
+
+impl PlannedAction {
+    pub fn transfer_size(&self) -> u64 {
+        let local = self.local.as_ref().map(|entry| entry.size);
+        let remote = self.remote.as_ref().map(|entry| entry.size);
+        match self.action {
+            SyncAction::DownloadNew | SyncAction::DownloadUpdate => remote,
+            _ => local.or(remote),
+        }
+        .unwrap_or_default()
+    }
 }

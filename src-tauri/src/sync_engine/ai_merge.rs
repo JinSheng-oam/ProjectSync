@@ -126,7 +126,7 @@ impl SyncCoordinator {
             if remote_size > AI_MERGE_SOURCE_LIMIT {
                 return Err(AppError::new("AI_MERGE_TOO_LARGE", "远端文本超过 64 KiB。"));
             }
-            let remote = read_remote_snapshot(&client, &root.remote_path, &path, &self.data_dir).await?;
+            let remote = read_remote_snapshot(&client, &root.remote_path, &path).await?;
             if local_hash == remote.hash {
                 return Err(AppError::new("AI_MERGE_NOT_NEEDED", "两端内容已一致，请返回项目执行同步以清除冲突。"));
             }
@@ -566,7 +566,7 @@ impl SyncCoordinator {
             )
             .await?;
             let observed =
-                verify_remote_hash(&client, &remote_path, &self.data_dir, &merged_hash).await?;
+                verify_remote_hash(&client, &remote_path, &merged_hash).await?;
             if let Err(local_error) = atomic_replace(&merged_stage, &target) {
                 let rollback = put_remote_update(
                     &client,

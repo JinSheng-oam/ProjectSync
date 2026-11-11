@@ -215,7 +215,6 @@ impl SyncCoordinator {
                 &client,
                 &normalized_remote,
                 rules,
-                &self.data_dir,
                 &[],
                 &git_tracked_paths,
             )

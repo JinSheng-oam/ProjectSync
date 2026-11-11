@@ -64,7 +64,7 @@ impl RuleEngine {
     }
 
     pub(crate) fn is_excluded(&self, path: &str, is_directory: bool) -> bool {
-        if path
+        if is_transfer_staging_file(path) || path
             .split('/')
             .any(|part| part.eq_ignore_ascii_case(".projectsync"))
         {
@@ -220,6 +220,24 @@ pub fn scan_local_cached_excluding(
         ));
     }
     Ok(entries)
+}
+
+fn is_transfer_staging_file(path: &str) -> bool {
+    let name = path.rsplit('/').next().unwrap_or(path).to_ascii_lowercase();
+    let Some(id) = name.strip_prefix(".projectsync-").and_then(|name| name.strip_suffix(".stage")) else {
+        return false;
+    };
+    let id = ["ai-merge-", "resolve-", "keepboth-"].iter()
+        .find_map(|prefix| id.strip_prefix(*prefix)).unwrap_or(id);
+    id.len() == 36 && uuid::Uuid::parse_str(id).is_ok()
+}
+
+#[test]
+fn transfer_staging_files_are_excluded_even_without_user_rules() {
+    let engine = RuleEngine::compile(&[]).unwrap();
+    assert!(!engine.includes("docs/.projectsync-72b6d85f-becf-475e-8952-233292209046.stage"));
+    assert!(!engine.includes(".projectsync-ai-merge-72b6d85f-becf-475e-8952-233292209046.stage"));
+    assert!(engine.includes(".projectsync-notes.stage"));
 }
 
 pub fn is_generated_conflict_copy(relative_path: &str) -> bool {

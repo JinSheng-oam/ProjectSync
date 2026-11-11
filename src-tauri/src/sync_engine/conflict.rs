@@ -32,7 +32,7 @@ impl SyncCoordinator {
             Ok(rows) => {
                 if rows.iter().any(|e| !e.is_collection) {
                     Some(
-                        read_remote_snapshot(&client, &root.remote_path, &path, &self.data_dir)
+                        read_remote_snapshot(&client, &root.remote_path, &path)
                             .await?,
                     )
                 } else {
@@ -90,7 +90,7 @@ impl SyncCoordinator {
                 }
                 let hash = hash_file(&local_path)?;
                 let observed =
-                    verify_remote_hash(&client, &remote_path, &self.data_dir, &hash).await?;
+                    verify_remote_hash(&client, &remote_path, &hash).await?;
                 let local = scan_local(&root.local_path, &rules)?
                     .into_iter()
                     .find(|e| e.relative_path == path);
@@ -168,13 +168,7 @@ impl SyncCoordinator {
                             None,
                         )
                         .await?;
-                        let _ = verify_remote_hash(
-                            &client,
-                            &conflict_remote,
-                            &self.data_dir,
-                            local_hash,
-                        )
-                        .await?;
+                        verify_remote_hash(&client, &conflict_remote, local_hash).await?;
                     } else {
                         copy_to_trash(&self.data_dir, &root.id, &path, "keep-both", &target)?;
                     }
@@ -226,7 +220,7 @@ impl SyncCoordinator {
                         )
                         .await?;
                         let observed =
-                            verify_remote_hash(&client, &remote_path, &self.data_dir, local_hash)
+                            verify_remote_hash(&client, &remote_path, local_hash)
                                 .await?;
                         let local = scan_local(&root.local_path, &rules)?
                             .into_iter()

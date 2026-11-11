@@ -205,67 +205,60 @@ async fn remote_file_hash(
     result.map(Some)
 }
 
+pub(super) fn verify_snapshot_etag(listed: Option<&str>, received: Option<&str>) -> AppResult<()> {
+    if listed.is_some_and(|tag| Some(tag) != received) {
+        return Err(AppError::retryable(
+            "DAV_PRECONDITION_FAILED",
+            "读取内容时 WebDAV 文件版本与属性不一致，请重新扫描。",
+        ));
+    }
+    Ok(())
+}
+
+#[test]
+fn snapshot_rejects_content_from_a_different_version() {
+    assert!(verify_snapshot_etag(Some("\"v1\""), Some("\"v2\"")).is_err());
+    assert!(verify_snapshot_etag(Some("\"v1\""), None).is_err());
+    assert!(verify_snapshot_etag(Some("\"v1\""), Some("\"v1\"")).is_ok());
+    assert!(verify_snapshot_etag(None, None).is_ok());
+}
+
 pub(super) async fn verify_remote_hash(
     client: &WebDavClient,
     path: &str,
-    data_dir: &Path,
     expected: &str,
 ) -> AppResult<RemoteEntry> {
-    let staging = data_dir
-        .join("staging")
-        .join(format!("verify-{}.bin", uuid::Uuid::new_v4()));
-    if let Some(parent) = staging.parent() {
-        tokio::fs::create_dir_all(parent).await?;
-    }
-    let size = client.get_to_file(path, &staging).await?;
-    let hash = hash_file(&staging)?;
-    let _ = tokio::fs::remove_file(&staging).await;
-    if hash != expected {
+    let observed = read_remote_entry(client, path).await?;
+    if observed.hash != expected {
         return Err(AppError::retryable(
             "HASH_MISMATCH",
             "WebDAV 写入后的读取校验不一致",
         ));
     }
-    let props = client.propfind(path, 0).await?;
-    let prop = props
-        .into_iter()
-        .find(|e| !e.is_collection)
-        .ok_or_else(|| AppError::retryable("DAV_NOT_FOUND", "写入后无法读取远端文件属性"))?;
-    Ok(RemoteEntry {
-        relative_path: String::new(),
-        path_key: String::new(),
-        hash,
-        size,
-        modified_at: prop.modified_at,
-        etag: prop.etag,
-        is_collection: false,
-    })
+    Ok(observed)
 }
 
 pub(super) async fn read_remote_snapshot(
     client: &WebDavClient,
     root_path: &str,
     relative: &str,
-    data_dir: &Path,
 ) -> AppResult<RemoteEntry> {
     let remote_path = remote_file_path(root_path, relative)?;
-    let staging = data_dir
-        .join("staging")
-        .join(format!("conflict-read-{}.bin", uuid::Uuid::new_v4()));
-    if let Some(parent) = staging.parent() {
-        tokio::fs::create_dir_all(parent).await?;
-    }
-    let size = client.get_to_file(&remote_path, &staging).await?;
-    let hash = hash_file(&staging)?;
-    let _ = tokio::fs::remove_file(staging).await;
-    let properties = client.propfind(&remote_path, 0).await?;
-    let property = properties
-        .into_iter()
+    let mut entry = read_remote_entry(client, &remote_path).await?;
+    entry.relative_path = relative.to_owned();
+    entry.path_key = path_key(relative);
+    Ok(entry)
+}
+
+async fn read_remote_entry(client: &WebDavClient, path: &str) -> AppResult<RemoteEntry> {
+    let (size, hash, etag) = client.hash_resource(path).await?;
+    let property = client.propfind(path, 0).await?.into_iter()
         .find(|entry| !entry.is_collection)
-        .ok_or_else(|| AppError::retryable("DAV_NOT_FOUND", "冲突远端版本已删除"))?;
+        .ok_or_else(|| AppError::retryable("DAV_NOT_FOUND", "无法读取远端文件属性"))?;
+    verify_snapshot_etag(property.etag.as_deref(), etag.as_deref())?;
     Ok(RemoteEntry {
-        relative_path: relative.to_owned(),
-        path_key: path_key(relative),
+        relative_path: String::new(),
+        path_key: String::new(),
         hash,
         size,
         modified_at: property.modified_at,

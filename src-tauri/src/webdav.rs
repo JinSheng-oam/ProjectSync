@@ -226,6 +226,26 @@ impl WebDavClient {
         parse_multistatus(&body, &self.base_url, &url)
     }
 
+    pub(crate) async fn hash_resource(&self, path: &str) -> AppResult<(u64, String, Option<String>)> {
+        let response = self
+            .send(Method::GET, self.url_for(path)?, HeaderMap::new(), None)
+            .await?;
+        Self::check_status(response.status(), "GET")?;
+        let etag = response.headers().get(reqwest::header::ETAG)
+            .and_then(|value| value.to_str().ok()).map(str::to_owned);
+        let mut body = response.bytes_stream();
+        let mut hasher = blake3::Hasher::new();
+        let mut size = 0;
+        while let Some(chunk) = body.next().await {
+            let chunk = chunk.map_err(|_| {
+                AppError::retryable("DAV_CONNECTION_FAILED", "读取 WebDAV 文件流失败")
+            })?;
+            hasher.update(&chunk);
+            size += chunk.len() as u64;
+        }
+        Ok((size, hasher.finalize().to_hex().to_string(), etag))
+    }
+
     pub async fn get_to_file(&self, path: &str, destination: &Path) -> AppResult<u64> {
         self.get_to_file_with_progress(path, destination, None)
             .await

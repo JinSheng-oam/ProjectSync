@@ -76,6 +76,7 @@ pub(super) fn build_plan(
         }
         let state = b.map(|v| v.baseline_state.as_str()).unwrap_or("UNKNOWN");
         let base_hash = b.and_then(|v| v.base_hash.as_deref());
+        let base_remote_hash = b.and_then(|v| v.base_remote_hash.as_deref()).or(base_hash);
         match (l, r) {
             (Some(local), Some(remote)) => {
                 let line_endings_only = line_ending_equivalent.contains(&key);
@@ -96,7 +97,7 @@ pub(super) fn build_plan(
                 }
                 if state == "PRESENT" {
                     let local_changed = Some(local.hash.as_str()) != base_hash;
-                    let remote_changed = Some(remote.hash.as_str()) != base_hash;
+                    let remote_changed = Some(remote.hash.as_str()) != base_remote_hash;
                     if local_changed && !remote_changed {
                         if capabilities.safe_update_existing {
                             plan.push(with_etag(
@@ -196,7 +197,7 @@ pub(super) fn build_plan(
             }
             (None, Some(remote)) if local_complete => {
                 if state == "PRESENT" {
-                    if Some(remote.hash.as_str()) == base_hash {
+                    if Some(remote.hash.as_str()) == base_remote_hash {
                         if let Some(etag) = remote_trash_etag(capabilities, remote) {
                             plan.push(with_etag(
                                 plan_item(
@@ -297,12 +298,7 @@ pub(super) fn preview_from_plan(root_id: &str, plan: Vec<PlannedAction>) -> Init
         items: Vec::new(),
     };
     for item in plan {
-        let size = item
-            .local
-            .as_ref()
-            .map(|v| v.size)
-            .or_else(|| item.remote.as_ref().map(|v| v.size))
-            .unwrap_or_default();
+        let size = item.transfer_size();
         match item.action {
             SyncAction::UploadNew | SyncAction::UploadUpdate => {
                 preview.uploads_count += 1;

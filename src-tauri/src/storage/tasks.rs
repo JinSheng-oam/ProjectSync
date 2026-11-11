@@ -14,6 +14,23 @@ mod tests {
     use super::*;
 
     #[tokio::test]
+    async fn failed_download_only_suppresses_the_same_remote_content() {
+        let pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect_with(SqliteConnectOptions::new().in_memory(true).foreign_keys(false))
+            .await
+            .unwrap();
+        sqlx::migrate!("./migrations").run(&pool).await.unwrap();
+        let db = Database { pool, path: PathBuf::new() };
+        let action = SyncAction::DownloadUpdate;
+        let (id, ready) = db.prepare_task("r", "notes.md", &action, 4, Some("local"), None, Some("old")).await.unwrap();
+        assert!(ready);
+        db.set_task(&id, TaskStatus::Failed, 0, None).await.unwrap();
+        assert!(!db.prepare_task("r", "notes.md", &action, 4, Some("local"), None, Some("old")).await.unwrap().1);
+        assert!(db.prepare_task("r", "notes.md", &action, 4, Some("local"), None, Some("new")).await.unwrap().1);
+    }
+
+    #[tokio::test]
     async fn acknowledgement_hides_only_remote_trash_and_survives_replanning() {
         let pool = SqlitePoolOptions::new()
             .max_connections(1)
@@ -25,9 +42,9 @@ mod tests {
         let root = "root";
         let path = "notes.md";
         let etag = Some("\"v1\"");
-        let (trash, _) = db.prepare_task(root, path, &SyncAction::MoveRemoteToTrash, 1, None, etag).await.unwrap();
+        let (trash, _) = db.prepare_task(root, path, &SyncAction::MoveRemoteToTrash, 1, None, etag, None).await.unwrap();
         db.set_task(&trash, TaskStatus::Blocked, 0, Some(("BLOCKED_SERVER_CAPABILITY", "旧版本的远端移动阻止记录"))).await.unwrap();
-        let (upload, _) = db.prepare_task(root, path, &SyncAction::UploadNew, 1, Some("hash"), None).await.unwrap();
+        let (upload, _) = db.prepare_task(root, path, &SyncAction::UploadNew, 1, Some("hash"), None, None).await.unwrap();
         db.set_task(&upload, TaskStatus::Blocked, 0, Some(("BLOCKED_SERVER_CAPABILITY", "安全新建未验证"))).await.unwrap();
 
         db.set_setting("ignoreRemoteDeleteWarnings", "true").await.unwrap();
@@ -38,8 +55,8 @@ mod tests {
         let (root, path) = db.remote_trash_task(&trash).await.unwrap();
         db.acknowledge_remote_trash(&root, &path).await.unwrap();
         assert_eq!(db.tasks(20).await.unwrap().into_iter().map(|task| task.id).collect::<Vec<_>>(), vec![upload]);
-        assert!(!db.prepare_task(&root, &path, &SyncAction::Blocked, 1, None, None).await.unwrap().1);
-        assert!(db.prepare_task(&root, &path, &SyncAction::MoveRemoteToTrash, 1, None, etag).await.unwrap().1);
+        assert!(!db.prepare_task(&root, &path, &SyncAction::Blocked, 1, None, None, None).await.unwrap().1);
+        assert!(db.prepare_task(&root, &path, &SyncAction::MoveRemoteToTrash, 1, None, etag, None).await.unwrap().1);
     }
 }
 
@@ -68,6 +85,7 @@ impl Database {
         total: u64,
         expected_hash: Option<&str>,
         etag: Option<&str>,
+        remote_hash: Option<&str>,
     ) -> AppResult<(String, bool)> {
         // A historical execution-time block can become a planning-time block.
         // A blocked plan with no local hash is the remote-only deletion case.
@@ -90,19 +108,19 @@ impl Database {
             if status == "RETRY_WAIT" && next_retry.is_some_and(|value| value > unix_ms()) {
                 return Ok((id, false));
             }
-            sqlx::query("UPDATE sync_tasks SET operation=?,status='PENDING',expected_local_hash=?,expected_remote_etag=?,bytes_total=?,last_error_code=NULL,last_error_message=NULL,next_retry_at=NULL,updated_at=? WHERE id=?")
-                .bind(action.as_db()).bind(expected_hash).bind(etag).bind(total as i64).bind(unix_ms()).bind(&id).execute(&self.pool).await?;
+            sqlx::query("UPDATE sync_tasks SET operation=?,status='PENDING',expected_local_hash=?,expected_remote_etag=?,expected_remote_hash=?,bytes_total=?,last_error_code=NULL,last_error_message=NULL,next_retry_at=NULL,updated_at=? WHERE id=?")
+                .bind(action.as_db()).bind(expected_hash).bind(etag).bind(remote_hash).bind(total as i64).bind(unix_ms()).bind(&id).execute(&self.pool).await?;
             return Ok((id, true));
         }
-        let terminal=sqlx::query("SELECT id FROM sync_tasks WHERE root_id=? AND relative_path=? AND operation=? AND expected_local_hash IS ? AND expected_remote_etag IS ? AND status IN ('FAILED','BLOCKED') AND (operation='BLOCKED' OR last_error_code IS NOT 'REMOTE_TRASH_ACKNOWLEDGED') ORDER BY created_at DESC LIMIT 1")
-            .bind(root_id).bind(path).bind(action.as_db()).bind(expected_hash).bind(etag).fetch_optional(&self.pool).await?;
+        let terminal=sqlx::query("SELECT id FROM sync_tasks WHERE root_id=? AND relative_path=? AND operation=? AND expected_local_hash IS ? AND expected_remote_etag IS ? AND expected_remote_hash IS ? AND status IN ('FAILED','BLOCKED') AND (operation='BLOCKED' OR last_error_code IS NOT 'REMOTE_TRASH_ACKNOWLEDGED') ORDER BY created_at DESC LIMIT 1")
+            .bind(root_id).bind(path).bind(action.as_db()).bind(expected_hash).bind(etag).bind(remote_hash).fetch_optional(&self.pool).await?;
         if let Some(row) = terminal {
             return Ok((row.get("id"), false));
         }
         let id = uuid::Uuid::new_v4().to_string();
         let now = unix_ms();
-        sqlx::query("INSERT INTO sync_tasks(id,root_id,relative_path,operation,status,priority,expected_local_hash,expected_remote_etag,idempotency_key,bytes_total,created_at,updated_at) VALUES(?,?,?,?,'PENDING',100,?,?,?,?,?,?)")
-            .bind(&id).bind(root_id).bind(path).bind(action.as_db()).bind(expected_hash).bind(etag).bind(uuid::Uuid::new_v4().to_string()).bind(total as i64).bind(now).bind(now).execute(&self.pool).await?;
+        sqlx::query("INSERT INTO sync_tasks(id,root_id,relative_path,operation,status,priority,expected_local_hash,expected_remote_etag,expected_remote_hash,idempotency_key,bytes_total,created_at,updated_at) VALUES(?,?,?,?,'PENDING',100,?,?,?,?,?,?,?)")
+            .bind(&id).bind(root_id).bind(path).bind(action.as_db()).bind(expected_hash).bind(etag).bind(remote_hash).bind(uuid::Uuid::new_v4().to_string()).bind(total as i64).bind(now).bind(now).execute(&self.pool).await?;
         Ok((id, true))
     }
 

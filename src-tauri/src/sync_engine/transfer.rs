@@ -16,7 +16,7 @@ impl SyncCoordinator {
             return Err(AppError::new("LOCAL_FILE_CHANGED", "本地原位置已有文件，未覆盖"));
         }
         let (account, client) = self.client_for(&root.account_id).await?;
-        let remote = read_remote_snapshot(&client, &root.remote_path, &path, &self.data_dir).await?;
+        let remote = read_remote_snapshot(&client, &root.remote_path, &path).await?;
         let item = PlannedAction {
             path,
             action: SyncAction::DownloadNew,
@@ -266,7 +266,7 @@ impl SyncCoordinator {
                     .await?;
                 }
                 let observed =
-                    verify_remote_hash(client, &destination, &self.data_dir, &local.hash).await?;
+                    verify_remote_hash(client, &destination, &local.hash).await?;
                 if hash_file(&local.absolute_path)? != local.hash {
                     return Err(AppError::retryable(
                         "LOCAL_FILE_CHANGED",

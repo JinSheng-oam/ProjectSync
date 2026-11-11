@@ -85,11 +85,17 @@ pub(super) async fn line_ending_equivalent_paths(
             continue;
         }
         if let Some(base) = baseline_by_path.get(local_entry.path_key.as_str()) {
-            if base.baseline_state == "PRESENT"
-                && (Some(local_entry.hash.as_str()) == base.base_hash.as_deref()
-                    || Some(remote_entry.hash.as_str()) == base.base_hash.as_deref())
-            {
-                continue;
+            if base.baseline_state == "PRESENT" {
+                let local_unchanged = Some(local_entry.hash.as_str()) == base.base_hash.as_deref();
+                let remote_unchanged = Some(remote_entry.hash.as_str())
+                    == base.base_remote_hash.as_deref().or(base.base_hash.as_deref());
+                if local_unchanged && remote_unchanged {
+                    equivalent.insert(local_entry.path_key.clone());
+                    continue;
+                }
+                if local_unchanged || remote_unchanged {
+                    continue;
+                }
             }
         }
         let Some(local_normalized_hash) =
@@ -134,7 +140,6 @@ pub(super) async fn scan_remote(
     client: &WebDavClient,
     root_path: &str,
     rules: &[SyncRuleDto],
-    data_dir: &Path,
     cache: &[crate::domain::BaselineEntry],
     excluded_paths: &HashSet<String>,
 ) -> AppResult<Vec<RemoteEntry>> {
@@ -149,7 +154,6 @@ pub(super) async fn scan_remote(
     let mut entries = Vec::new();
     let mut case_names = HashMap::<String, String>::new();
     let prefix = format!("{}/", root_path.trim_end_matches('/'));
-    let staging_dir = data_dir.join("staging");
     while let Some(directory) = directories.pop() {
         if !visited.insert(directory.clone()) {
             continue;
@@ -224,32 +228,21 @@ pub(super) async fn scan_remote(
             }
         }
         if !downloads.is_empty() {
-            tokio::fs::create_dir_all(&staging_dir).await?;
             let mut jobs = futures_util::stream::iter(downloads)
-                .map(|(dav_path, mut entry)| {
-                    let staging = staging_dir.join(format!("remote-scan-{}.bin", uuid::Uuid::new_v4()));
-                    async move {
-                        let result = async {
-                            entry.size = client.get_to_file(&dav_path, &staging).await.map_err(|error| {
-                                if error.code == "DAV_NOT_FOUND" {
-                                    AppError::retryable("SCAN_INCOMPLETE", "扫描期间远端文件已变化，请重新扫描。")
-                                } else {
-                                    error
-                                }
-                            })?;
-                            let hash_path = staging.clone();
-                            entry.hash = tokio::task::spawn_blocking(move || hash_file(&hash_path))
-                                .await
-                                .map_err(|error| AppError::new("LOCAL_FILE_READ", error.to_string()))??;
-                            Ok::<_, AppError>(entry)
+                .map(|(dav_path, mut entry)| async move {
+                    let (size, hash, etag) = client.hash_resource(&dav_path).await.map_err(|error| {
+                        if error.code == "DAV_NOT_FOUND" {
+                            AppError::retryable("SCAN_INCOMPLETE", "扫描期间远端文件已变化，请重新扫描。")
+                        } else {
+                            error
                         }
-                        .await;
-                        let _ = tokio::fs::remove_file(staging).await;
-                        result
-                    }
+                    })?;
+                    super::remote_files::verify_snapshot_etag(entry.etag.as_deref(), etag.as_deref())?;
+                    entry.size = size;
+                    entry.hash = hash;
+                    Ok::<_, AppError>(entry)
                 })
                 .buffer_unordered(4);
-            // Drain in-flight downloads so each job can remove its staging file.
             let mut failure = None;
             while let Some(result) = jobs.next().await {
                 match result {
@@ -283,7 +276,7 @@ fn can_reuse_remote_hash(
 
 #[cfg(test)]
 mod remote_hash_cache_tests {
-    use super::can_reuse_remote_hash;
+    use super::*;
     use crate::domain::BaselineEntry;
 
     fn baseline(etag: Option<&str>) -> BaselineEntry {
@@ -293,6 +286,7 @@ mod remote_hash_cache_tests {
             baseline_state: "PRESENT".to_owned(),
             sync_state: "CLEAN".to_owned(),
             base_hash: Some("base".to_owned()),
+            base_remote_hash: None,
             base_size: 4,
             base_mtime_ms: 0,
             local_exists: true,
@@ -305,6 +299,40 @@ mod remote_hash_cache_tests {
             local_mtime_ns: 0,
             remote_mtime_ms: 0,
         }
+    }
+
+    #[tokio::test]
+    async fn unchanged_line_endings_stay_equivalent_without_another_get() {
+        let client = WebDavClient::new("https://example.test/", "user", String::new(), true).unwrap();
+        let mut baseline = baseline(None);
+        baseline.base_hash = Some("crlf".into());
+        baseline.base_remote_hash = Some("lf".into());
+        let local = LocalEntry {
+            relative_path: "file.txt".into(), path_key: "file.txt".into(),
+            absolute_path: PathBuf::new(), hash: "crlf".into(), size: 4, mtime_ns: 0,
+        };
+        let mut remote = RemoteEntry {
+            relative_path: "file.txt".into(), path_key: "file.txt".into(),
+            hash: "lf".into(), size: 3, modified_at: 0, etag: None, is_collection: false,
+        };
+        let equivalents = line_ending_equivalent_paths(
+            &client, "/", std::slice::from_ref(&local), std::slice::from_ref(&remote),
+            std::slice::from_ref(&baseline), Path::new(""),
+        ).await.unwrap();
+        assert!(equivalents.contains("file.txt"));
+        let clean = build_plan(
+            std::slice::from_ref(&local), std::slice::from_ref(&remote),
+            std::slice::from_ref(&baseline), &equivalents, &[], true, true, &unsafe_capabilities(),
+        );
+        assert_eq!(clean[0].action, SyncAction::MarkClean);
+
+        remote.hash = "edited".into();
+        remote.size = 10;
+        let plan = build_plan(
+            &[local], &[remote], &[baseline], &HashSet::new(), &[], true, true, &unsafe_capabilities(),
+        );
+        assert_eq!(plan[0].action, SyncAction::DownloadUpdate);
+        assert_eq!(plan[0].transfer_size(), 10);
     }
 
     #[test]

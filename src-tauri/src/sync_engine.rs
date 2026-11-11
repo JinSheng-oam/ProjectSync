@@ -400,7 +400,6 @@ impl SyncCoordinator {
             &client,
             &root.remote_path,
             &rules,
-            &self.data_dir,
             &old_baseline,
             &git_tracked_paths,
         )
@@ -457,12 +456,7 @@ impl SyncCoordinator {
                     | SyncAction::DownloadNew
                     | SyncAction::DownloadUpdate
             ) {
-                let total = item
-                    .local
-                    .as_ref()
-                    .map(|entry| entry.size)
-                    .or_else(|| item.remote.as_ref().map(|entry| entry.size))
-                    .unwrap_or_default();
+                let total = item.transfer_size();
                 let (task, ready) = self
                     .db
                     .prepare_task(
@@ -472,6 +466,12 @@ impl SyncCoordinator {
                         total,
                         item.local.as_ref().map(|entry| entry.hash.as_str()),
                         item.expected_remote_etag.as_deref(),
+                        match item.action {
+                            SyncAction::DownloadNew | SyncAction::DownloadUpdate => {
+                                item.remote.as_ref().map(|entry| entry.hash.as_str())
+                            }
+                            _ => None,
+                        },
                     )
                     .await?;
                 if ready {
@@ -590,6 +590,7 @@ impl SyncCoordinator {
                             total,
                             item.local.as_ref().map(|v| v.hash.as_str()),
                             item.expected_remote_etag.as_deref(),
+                            None,
                         )
                         .await?;
                     if !ready {
@@ -639,6 +640,7 @@ impl SyncCoordinator {
                             total,
                             item.local.as_ref().map(|entry| entry.hash.as_str()),
                             item.expected_remote_etag.as_deref(),
+                            None,
                         )
                         .await?;
                     if ready {
@@ -696,6 +698,7 @@ impl SyncCoordinator {
                         &item.action,
                         total,
                         item.local.as_ref().map(|entry| entry.hash.as_str()),
+                        None,
                         None,
                     )
                     .await?;
