@@ -132,6 +132,7 @@ export function App() {
                   onResume={handleResumeSync}
                   onEnable={handleEnableSync}
                   onRetryTask={handleRetryTask}
+                  onRefresh={refreshAll}
                   onCancelTask={handleCancelTask}
                 />
               )}
@@ -191,7 +192,7 @@ export function App() {
 
               {currentNav === 'ai' && <AiSettingsView />}
 
-              {currentNav === 'settings' && <SettingsView />}
+              {currentNav === 'settings' && <SettingsView roots={roots} onSaved={refreshAll} />}
             </>
           )}
         </main>

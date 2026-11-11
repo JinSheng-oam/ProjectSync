@@ -2,14 +2,17 @@ import { useEffect, useState } from 'react';
 import { Check, FolderSync, Settings, Shield } from 'lucide-react';
 import { Button } from '../../components/common/UIComponents';
 import { api } from '../../services/api';
+import { SyncRootDto } from '../../types/dto';
+import { RemoteBackupCleanup } from './RemoteBackupCleanup';
 
-export function SettingsView() {
+export function SettingsView({ roots, onSaved }: { roots: SyncRootDto[]; onSaved: () => Promise<void> }) {
   const [deviceName, setDeviceName] = useState('ProjectSync Device');
   const [autostart, setAutostart] = useState(false);
   const [startMinimized, setStartMinimized] = useState(false);
   const [defaultPollInterval, setDefaultPollInterval] = useState(60);
   const [defaultDebounce, setDefaultDebounce] = useState(1200);
   const [retryLimit, setRetryLimit] = useState(5);
+  const [ignoreRemoteDeleteWarnings, setIgnoreRemoteDeleteWarnings] = useState(false);
   const [saved, setSaved] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -25,6 +28,7 @@ export function SettingsView() {
       setDefaultPollInterval(settings.pollIntervalSeconds);
       setDefaultDebounce(settings.debounceMs);
       setRetryLimit(settings.retryLimit);
+      setIgnoreRemoteDeleteWarnings(settings.ignoreRemoteDeleteWarnings);
     }).catch((reason: unknown) => {
       if (active) setError(reason instanceof Error ? reason.message : '读取设置失败');
     });
@@ -42,7 +46,9 @@ export function SettingsView() {
         pollIntervalSeconds: defaultPollInterval,
         debounceMs: defaultDebounce,
         retryLimit,
+        ignoreRemoteDeleteWarnings,
       });
+      await onSaved();
       setSaved(true);
       setTimeout(() => setSaved(false), 2500);
     } catch (reason: unknown) {
@@ -136,16 +142,19 @@ export function SettingsView() {
           <NumberField label="本地变更防抖时间（毫秒）" value={defaultDebounce} min={100} max={30000} onChange={setDefaultDebounce} />
           <NumberField label="网络错误最多重试次数" value={retryLimit} min={1} max={20} onChange={setRetryLimit} />
         </div>
+        <ToggleRow title="忽略远端删除提醒" description="隐藏因节点不支持安全删除而保留的文件提醒。同步日志仍保留，关闭后可重新查看和恢复。" checked={ignoreRemoteDeleteWarnings} onChange={setIgnoreRemoteDeleteWarnings} />
       </section>
+      <RemoteBackupCleanup roots={roots} />
     </div>
   );
 }
 
-function ToggleRow(props: { title: string; checked: boolean; onChange: (value: boolean) => void }) {
+function ToggleRow(props: { title: string; description?: string; checked: boolean; onChange: (value: boolean) => void }) {
   return (
     <label className="flex items-center justify-between p-3.5 rounded-xl bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700/80 cursor-pointer hover:bg-slate-100/70 dark:hover:bg-slate-800/80 transition-colors">
       <div>
         <div className="text-xs text-slate-900 dark:text-slate-100 font-medium">{props.title}</div>
+        {props.description && <div className="mt-1 pr-2 text-xs text-slate-600 dark:text-slate-300">{props.description}</div>}
       </div>
       <input type="checkbox" checked={props.checked} onChange={(event) => props.onChange(event.target.checked)} className="rounded w-4 h-4 bg-white dark:bg-slate-900 border-slate-300 dark:border-slate-600 text-indigo-600 focus:ring-0 cursor-pointer" />
     </label>

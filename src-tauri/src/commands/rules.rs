@@ -28,10 +28,15 @@ pub async fn check_local_directory(path: String) -> ApiResult<()> {
         if !path.is_absolute() {
             return Err(crate::domain::AppError::new("LOCAL_ROOT_INVALID", "请输入本地目录的绝对路径。"));
         }
-        tokio::fs::read_dir(path).await.map_err(|error| {
-            crate::domain::AppError::new("LOCAL_ROOT_INVALID", format!("无法读取本地目录：{error}"))
-        })?;
-        Ok(())
+        tokio::fs::read_dir(path)
+            .await
+            .map(|_| ())
+            .map_err(|error| {
+                crate::domain::AppError::new(
+                    "LOCAL_ROOT_INVALID",
+                    format!("无法读取本地目录：{error}"),
+                )
+            })
     }.await)
 }
 

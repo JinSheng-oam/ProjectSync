@@ -25,6 +25,7 @@ interface OverviewDashboardProps {
   onResume: (rootId: string) => void;
   onEnable: (rootId: string) => void;
   onRetryTask: (taskId: string) => void;
+  onRefresh: () => Promise<void>;
   onCancelTask: (taskId: string) => void;
 }
 
@@ -41,6 +42,7 @@ export function OverviewDashboard({
   onResume,
   onEnable,
   onRetryTask,
+  onRefresh,
   onCancelTask,
 }: OverviewDashboardProps) {
   const unresolvedConflicts = conflicts.filter((c) => c.status === 'UNRESOLVED');
@@ -144,7 +146,7 @@ export function OverviewDashboard({
       )}
 
       {tasks.length > 0 && (
-        <ActiveTransferQueue tasks={tasks} onRetryTask={onRetryTask} onCancelTask={onCancelTask} onOpenWebDav={() => onNavigate('webdav')} />
+        <ActiveTransferQueue tasks={tasks} roots={roots} onRetryTask={onRetryTask} onRefresh={onRefresh} onCancelTask={onCancelTask} onOpenWebDav={() => onNavigate('webdav')} />
       )}
 
       {/* Project Grid */}

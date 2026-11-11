@@ -1,6 +1,49 @@
 use super::*;
 
 impl SyncCoordinator {
+    pub async fn handle_retained_remote_file(&self, task_id: &str, restore: bool) -> AppResult<()> {
+        let (root_id, _) = self.db.remote_trash_task(task_id).await?;
+        let lock = self.lock_for(&root_id)?;
+        let _guard = lock.lock().await;
+        let (_, path) = self.db.remote_trash_task(task_id).await?;
+        if !restore {
+            return self.db.acknowledge_remote_trash(&root_id, &path).await;
+        }
+
+        let root = self.db.root(&root_id).await?;
+        let target = ensure_safe_parent(&root.local_path, &path)?;
+        if target.symlink_metadata().is_ok() {
+            return Err(AppError::new("LOCAL_FILE_CHANGED", "本地原位置已有文件，未覆盖"));
+        }
+        let (account, client) = self.client_for(&root.account_id).await?;
+        let remote = read_remote_snapshot(&client, &root.remote_path, &path, &self.data_dir).await?;
+        let item = PlannedAction {
+            path,
+            action: SyncAction::DownloadNew,
+            conflict: None,
+            local: None,
+            remote: Some(remote),
+            expected_remote_etag: None,
+            reason: "撤销本地删除".into(),
+        };
+        let id = uuid::Uuid::new_v4().to_string();
+        let caps = account.capabilities.unwrap_or_else(unsafe_capabilities);
+        let bytes = match self.execute_item(&root, &client, &caps, &item, &id).await {
+            Ok(bytes) => bytes,
+            Err(error) => {
+                let _ = tokio::fs::remove_file(target.with_file_name(format!(".projectsync-{id}.stage"))).await;
+                return Err(error);
+            }
+        };
+        self.db.reconcile_tasks_for_path(&root.id, &item.path, true).await?;
+        let history_id = self.db.add_history(HistoryEntry {
+            root_id: &root.id, task_id: None, path: &item.path, action: &item.action,
+            status: "SUCCESS", bytes, duration_ms: 0, error: None,
+        }).await?;
+        self.emit("sync://history-updated", serde_json::json!({"rootId":root.id,"historyId":history_id}));
+        Ok(())
+    }
+
     pub(super) async fn execute_planned_task(
         &self,
         root: &RootRecord,
@@ -292,7 +335,11 @@ impl SyncCoordinator {
                         "下载目标已存在；未覆盖",
                     ));
                 }
-                atomic_replace(&staging, &target)?;
+                if item.action == SyncAction::DownloadNew {
+                    crate::filesystem::atomic_install_new(&staging, &target)?;
+                } else {
+                    atomic_replace(&staging, &target)?;
+                }
                 let verified = hash_file(&target)?;
                 if verified != remote.hash {
                     return Err(AppError::new(
@@ -365,7 +412,7 @@ impl SyncCoordinator {
                     .as_ref()
                     .ok_or_else(|| AppError::new("DAV_NOT_FOUND", "待回收远端文件不存在"))?;
                 let etag = plan::remote_trash_etag(capabilities, remote).ok_or_else(|| {
-                    AppError::new("BLOCKED_SERVER_CAPABILITY", if capabilities.safe_move_no_overwrite && capabilities.safe_update_existing {
+                    AppError::new("BLOCKED_SERVER_CAPABILITY", if capabilities.supports_remote_trash() {
                         "远端文件没有可用的强 ETag；远端文件已保留。"
                     } else {
                         plan::REMOTE_TRASH_CAPABILITY_MESSAGE
@@ -394,6 +441,9 @@ impl SyncCoordinator {
                     .await?;
                 self.db
                     .update_base(&root.id, &item.path, None, None, None)
+                    .await?;
+                self.db
+                    .reconcile_tasks_for_path(&root.id, &item.path, true)
                     .await?;
                 Ok(remote.size)
             }

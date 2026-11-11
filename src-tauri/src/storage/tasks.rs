@@ -1,6 +1,65 @@
 use super::*;
 
+// Match both planning-time and execution-time rows, including older clients' messages.
+const REMOTE_TRASH_BLOCK: &str = "status IN ('BLOCKED','FAILED')
+    AND last_error_code='BLOCKED_SERVER_CAPABILITY'
+    AND (operation='MOVE_REMOTE_TO_TRASH' OR (operation='BLOCKED' AND (
+        instr(last_error_message,'受保护的 MOVE') > 0 OR
+        instr(last_error_message,'保护的远端 MOVE') > 0 OR
+        instr(last_error_message,'远端文件没有可用的强 ETag') > 0
+    )))";
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn acknowledgement_hides_only_remote_trash_and_survives_replanning() {
+        let pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect_with(SqliteConnectOptions::new().in_memory(true).foreign_keys(false))
+            .await
+            .unwrap();
+        sqlx::migrate!("./migrations").run(&pool).await.unwrap();
+        let db = Database { pool, path: PathBuf::new() };
+        let root = "root";
+        let path = "notes.md";
+        let etag = Some("\"v1\"");
+        let (trash, _) = db.prepare_task(root, path, &SyncAction::MoveRemoteToTrash, 1, None, etag).await.unwrap();
+        db.set_task(&trash, TaskStatus::Blocked, 0, Some(("BLOCKED_SERVER_CAPABILITY", "旧版本的远端移动阻止记录"))).await.unwrap();
+        let (upload, _) = db.prepare_task(root, path, &SyncAction::UploadNew, 1, Some("hash"), None).await.unwrap();
+        db.set_task(&upload, TaskStatus::Blocked, 0, Some(("BLOCKED_SERVER_CAPABILITY", "安全新建未验证"))).await.unwrap();
+
+        db.set_setting("ignoreRemoteDeleteWarnings", "true").await.unwrap();
+        assert_eq!(db.tasks(20).await.unwrap().into_iter().map(|task| task.id).collect::<Vec<_>>(), vec![upload.clone()]);
+        db.set_setting("ignoreRemoteDeleteWarnings", "false").await.unwrap();
+        assert_eq!(db.tasks(20).await.unwrap().len(), 2);
+        assert!(db.remote_trash_task(&upload).await.is_err());
+        let (root, path) = db.remote_trash_task(&trash).await.unwrap();
+        db.acknowledge_remote_trash(&root, &path).await.unwrap();
+        assert_eq!(db.tasks(20).await.unwrap().into_iter().map(|task| task.id).collect::<Vec<_>>(), vec![upload]);
+        assert!(!db.prepare_task(&root, &path, &SyncAction::Blocked, 1, None, None).await.unwrap().1);
+        assert!(db.prepare_task(&root, &path, &SyncAction::MoveRemoteToTrash, 1, None, etag).await.unwrap().1);
+    }
+}
+
 impl Database {
+    pub async fn remote_trash_task(&self, id: &str) -> AppResult<(String, String)> {
+        let sql = format!("SELECT root_id,relative_path FROM sync_tasks WHERE id=? AND {REMOTE_TRASH_BLOCK}");
+        sqlx::query_as(&sql)
+            .bind(id)
+            .fetch_optional(&self.pool)
+            .await?
+            .ok_or_else(|| AppError::new("TASK_NOT_FOUND", "远端保留记录已处理或已发生变化"))
+    }
+
+    pub async fn acknowledge_remote_trash(&self, root_id: &str, path: &str) -> AppResult<()> {
+        let sql = format!("UPDATE sync_tasks SET last_error_code='REMOTE_TRASH_ACKNOWLEDGED',updated_at=?
+            WHERE root_id=? AND relative_path=? AND {REMOTE_TRASH_BLOCK}");
+        sqlx::query(&sql).bind(unix_ms()).bind(root_id).bind(path).execute(&self.pool).await?;
+        Ok(())
+    }
+
     pub async fn prepare_task(
         &self,
         root_id: &str,
@@ -10,6 +69,18 @@ impl Database {
         expected_hash: Option<&str>,
         etag: Option<&str>,
     ) -> AppResult<(String, bool)> {
+        // A historical execution-time block can become a planning-time block.
+        // A blocked plan with no local hash is the remote-only deletion case.
+        if *action == SyncAction::Blocked && expected_hash.is_none() {
+            let acknowledged = sqlx::query_scalar::<_, String>(
+                "SELECT id FROM sync_tasks WHERE root_id=? AND relative_path=?
+                 AND last_error_code='REMOTE_TRASH_ACKNOWLEDGED' LIMIT 1",
+            )
+            .bind(root_id).bind(path).fetch_optional(&self.pool).await?;
+            if let Some(id) = acknowledged {
+                return Ok((id, false));
+            }
+        }
         let pending=sqlx::query("SELECT id,status,next_retry_at FROM sync_tasks WHERE root_id=? AND relative_path=? AND status IN ('PENDING','RETRY_WAIT') ORDER BY created_at DESC LIMIT 1")
             .bind(root_id).bind(path).fetch_optional(&self.pool).await?;
         if let Some(row) = pending {
@@ -23,7 +94,7 @@ impl Database {
                 .bind(action.as_db()).bind(expected_hash).bind(etag).bind(total as i64).bind(unix_ms()).bind(&id).execute(&self.pool).await?;
             return Ok((id, true));
         }
-        let terminal=sqlx::query("SELECT id FROM sync_tasks WHERE root_id=? AND relative_path=? AND operation=? AND expected_local_hash IS ? AND expected_remote_etag IS ? AND status IN ('FAILED','BLOCKED') ORDER BY created_at DESC LIMIT 1")
+        let terminal=sqlx::query("SELECT id FROM sync_tasks WHERE root_id=? AND relative_path=? AND operation=? AND expected_local_hash IS ? AND expected_remote_etag IS ? AND status IN ('FAILED','BLOCKED') AND (operation='BLOCKED' OR last_error_code IS NOT 'REMOTE_TRASH_ACKNOWLEDGED') ORDER BY created_at DESC LIMIT 1")
             .bind(root_id).bind(path).bind(action.as_db()).bind(expected_hash).bind(etag).fetch_optional(&self.pool).await?;
         if let Some(row) = terminal {
             return Ok((row.get("id"), false));
@@ -52,7 +123,12 @@ impl Database {
     }
 
     pub async fn tasks(&self, limit: u32) -> AppResult<Vec<TaskDto>> {
-        let rows = sqlx::query("SELECT * FROM sync_tasks WHERE status NOT IN ('SUCCEEDED','CANCELLED') ORDER BY CASE status WHEN 'RUNNING' THEN 0 WHEN 'PENDING' THEN 1 WHEN 'RETRY_WAIT' THEN 2 ELSE 3 END,created_at DESC LIMIT ?").bind(limit.clamp(1,500) as i64).fetch_all(&self.pool).await?;
+        let hide_remote_trash = self.setting("ignoreRemoteDeleteWarnings").await?.as_deref() == Some("true");
+        let sql = format!("SELECT * FROM sync_tasks WHERE status NOT IN ('SUCCEEDED','CANCELLED')
+            AND last_error_code IS NOT 'REMOTE_TRASH_ACKNOWLEDGED'
+            AND (? = 0 OR NOT COALESCE(({REMOTE_TRASH_BLOCK}), 0))
+            ORDER BY CASE status WHEN 'RUNNING' THEN 0 WHEN 'PENDING' THEN 1 WHEN 'RETRY_WAIT' THEN 2 ELSE 3 END,created_at DESC LIMIT ?");
+        let rows = sqlx::query(&sql).bind(hide_remote_trash).bind(limit.clamp(1,500) as i64).fetch_all(&self.pool).await?;
         Ok(rows
             .iter()
             .map(|r| TaskDto {

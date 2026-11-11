@@ -8,10 +8,15 @@ import {
   Gauge,
   Trash2,
   Pencil,
+  RefreshCw,
 } from 'lucide-react';
 import { WebDavAccountDto, WebDavCapabilities } from '../../types/dto';
 import { Button, Modal } from '../../components/common/UIComponents';
 import { api } from '../../services/api';
+import { getErrorMessage } from '../../services/errorMessage';
+
+const supportsRemoteTrash = (caps: WebDavCapabilities) =>
+  Boolean(caps.safeMoveNoOverwrite && caps.safeMoveIfMatch && caps.safeUpdateExisting);
 
 interface WebDavManagerProps {
   accounts: WebDavAccountDto[];
@@ -32,6 +37,25 @@ export function WebDavManager({ accounts, onRefresh }: WebDavManagerProps) {
   const [testError, setTestError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [probingId, setProbingId] = useState<string | null>(null);
+  const [probeFeedback, setProbeFeedback] = useState<{ id: string; message: string; error: boolean } | null>(null);
+
+  const handleReprobe = async (accountId: string) => {
+    setProbingId(accountId);
+    setProbeFeedback(null);
+    try {
+      const result = await api.reprobeWebDavAccount(accountId);
+      const message = supportsRemoteTrash(result)
+        ? '受保护的 MOVE 已验证，结果已保存。'
+        : '远端回收站保护未通过验证，ProjectSync 将继续保留待删除的远端文件。';
+      setProbeFeedback({ id: accountId, message: [message, result.probeCleanupWarning].filter(Boolean).join(' '), error: false });
+      onRefresh();
+    } catch (error) {
+      setProbeFeedback({ id: accountId, message: getErrorMessage(error, '重新探测失败'), error: true });
+    } finally {
+      setProbingId(null);
+    }
+  };
 
   const handleDeleteAccount = async (accountId: string, accountName: string) => {
     if (!window.confirm(`删除 WebDAV 节点“${accountName}”？正在使用它的项目需要先解除绑定。`)) return;
@@ -72,7 +96,7 @@ export function WebDavManager({ accounts, onRefresh }: WebDavManagerProps) {
 
   const handleTestConnection = async () => {
     if (editingAccountId && !password) {
-      setTestError('重新探测时请填写密码；留空只适用于不修改密码直接保存节点信息。');
+      setTestError('测试表单中的配置需要填写密码。探测已保存的节点，请使用节点卡片上的「重新探测」。');
       return;
     }
     setTesting(true);
@@ -155,10 +179,10 @@ export function WebDavManager({ accounts, onRefresh }: WebDavManagerProps) {
                   <span className={`w-1.5 h-1.5 rounded-full ${acc.status === 'ONLINE' ? 'bg-emerald-500' : 'bg-slate-400'}`} />
                   {acc.status === 'ONLINE' ? '在线' : acc.status === 'AUTH_FAILED' ? '认证失败' : acc.status === 'OFFLINE' ? '离线' : '未探测'}
                 </span>
-                <button type="button" onClick={() => openEditAccount(acc)} aria-label={`编辑 ${acc.name}`} className="rounded p-1.5 text-slate-400 hover:bg-indigo-50 hover:text-indigo-700 dark:hover:bg-indigo-950/40 dark:hover:text-indigo-300 transition-colors">
+                <button type="button" disabled={probingId === acc.id} onClick={() => openEditAccount(acc)} aria-label={`编辑 ${acc.name}`} className="rounded p-1.5 text-slate-400 hover:bg-indigo-50 hover:text-indigo-700 dark:hover:bg-indigo-950/40 dark:hover:text-indigo-300 disabled:opacity-50 transition-colors">
                   <Pencil className="w-3.5 h-3.5" />
                 </button>
-                <button type="button" disabled={deletingId === acc.id} onClick={() => handleDeleteAccount(acc.id, acc.name)} aria-label={`删除 ${acc.name}`} className="rounded p-1.5 text-slate-400 hover:bg-rose-50 hover:text-rose-600 dark:hover:bg-rose-950/40 dark:hover:text-rose-400 disabled:opacity-50 transition-colors">
+                <button type="button" disabled={deletingId === acc.id || probingId === acc.id} onClick={() => handleDeleteAccount(acc.id, acc.name)} aria-label={`删除 ${acc.name}`} className="rounded p-1.5 text-slate-400 hover:bg-rose-50 hover:text-rose-600 dark:hover:bg-rose-950/40 dark:hover:text-rose-400 disabled:opacity-50 transition-colors">
                   <Trash2 className="w-3.5 h-3.5" />
                 </button>
               </div>
@@ -181,13 +205,23 @@ export function WebDavManager({ accounts, onRefresh }: WebDavManagerProps) {
               </div>
             </div>
 
-            {/* Verified Capabilities Badges */}
-            {acc.capabilities && (
-              <div className="space-y-2 pt-2 border-t border-slate-100 dark:border-slate-800">
-                <div className="text-xs font-semibold text-slate-800 dark:text-slate-200 flex items-center gap-1.5">
+            <div className="space-y-2 pt-2 border-t border-slate-100 dark:border-slate-800">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="flex items-center gap-1.5 text-xs font-semibold text-slate-800 dark:text-slate-200">
                   <ShieldCheck className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
-                  <span>服务端兼容性探测结果 (Runtime Profile)</span>
+                  <span>服务端兼容性</span>
                 </div>
+                <Button variant="secondary" size="sm" disabled={probingId !== null || deletingId === acc.id} onClick={() => handleReprobe(acc.id)} className="gap-1.5">
+                  <RefreshCw className={`h-3.5 w-3.5 ${probingId === acc.id ? 'animate-spin' : ''}`} />
+                  {probingId === acc.id ? '探测中…' : '重新探测'}
+                </Button>
+              </div>
+              {probeFeedback?.id === acc.id && (
+                <p role={probeFeedback.error ? 'alert' : 'status'} className={`break-words text-xs ${probeFeedback.error ? 'text-rose-700 dark:text-rose-400' : 'text-slate-600 dark:text-slate-300'}`}>
+                  {probeFeedback.message}
+                </p>
+              )}
+              {acc.capabilities && (
                 <div className="grid grid-cols-2 gap-2 text-xs text-slate-600 dark:text-slate-400">
                   <div className="bg-slate-50 dark:bg-slate-800/60 p-2 rounded-lg border border-slate-200 dark:border-slate-700 flex justify-between">
                     <span>ETag 强校验:</span>
@@ -211,7 +245,7 @@ export function WebDavManager({ accounts, onRefresh }: WebDavManagerProps) {
                   </div>
                   <div className="flex justify-between gap-2 rounded-lg border border-slate-200 bg-slate-50 p-2 dark:border-slate-700 dark:bg-slate-800/60">
                     <span>远端回收站（受保护的 MOVE）</span>
-                    <span className="shrink-0 font-semibold">{acc.capabilities.safeMoveNoOverwrite ? '已验证' : '未验证'}</span>
+                    <span className="shrink-0 font-semibold">{supportsRemoteTrash(acc.capabilities) ? '已验证' : '未验证'}</span>
                   </div>
                   <div className="bg-slate-50 dark:bg-slate-800/60 p-2 rounded-lg border border-slate-200 dark:border-slate-700 flex justify-between">
                     <span>吞吐带宽:</span>
@@ -220,8 +254,8 @@ export function WebDavManager({ accounts, onRefresh }: WebDavManagerProps) {
                     </span>
                   </div>
                 </div>
-              </div>
-            )}
+              )}
+            </div>
           </div>
         ))}
       </div>
@@ -319,7 +353,7 @@ export function WebDavManager({ accounts, onRefresh }: WebDavManagerProps) {
               <div>• 并发写防护 If-Match: {testResult.supportsIfMatch ? '支持' : '不支持'}</div>
               <div>• WebDAV 独占锁写保护: {testResult.supportsLock ? '已验证' : '未验证'}</div>
               <div>• 安全新建: <span className="font-mono">{testResult.safeCreateOnly ? (testResult.supportsIfNoneMatch ? 'If-None-Match' : '独占锁') : '未验证'}</span></div>
-              <div>• 受保护的 MOVE: {testResult.safeMoveNoOverwrite ? '支持' : '未验证'}</div>
+              <div>• 远端回收站: {supportsRemoteTrash(testResult) ? '已验证' : '未验证'}</div>
               <div>• 测得带宽: <span className="font-mono tabular-nums">{typeof testResult.maxUploadSpeedMbs === 'number' ? `~${testResult.maxUploadSpeedMbs} MB/s` : '未测量'}</span></div>
               {testResult.probeCleanupWarning && (
                 <div className="text-amber-700 dark:text-amber-300">• {testResult.probeCleanupWarning}</div>

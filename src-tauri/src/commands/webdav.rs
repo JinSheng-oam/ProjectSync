@@ -1,4 +1,19 @@
 use super::*;
+use crate::sync_engine::{CleanupSelection, RemoteCleanupInventory, RemoteCleanupResult};
+
+#[tauri::command]
+pub(crate) async fn list_remote_cleanup(state: State<'_, AppState>, root_id: String) -> ApiResult<RemoteCleanupInventory> {
+    api(state.sync.list_remote_cleanup(&root_id).await)
+}
+
+#[tauri::command]
+pub(crate) async fn clean_remote_backups(
+    state: State<'_, AppState>,
+    root_id: String,
+    items: Vec<CleanupSelection>,
+) -> ApiResult<RemoteCleanupResult> {
+    api(state.sync.clean_remote_backups(&root_id, items).await)
+}
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -150,6 +165,23 @@ pub async fn test_webdav_connection(
         .await;
     password.zeroize();
     api(result)
+}
+
+#[tauri::command]
+pub async fn reprobe_webdav_account(
+    state: State<'_, AppState>,
+    account_id: String,
+) -> ApiResult<WebDavCapabilities> {
+    api(async {
+        let (_, client) = state.sync.client_for(&account_id).await?;
+        let capabilities = client.test_connection().await?;
+        state
+            .db
+            .save_capabilities(&account_id, &capabilities, "ONLINE")
+            .await?;
+        Ok(capabilities)
+    }
+    .await)
 }
 
 #[tauri::command]

@@ -1,6 +1,35 @@
 use super::*;
 
 impl WebDavClient {
+    pub(crate) async fn probe_locked_delete(&self, project_root: &str) -> AppResult<bool> {
+        let path = format!("{}/.projectsync/.projectsync-cleanup-probe-{}", project_root.trim_end_matches('/'), uuid::Uuid::new_v4().simple());
+        let contents = b"ProjectSync isolated DELETE lock probe";
+        let file = temp_file(contents)?;
+        let created = self.put_file(&file, &path, PutCondition::CreateOnly).await;
+        let _ = tokio::fs::remove_file(file).await;
+        created?;
+        let result = async {
+            let token = self.lock_exclusive(&path, "0").await?;
+            let rejected = self.delete(&path, None).await.is_err_and(|error| {
+                matches!(error.code.as_str(), "DAV_LOCKED" | "DAV_PRECONDITION_FAILED")
+            });
+            let wrong_token = format!("opaquelocktoken:{}", uuid::Uuid::new_v4());
+            let protected = rejected
+                && self.delete_with_lock_token(&path, &wrong_token).await.is_err_and(|error| {
+                    matches!(error.code.as_str(), "DAV_LOCKED" | "DAV_PRECONDITION_FAILED")
+                })
+                && self.get_bytes(&path).await.as_deref().ok() == Some(contents.as_slice())
+                && self.delete_with_lock_token(&path, &token).await.is_ok()
+                && self.get_bytes(&path).await.is_err_and(|error| error.code == "DAV_NOT_FOUND");
+            let _ = self.unlock(&path, &token).await;
+            Ok(protected)
+        }.await;
+        if self.get_bytes(&path).await.as_deref().ok() == Some(contents.as_slice()) {
+            let _ = self.delete(&path, None).await;
+        }
+        result
+    }
+
     pub async fn probe_lock_exclusion_in(&self, parent: &str) -> AppResult<bool> {
         let parent = normalize_remote_path(parent)?;
         let token = match self.lock_exclusive(&parent, "infinity").await {
@@ -147,6 +176,7 @@ impl WebDavClient {
         let mut safe_update_existing = false;
         let mut safe_delete = false;
         let mut safe_move_no_overwrite = false;
+        let mut safe_move_if_match = false;
         let mut etag_type = "None".to_owned();
         let mut created = false;
 
@@ -248,15 +278,20 @@ impl WebDavClient {
                         .is_ok()
                 {
                     // MOVE with Overwrite:F must reject an occupied destination and preserve both files.
-                    let before_dest = self.get_bytes(&move_dest).await.ok();
                     safe_move_no_overwrite = self
                         .move_resource(&move_source, &move_dest, false, None)
                         .await
                         .err()
                         .is_some_and(|e| e.code == "DAV_PRECONDITION_FAILED")
-                        && before_dest.as_deref() == Some(b"projectsync capability probe B")
+                        && self.get_bytes(&move_dest).await.as_deref().ok()
+                            == Some(b"projectsync capability probe B".as_slice())
                         && self.get_bytes(&move_source).await.as_deref().ok()
                             == Some(b"projectsync capability probe A".as_slice());
+                    if safe_move_no_overwrite {
+                        safe_move_if_match = self
+                            .probe_move_if_match(&move_source, &format!("{probe_path}/move-new.bin"))
+                            .await;
+                    }
                 }
             }
             let _ = tokio::fs::remove_file(a).await;
@@ -294,9 +329,39 @@ impl WebDavClient {
             safe_update_existing,
             safe_delete,
             safe_move_no_overwrite,
+            safe_move_if_match,
             probe_cleanup_warning,
             tested_at: unix_ms(),
         })
+    }
+
+    async fn probe_move_if_match(&self, source: &str, destination: &str) -> bool {
+        let Ok(entries) = self.propfind(source, 0).await else {
+            return false;
+        };
+        let Some(etag) = entries
+            .iter()
+            .find(|entry| !entry.is_collection)
+            .and_then(|entry| entry.etag.as_deref())
+            .map(str::trim)
+            .filter(|etag| etag.len() >= 2 && etag.starts_with('"') && etag.ends_with('"'))
+        else {
+            return false;
+        };
+        let stale = if etag == "\"projectsync-invalid-etag\"" {
+            "\"projectsync-other-invalid-etag\""
+        } else {
+            "\"projectsync-invalid-etag\""
+        };
+        let expected = b"projectsync capability probe A".as_slice();
+        self.move_resource(source, destination, false, Some(stale))
+            .await
+            .is_err_and(|error| error.code == "DAV_PRECONDITION_FAILED")
+            && self.get_bytes(source).await.as_deref().ok() == Some(expected)
+            && self.get_bytes(destination).await.is_err_and(|error| error.code == "DAV_NOT_FOUND")
+            && self.move_resource(source, destination, false, Some(etag)).await.is_ok()
+            && self.get_bytes(destination).await.as_deref().ok() == Some(expected)
+            && self.get_bytes(source).await.is_err_and(|error| error.code == "DAV_NOT_FOUND")
     }
 }
 

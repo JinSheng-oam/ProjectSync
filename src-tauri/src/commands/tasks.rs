@@ -11,6 +11,15 @@ pub async fn cancel_sync_task(state: State<'_, AppState>, task_id: String) -> Ap
 }
 
 #[tauri::command]
+pub async fn handle_retained_remote_file(
+    state: State<'_, AppState>,
+    task_id: String,
+    restore: bool,
+) -> ApiResult<()> {
+    api(state.sync.handle_retained_remote_file(&task_id, restore).await)
+}
+
+#[tauri::command]
 pub async fn retry_failed_task(
     state: State<'_, AppState>,
     task_id: String,

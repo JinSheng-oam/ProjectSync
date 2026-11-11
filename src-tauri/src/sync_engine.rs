@@ -5,6 +5,8 @@ mod transfer;
 mod remote_files;
 mod conflict;
 mod binding;
+mod cleanup;
+pub(crate) use cleanup::{CleanupSelection, RemoteCleanupInventory, RemoteCleanupResult};
 
 use plan::{build_plan, preview_from_plan};
 use remote_files::{
@@ -766,6 +768,7 @@ fn unsafe_capabilities() -> WebDavCapabilities {
         safe_update_existing: false,
         safe_delete: false,
         safe_move_no_overwrite: false,
+        safe_move_if_match: false,
         probe_cleanup_warning: None,
         tested_at: 0,
     }

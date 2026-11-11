@@ -455,7 +455,7 @@ impl WebDavClient {
         self.delete_inner(path, if_match, None).await
     }
 
-    async fn delete_with_lock_token(&self, path: &str, lock_token: &str) -> AppResult<()> {
+    pub(crate) async fn delete_with_lock_token(&self, path: &str, lock_token: &str) -> AppResult<()> {
         self.delete_inner(path, None, Some(lock_token)).await
     }
 

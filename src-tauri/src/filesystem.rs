@@ -363,6 +363,35 @@ pub fn ensure_safe_parent(root: &Path, relative_path: &str) -> AppResult<PathBuf
 }
 
 pub fn atomic_replace(staging: &Path, target: &Path) -> AppResult<()> {
+    atomic_commit(staging, target, true)
+}
+
+pub fn atomic_install_new(staging: &Path, target: &Path) -> AppResult<()> {
+    atomic_commit(staging, target, false)
+}
+
+#[cfg(test)]
+#[test]
+fn atomic_install_new_keeps_an_existing_target() {
+    let dir = std::env::temp_dir().join(format!("projectsync-install-test-{}", uuid::Uuid::new_v4()));
+    fs::create_dir(&dir).unwrap();
+    let stage = dir.join("staged");
+    let target = dir.join("notes.txt");
+    fs::write(&stage, b"remote copy").unwrap();
+    fs::write(&target, b"local copy").unwrap();
+    let result = atomic_install_new(&stage, &target);
+    let local = fs::read(&target).unwrap();
+    fs::remove_file(&target).unwrap();
+    atomic_install_new(&stage, &target).unwrap();
+    let restored = fs::read(&target).unwrap();
+    fs::remove_file(&target).unwrap();
+    fs::remove_dir(&dir).unwrap();
+    assert!(result.is_err());
+    assert_eq!(local, b"local copy");
+    assert_eq!(restored, b"remote copy");
+}
+
+fn atomic_commit(staging: &Path, target: &Path, replace: bool) -> AppResult<()> {
     #[cfg(windows)]
     {
         use std::os::windows::ffi::OsStrExt;
@@ -379,14 +408,18 @@ pub fn atomic_replace(staging: &Path, target: &Path) -> AppResult<()> {
             .encode_wide()
             .chain(Some(0))
             .collect::<Vec<_>>();
+        let flags = MOVEFILE_WRITE_THROUGH | if replace { MOVEFILE_REPLACE_EXISTING } else { 0 };
         let moved = unsafe {
             MoveFileExW(
                 from.as_ptr(),
                 to.as_ptr(),
-                MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH,
+                flags,
             )
         };
         if moved == 0 {
+            if !replace && std::io::Error::last_os_error().kind() == std::io::ErrorKind::AlreadyExists {
+                return Err(AppError::new("LOCAL_FILE_CHANGED", "本地目标已存在，未覆盖"));
+            }
             return Err(AppError::new(
                 "LOCAL_REPLACE_FAILED",
                 "原子替换本地文件失败；临时文件已保留",
@@ -396,7 +429,18 @@ pub fn atomic_replace(staging: &Path, target: &Path) -> AppResult<()> {
     }
     #[cfg(not(windows))]
     {
-        fs::rename(staging, target)?;
+        if replace {
+            fs::rename(staging, target)?;
+        } else {
+            fs::hard_link(staging, target).map_err(|error| {
+                if error.kind() == std::io::ErrorKind::AlreadyExists {
+                    AppError::new("LOCAL_FILE_CHANGED", "本地目标已存在，未覆盖")
+                } else {
+                    AppError::from(error)
+                }
+            })?;
+            let _ = fs::remove_file(staging);
+        }
         Ok(())
     }
 }

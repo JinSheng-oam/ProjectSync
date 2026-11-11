@@ -169,6 +169,14 @@ class MockEngine {
     return [...this.accounts];
   }
 
+  async handleRetainedRemoteFile(taskId: string, _restore: boolean): Promise<void> {
+    await this.delay(180);
+    const task = this.tasks.find((item) => item.id === taskId);
+    if (!task) throw new Error('远端保留记录已处理或已发生变化');
+    this.tasks = this.tasks.filter((item) => item.rootId !== task.rootId ||
+      item.path !== task.path || item.errorCode !== 'BLOCKED_SERVER_CAPABILITY');
+  }
+
   async testWebDavConnection(url: string, _username: string, _password = '', _tlsVerify = true): Promise<WebDavCapabilities> {
     await this.delay(800);
     if (!url.startsWith('http://') && !url.startsWith('https://')) {
@@ -182,6 +190,9 @@ class MockEngine {
       supportsLock: true,
       propfindDepth1Supported: true,
       maxUploadSpeedMbs: 35.8,
+      safeUpdateExisting: true,
+      safeMoveNoOverwrite: true,
+      safeMoveIfMatch: true,
       testedAt: Date.now(),
     };
   }
@@ -198,6 +209,16 @@ class MockEngine {
     };
     this.accounts.push(newAcc);
     return newAcc;
+  }
+
+  async reprobeWebDavAccount(accountId: string): Promise<WebDavCapabilities> {
+    const account = this.accounts.find((item) => item.id === accountId);
+    if (!account) throw new Error('WebDAV 节点不存在');
+    const result = await this.testWebDavConnection(account.url, account.username);
+    account.capabilities = result;
+    account.status = 'ONLINE';
+    account.lastConnectedAt = Date.now();
+    return result;
   }
 
   async previewInitialSync(_accountId: string, _localPath: string, _remotePath: string, _rules: SyncRuleDto[], _excludeGitTracked: boolean): Promise<InitialSyncPreviewDto> {
@@ -273,9 +294,12 @@ class MockEngine {
     return [...(this.files[rootId] || [])];
   }
 
-  async getPendingTasks(): Promise<TaskDto[]> {
+  async getPendingTasks(ignoreRemoteDeleteWarnings = false): Promise<TaskDto[]> {
     await this.delay(100);
-    return [...this.tasks];
+    return this.tasks.filter((task) => !ignoreRemoteDeleteWarnings ||
+      task.errorCode !== 'BLOCKED_SERVER_CAPABILITY' ||
+      (task.action !== 'MoveRemoteToTrash' &&
+        !(task.action === 'Blocked' && /受保护的 MOVE|保护的远端 MOVE|远端文件没有可用的强 ETag/.test(task.error ?? ''))));
   }
 
   async querySyncHistory(keyword = '', limit = 50): Promise<HistoryItemDto[]> {

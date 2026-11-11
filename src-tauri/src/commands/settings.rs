@@ -35,6 +35,7 @@ pub async fn backup_database(state: State<'_, AppState>, destination: String) ->
 pub async fn get_app_settings(state: State<'_, AppState>) -> ApiResult<AppSettingsDto> {
     api(async {
         Ok(AppSettingsDto {
+            ignore_remote_delete_warnings: setting_bool(&state, "ignoreRemoteDeleteWarnings", false).await,
             device_id: state.db.device_id().await?,
             device_name: state.db.device_name().await?,
             poll_interval_seconds: setting_u32(&state, "pollIntervalSeconds", 60).await,
@@ -53,6 +54,9 @@ pub async fn update_app_settings(
     settings: serde_json::Value,
 ) -> ApiResult<()> {
     api(async {
+        if let Some(ignore) = settings.get("ignoreRemoteDeleteWarnings").and_then(|v| v.as_bool()) {
+            state.db.set_setting("ignoreRemoteDeleteWarnings", if ignore { "true" } else { "false" }).await?;
+        }
         if let Some(name) = settings.get("deviceName").and_then(|v| v.as_str()) {
             let name = name.trim();
             if name.is_empty() || name.len() > 64 {

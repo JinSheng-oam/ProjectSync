@@ -83,6 +83,7 @@ export interface WebDavCapabilities {
   safeUpdateExisting?: boolean;
   safeDelete?: boolean;
   safeMoveNoOverwrite?: boolean;
+  safeMoveIfMatch?: boolean;
   probeCleanupWarning?: string;
   maxUploadSpeedMbs?: number;
   testedAt: number;
@@ -198,6 +199,7 @@ export interface CreateWebDavAccountInput {
 }
 
 export interface AppSettingsDto {
+  ignoreRemoteDeleteWarnings: boolean;
   deviceId: string;
   deviceName: string;
   pollIntervalSeconds: number;
@@ -205,6 +207,25 @@ export interface AppSettingsDto {
   autoStart: boolean;
   startMinimized: boolean;
   retryLimit: number;
+}
+
+export interface RemoteCleanupItem {
+  path: string;
+  kind: 'trash' | 'conflict';
+  size: number;
+  modifiedAt: number;
+  etag: string | null;
+}
+
+export interface RemoteCleanupInventory {
+  files: RemoteCleanupItem[];
+  truncated: boolean;
+  canAttemptCleanup: boolean;
+}
+
+export interface RemoteCleanupResult {
+  removed: string[];
+  failures: [string, string][];
 }
 
 export interface RemoteEntryDto {

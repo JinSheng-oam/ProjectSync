@@ -8,10 +8,10 @@ use crate::{
 use std::collections::{BTreeSet, HashMap, HashSet};
 
 pub(super) const REMOTE_TRASH_CAPABILITY_MESSAGE: &str =
-    "本地文件已删除，但 WebDAV 未验证受保护的 MOVE；远端文件已保留。请重新探测节点，或把远端文件恢复到本地。";
+    "本地文件已删除，但 WebDAV 未验证受保护的 MOVE；远端文件已保留。请到 WebDAV 节点点击「重新探测」，或把远端文件恢复到本地。";
 
 pub(super) fn remote_trash_etag<'a>(capabilities: &WebDavCapabilities, remote: &'a RemoteEntry) -> Option<&'a str> {
-    if !capabilities.safe_move_no_overwrite || !capabilities.safe_update_existing {
+    if !capabilities.supports_remote_trash() {
         return None;
     }
     remote.etag.as_deref().map(str::trim).filter(|etag| {
@@ -216,7 +216,7 @@ pub(super) fn build_plan(
                                 None,
                                 None,
                                 Some((*remote).clone()),
-                                if capabilities.safe_move_no_overwrite && capabilities.safe_update_existing {
+                                if capabilities.supports_remote_trash() {
                                     "本地文件已删除，但远端文件没有可用的强 ETag；远端文件已保留。"
                                 } else {
                                     REMOTE_TRASH_CAPABILITY_MESSAGE
@@ -327,4 +327,34 @@ pub(super) fn preview_from_plan(root_id: &str, plan: Vec<PlannedAction>) -> Init
         });
     }
     preview
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn legacy_no_overwrite_probe_does_not_authorize_remote_trash() {
+        let mut capabilities = super::super::unsafe_capabilities();
+        capabilities.safe_move_no_overwrite = true;
+        capabilities.safe_update_existing = true;
+        let mut legacy_report = serde_json::to_value(&capabilities).unwrap();
+        legacy_report.as_object_mut().unwrap().remove("safeMoveIfMatch");
+        let mut loaded: WebDavCapabilities = serde_json::from_value(legacy_report).unwrap();
+        let mut file = RemoteEntry {
+            relative_path: "notes.md".into(),
+            path_key: "notes.md".into(),
+            hash: "test-hash".into(),
+            size: 1,
+            modified_at: 0,
+            etag: Some("\"v1\"".into()),
+            is_collection: false,
+        };
+
+        assert_eq!(remote_trash_etag(&loaded, &file), None);
+        loaded.safe_move_if_match = true;
+        assert_eq!(remote_trash_etag(&loaded, &file), Some("\"v1\""));
+        file.etag = Some("W/\"v1\"".into());
+        assert_eq!(remote_trash_etag(&loaded, &file), None);
+    }
 }

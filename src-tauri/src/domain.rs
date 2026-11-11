@@ -117,8 +117,16 @@ pub struct WebDavCapabilities {
     pub safe_update_existing: bool,
     pub safe_delete: bool,
     pub safe_move_no_overwrite: bool,
+    #[serde(default)]
+    pub safe_move_if_match: bool,
     pub probe_cleanup_warning: Option<String>,
     pub tested_at: i64,
+}
+
+impl WebDavCapabilities {
+    pub fn supports_remote_trash(&self) -> bool {
+        self.safe_move_no_overwrite && self.safe_move_if_match && self.safe_update_existing
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -453,6 +461,7 @@ pub struct RuleImpactDto {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AppSettingsDto {
+    pub ignore_remote_delete_warnings: bool,
     pub device_id: String,
     pub device_name: String,
     pub poll_interval_seconds: u32,

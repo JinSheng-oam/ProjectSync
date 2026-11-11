@@ -11,6 +11,9 @@ import type {
   WebDavCapabilities,
   CreateWebDavAccountInput,
   AppSettingsDto,
+  RemoteCleanupInventory,
+  RemoteCleanupItem,
+  RemoteCleanupResult,
   RemoteEntryDto,
   RuleImpactDto,
   AiSettingsDto,
@@ -34,6 +37,12 @@ let mockAiSettings: AiSettingsDto = {
   hasApiKey: false,
   configured: true,
   mergePrompt: '合并本地与远端修改，保留双方意图；不要引入新事实、删除无关内容或改变文件格式。',
+};
+
+let mockAppSettings: AppSettingsDto = {
+  deviceId: 'browser-preview', deviceName: 'ProjectSync Device',
+  pollIntervalSeconds: 60, debounceMs: 1200, autoStart: false,
+  startMinimized: false, retryLimit: 5, ignoreRemoteDeleteWarnings: false,
 };
 
 export const api = {
@@ -128,6 +137,14 @@ export const api = {
     return mockEngine.createWebDavAccount(account);
   },
 
+  async reprobeWebDavAccount(accountId: string): Promise<WebDavCapabilities> {
+    if (isTauriEnv) {
+      const { invoke } = await import('@tauri-apps/api/core');
+      return invoke('reprobe_webdav_account', { accountId });
+    }
+    return mockEngine.reprobeWebDavAccount(accountId);
+  },
+
   async previewInitialSync(accountId: string, localPath: string, remotePath: string, rules: SyncRuleDto[], excludeGitTracked: boolean): Promise<InitialSyncPreviewDto> {
     if (isTauriEnv) {
       const { invoke } = await import('@tauri-apps/api/core');
@@ -180,7 +197,15 @@ export const api = {
       const { invoke } = await import('@tauri-apps/api/core');
       return invoke('get_pending_tasks');
     }
-    return mockEngine.getPendingTasks();
+    return mockEngine.getPendingTasks(mockAppSettings.ignoreRemoteDeleteWarnings);
+  },
+
+  async handleRetainedRemoteFile(taskId: string, restore: boolean): Promise<void> {
+    if (isTauriEnv) {
+      const { invoke } = await import('@tauri-apps/api/core');
+      return invoke('handle_retained_remote_file', { taskId, restore });
+    }
+    return mockEngine.handleRetainedRemoteFile(taskId, restore);
   },
 
   async querySyncHistory(keyword = '', limit = 50): Promise<HistoryItemDto[]> {
@@ -347,15 +372,30 @@ export const api = {
   },
 
   async getAppSettings(): Promise<AppSettingsDto | null> {
-    if (!isTauriEnv) return null;
+    if (!isTauriEnv) return { ...mockAppSettings };
     const { invoke } = await import('@tauri-apps/api/core');
     return invoke('get_app_settings');
   },
 
   async updateAppSettings(settings: Record<string, unknown>): Promise<void> {
-    if (!isTauriEnv) return;
+    if (!isTauriEnv) {
+      mockAppSettings = { ...mockAppSettings, ...settings };
+      return;
+    }
     const { invoke } = await import('@tauri-apps/api/core');
     return invoke('update_app_settings', { settings });
+  },
+
+  async listRemoteCleanup(rootId: string): Promise<RemoteCleanupInventory> {
+    if (!isTauriEnv) return { files: [], truncated: false, canAttemptCleanup: false };
+    const { invoke } = await import('@tauri-apps/api/core');
+    return invoke('list_remote_cleanup', { rootId });
+  },
+
+  async cleanRemoteBackups(rootId: string, items: RemoteCleanupItem[]): Promise<RemoteCleanupResult> {
+    if (!isTauriEnv) throw new Error('远端清理仅在桌面版可用');
+    const { invoke } = await import('@tauri-apps/api/core');
+    return invoke('clean_remote_backups', { rootId, items });
   },
 
   async getAiSettings(): Promise<AiSettingsDto> {
