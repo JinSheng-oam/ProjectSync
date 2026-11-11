@@ -6,7 +6,10 @@ impl SyncCoordinator {
         conflict_id: &str,
         resolution: ConflictResolution,
     ) -> AppResult<String> {
-        let (root_id, path, local_hash, remote_hash, _base_hash, expected_etag) =
+        let (root_id, ..) = self.db.conflict_record(conflict_id).await?;
+        let lock = self.lock_for(&root_id)?;
+        let _guard = lock.lock().await;
+        let (_, path, local_hash, remote_hash, _base_hash, expected_etag) =
             self.db.conflict_record(conflict_id).await?;
         let root = self.db.root(&root_id).await?;
         let (account, client) = self.client_for(&root.account_id).await?;
@@ -47,6 +50,11 @@ impl SyncCoordinator {
                 "冲突检测后远端版本发生变化；请重新扫描",
             ));
         }
+        let action = if resolution == ConflictResolution::KeepRemote && current_remote.is_none() {
+            SyncAction::MoveLocalToTrash
+        } else {
+            SyncAction::CreateConflictCopy
+        };
         let message = match resolution {
             ConflictResolution::KeepLocal => {
                 let local_path = target.clone();
@@ -128,6 +136,12 @@ impl SyncCoordinator {
                         .await?;
                 } else {
                     if target.exists() {
+                        if Some(hash_file(&target)?.as_str()) != local_hash.as_deref() {
+                            return Err(AppError::retryable(
+                                "LOCAL_FILE_CHANGED",
+                                "确认期间本地旧文件发生变化；本地文件已保留",
+                            ));
+                        }
                         move_to_trash(&self.data_dir, &root.id, &path, &target)?;
                     }
                     self.db
@@ -272,7 +286,6 @@ impl SyncCoordinator {
             }
         };
         self.db.resolve_conflict(conflict_id, resolution).await?;
-        let action = SyncAction::CreateConflictCopy;
         self.db
             .add_history(HistoryEntry {
                 root_id: &root.id,

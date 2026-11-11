@@ -433,8 +433,21 @@ impl SyncCoordinator {
         );
         self.db.set_root_status(&root.id, "SYNCING").await?;
         let mut transfer_jobs = Vec::new();
+        let mut local_recycle = Vec::new();
+        let mut planned_downloads = 0;
+        let downloaded_before = summary.downloaded;
         for item in plan {
             self.ensure_sync_active(&root.id).await?;
+            if item.action == SyncAction::MoveLocalToTrash {
+                local_recycle.push(item);
+                continue;
+            }
+            if matches!(
+                item.action,
+                SyncAction::DownloadNew | SyncAction::DownloadUpdate
+            ) {
+                planned_downloads += 1;
+            }
             if matches!(
                 item.action,
                 SyncAction::UploadNew
@@ -517,11 +530,9 @@ impl SyncCoordinator {
                             .mark_line_endings_equivalent(&root.id, &item.path)
                             .await?;
                     }
-                    if item.local.is_some() && item.remote.is_some() {
-                        self.db
-                            .resolve_conflicts_for_path(&root.id, &item.path)
-                            .await?;
-                    }
+                    self.db
+                        .resolve_conflicts_for_path(&root.id, &item.path)
+                        .await?;
                     self.db
                         .reconcile_tasks_for_path(&root.id, &item.path, true)
                         .await?;
@@ -667,6 +678,37 @@ impl SyncCoordinator {
             summary.downloaded += downloaded;
             summary.failed += failed;
             summary.blocked += blocked;
+        }
+        // A remote reorganization can appear as new content plus disappeared
+        // paths, even when the content also changed and cannot be paired by hash.
+        // A skipped or cancelled download is not counted as a success.
+        if summary.downloaded - downloaded_before == planned_downloads {
+            for item in local_recycle {
+                self.ensure_sync_active(&root.id).await?;
+                let total = item.local.as_ref().map_or(0, |entry| entry.size);
+                let (task, ready) = self
+                    .db
+                    .prepare_task(
+                        &root.id,
+                        &item.path,
+                        &item.action,
+                        total,
+                        item.local.as_ref().map(|entry| entry.hash.as_str()),
+                        None,
+                    )
+                    .await?;
+                if ready {
+                    let (_, _, failed, blocked) = self
+                        .execute_planned_task(&root, &client, &capabilities, &item, &task, total)
+                        .await?;
+                    summary.failed += failed;
+                    summary.blocked += blocked;
+                } else {
+                    summary.skipped += 1;
+                }
+            }
+        } else {
+            summary.skipped += local_recycle.len() as u64;
         }
         if !root.initial_sync_completed && summary.failed == 0 && summary.blocked == 0 {
             self.db.mark_initial_completed(&root.id).await?;

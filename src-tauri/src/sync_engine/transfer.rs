@@ -324,6 +324,16 @@ impl SyncCoordinator {
                     .local
                     .as_ref()
                     .ok_or_else(|| AppError::new("LOCAL_NOT_FOUND", "待回收本地文件不存在"))?;
+                match client.propfind(&destination, 0).await {
+                    Err(error) if error.code == "DAV_NOT_FOUND" => {}
+                    Err(error) => return Err(error),
+                    Ok(_) => {
+                        return Err(AppError::retryable(
+                            "DAV_PRECONDITION_FAILED",
+                            "远端旧路径已恢复；本地文件已保留",
+                        ));
+                    }
+                }
                 if hash_file(&local.absolute_path)? != local.hash {
                     return Err(AppError::retryable(
                         "LOCAL_FILE_CHANGED",
@@ -343,6 +353,9 @@ impl SyncCoordinator {
                     .await?;
                 self.db
                     .update_base(&root.id, &item.path, None, None, None)
+                    .await?;
+                self.db
+                    .resolve_conflicts_for_path(&root.id, &item.path)
                     .await?;
                 Ok(local.size)
             }

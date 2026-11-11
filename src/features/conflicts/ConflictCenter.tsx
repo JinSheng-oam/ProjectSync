@@ -107,6 +107,8 @@ export function ConflictCenter({
   const allChecked = selectableIds.length > 0 && selectedBatch.length === selectableIds.length;
   const isActiveQueued = activeConflict ? queuedIds.has(activeConflict.id) : false;
   const missingVersion = activeConflict && (!activeConflict.hasLocalVersion ? '本地' : !activeConflict.hasRemoteVersion ? '远端' : null);
+  const remoteOldPathMissing = activeConflict?.conflictType === 'RemoteDeleteLocalModified' &&
+    activeConflict.hasLocalVersion && !activeConflict.hasRemoteVersion;
   const conflictLabels: Record<ConflictItemDto['conflictType'], string> = {
     ConcurrentModification: '两端均已修改', InitialSyncDifferent: '首次同步内容不同',
     LocalDeleteRemoteModified: '本地删除、远端修改', RemoteDeleteLocalModified: '远端删除、本地修改',
@@ -387,6 +389,11 @@ export function ConflictCenter({
                   </span>
                 </div>
 
+                {remoteOldPathMissing && (
+                  <p className="text-xs text-slate-600 dark:text-slate-400">
+                    远端已没有这个路径，可能是移动、改名或删除。若文件已移到新路径，请先确认新文件已下载，并把需要的本地修改合入新文件。
+                  </p>
+                )}
                 <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3">
                   {/* Action 1: KEEP_BOTH (Default Recommended) */}
                   <button type="button" disabled={Boolean(missingVersion)}
@@ -466,15 +473,15 @@ export function ConflictCenter({
                       setConfirmResolution({
                         id: activeConflict.id,
                         resolution: 'KeepLocal',
-                        title: activeConflict.hasRemoteVersion ? '确认以本地版本为准' : '确认恢复远端文件',
-                        description: activeConflict.hasRemoteVersion ? '上传本地版本覆盖远端。写入前将重新核对版本。' : '上传现存的本地版本，在远端安全新建此文件。',
+                        title: activeConflict.hasRemoteVersion ? '确认以本地版本为准' : '确认恢复远端旧路径',
+                        description: activeConflict.hasRemoteVersion ? '上传本地版本覆盖远端。写入前将重新核对版本。' : '将本地版本上传到远端旧路径。如果文件已移到新路径，这会让远端同时保留两个路径。',
                       })
                     }
                     className="p-3.5 text-left focus-visible:ring-2 focus-visible:ring-indigo-500 disabled:cursor-not-allowed disabled:opacity-60 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 hover:bg-slate-50 dark:hover:bg-slate-800/50 cursor-pointer transition-all space-y-1.5 shadow-soft-sm"
                   >
                     <span className="text-xs font-semibold text-slate-900 dark:text-slate-100 flex items-center gap-1.5">
                       <HardDrive className="w-4 h-4 text-slate-500 dark:text-slate-400" />
-                      <span>{activeConflict.hasRemoteVersion ? '以本地为准' : '恢复到远端'}</span>
+                      <span>{activeConflict.hasRemoteVersion ? '以本地为准' : '恢复远端旧路径'}</span>
                     </span>
                     <span className="block text-[11px] text-slate-600 dark:text-slate-400 leading-normal">
                       {activeConflict.hasRemoteVersion ? '使用本地内容覆盖远端。' : '把现存的本地版本上传到远端。'}
@@ -482,23 +489,25 @@ export function ConflictCenter({
                   </button>
 
                   {/* Action 4: KEEP_REMOTE */}
-                  <button type="button" disabled={!activeConflict.hasRemoteVersion}
+                  <button type="button" disabled={!activeConflict.hasRemoteVersion && !remoteOldPathMissing}
                     onClick={() =>
                       setConfirmResolution({
                         id: activeConflict.id,
                         resolution: 'KeepRemote',
-                        title: activeConflict.hasLocalVersion ? '确认以远端版本为准' : '确认恢复本地文件',
-                        description: activeConflict.hasLocalVersion ? '备份当前本地版本，再用远端版本替换。' : '下载现存的远端版本，恢复本地文件。',
+                        title: remoteOldPathMissing ? '确认回收本地旧文件' : activeConflict.hasLocalVersion ? '确认以远端版本为准' : '确认恢复本地文件',
+                        description: remoteOldPathMissing
+                          ? '请先确认需要的新文件已下载。本地旧文件会移入 ProjectSync 回收站，远端旧路径保持不变。'
+                          : activeConflict.hasLocalVersion ? '备份当前本地版本，再用远端版本替换。' : '下载现存的远端版本，恢复本地文件。',
                       })
                     }
                     className="p-3.5 text-left focus-visible:ring-2 focus-visible:ring-indigo-500 disabled:cursor-not-allowed disabled:opacity-60 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 hover:bg-slate-50 dark:hover:bg-slate-800/50 cursor-pointer transition-all space-y-1.5 shadow-soft-sm"
                   >
                     <span className="text-xs font-semibold text-slate-900 dark:text-slate-100 flex items-center gap-1.5">
                       <Cloud className="w-4 h-4 text-slate-500 dark:text-slate-400" />
-                      <span>{activeConflict.hasLocalVersion ? '以远端为准' : '恢复到本地'}</span>
+                      <span>{remoteOldPathMissing ? '回收本地旧文件' : activeConflict.hasLocalVersion ? '以远端为准' : '恢复到本地'}</span>
                     </span>
                     <span className="block text-[11px] text-slate-600 dark:text-slate-400 leading-normal">
-                      {activeConflict.hasLocalVersion ? '下载远端内容，备份并替换本地文件。' : '把现存的远端版本下载到本地。'}
+                      {remoteOldPathMissing ? '保持远端目录结构，旧文件移入 ProjectSync 回收站。' : activeConflict.hasLocalVersion ? '下载远端内容，备份并替换本地文件。' : '把现存的远端版本下载到本地。'}
                     </span>
                   </button>
                 </div>
