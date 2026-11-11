@@ -41,7 +41,7 @@ export function RemoteDirectoryBrowser({ browse, selectedAccountId, onSelect }: 
           远端目录浏览
         </span>
         <div className="flex items-center gap-2">
-          <code className="text-[11px] text-slate-600 dark:text-slate-400">{remoteBrowsePath}</code>
+          <code className="text-[11px] text-slate-600 dark:text-slate-400">正在浏览：{remoteBrowsePath}</code>
           <button type="button" onClick={() => setRemoteBrowsePath(parentRemoteDirectory(remoteBrowsePath))} disabled={remoteBrowsePath === '/'} className="p-1 rounded hover:bg-slate-200 dark:hover:bg-slate-700 disabled:opacity-40" aria-label="上级目录">
             <ArrowUp className="w-3.5 h-3.5" />
           </button>
@@ -63,7 +63,7 @@ export function RemoteDirectoryBrowser({ browse, selectedAccountId, onSelect }: 
           </button>
         ))}
       </div>
-      <Button variant="ghost" size="sm" disabled={!remoteBrowseLoaded || loadingRemote} onClick={() => { onSelect(remoteBrowsePath); }} className="text-indigo-700 dark:text-indigo-300">使用当前远端目录：{remoteBrowsePath}</Button>
+      <Button variant="ghost" size="sm" disabled={!remoteBrowseLoaded || loadingRemote} onClick={() => { onSelect(remoteBrowsePath); }} className="text-indigo-700 dark:text-indigo-300">设为同步目标：{remoteBrowsePath}</Button>
     </div>
   );
 }

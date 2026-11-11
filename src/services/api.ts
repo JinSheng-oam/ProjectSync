@@ -28,6 +28,7 @@ const isTauriEnv = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in win
 
 let mockAiSettings: AiSettingsDto = {
   useCodexForMerge: false,
+  codexModel: '',
   endpoint: 'https://api.openai.com/v1',
   model: 'gpt-4o-mini',
   hasApiKey: false,
@@ -258,8 +259,16 @@ export const api = {
     return invoke<RuleImpactDto>('preview_rule_impact', { rootId, rules });
   },
 
-  async explainSyncRule(path: string, rules: SyncRuleDto[]): Promise<string> {
+  async checkLocalDirectory(path: string): Promise<boolean> {
+    if (!isTauriEnv) return false;
+    const { invoke } = await import('@tauri-apps/api/core');
+    await invoke('check_local_directory', { path });
+    return true;
+  },
+
+  async explainSyncRule(path: string, rules: SyncRuleDto[], localPath?: string, excludeGitTracked?: boolean): Promise<string> {
     if (!isTauriEnv) {
+      if (excludeGitTracked) return '浏览器预览无法读取 Git 跟踪状态，请在桌面版诊断。';
       const normalizedPath = path.trim().replace(/\\/g, '/').replace(/^\/+/, '');
       if (!normalizedPath) return '请输入有效的文件相对路径。';
 
@@ -305,7 +314,7 @@ export const api = {
       return '文件将被【同步】：未命中任何排除规则，且未限制包含范围。';
     }
     const { invoke } = await import('@tauri-apps/api/core');
-    return invoke<string>('explain_sync_rule', { path, rules });
+    return invoke<string>('explain_sync_rule', { path, rules, localPath, excludeGitTracked });
   },
 
   async pickLocalDirectory(): Promise<string | null> {
@@ -359,6 +368,7 @@ export const api = {
     if (!isTauriEnv) {
       mockAiSettings = {
         useCodexForMerge: settings.useCodexForMerge,
+        codexModel: settings.codexModel.trim(),
         endpoint: settings.endpoint.trim(),
         model: settings.model.trim(),
         hasApiKey: settings.clearApiKey ? false : Boolean(settings.apiKey?.trim()) || mockAiSettings.hasApiKey,
@@ -371,11 +381,17 @@ export const api = {
     return invoke<AiSettingsDto>('save_ai_settings', { settings });
   },
 
-  async testAiSettings(input?: { endpoint: string; model: string; apiKey?: string; useCodexForMerge?: boolean }): Promise<AiConnectionTestDto> {
+  async testAiSettings(input?: { endpoint: string; model: string; apiKey?: string; useCodexForMerge?: boolean; codexModel?: string }): Promise<AiConnectionTestDto> {
     if (!isTauriEnv && input?.useCodexForMerge) throw new Error('请在桌面版测试 Codex CLI。');
     if (!isTauriEnv) return { message: '连接成功，模型返回：OK', model: input?.model || mockAiSettings.model, latencyMs: 320 };
     const { invoke } = await import('@tauri-apps/api/core');
     return invoke<AiConnectionTestDto>('test_ai_settings', { input });
+  },
+
+  async listCodexModels(): Promise<{ model: string; displayName: string }[]> {
+    if (!isTauriEnv) throw new Error('请在桌面版拉取 Codex CLI 模型。');
+    const { invoke } = await import('@tauri-apps/api/core');
+    return invoke('list_codex_models');
   },
 
   async listAiModels(endpoint: string, apiKey?: string): Promise<string[]> {
@@ -446,6 +462,12 @@ export const api = {
     }
     const { invoke } = await import('@tauri-apps/api/core');
     return invoke<AiMergePreviewDto>('refine_ai_merge', { input });
+  },
+
+  async regenerateAiMerge(conflictId: string): Promise<AiMergePreviewDto> {
+    if (!isTauriEnv) return this.previewAiMerge(conflictId);
+    const { invoke } = await import('@tauri-apps/api/core');
+    return invoke('regenerate_ai_merge', { conflictId });
   },
 
   async applyAiMerge(conflictId: string, previewId: string): Promise<{ success: boolean; message: string }> {

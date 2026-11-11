@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import {
   AlertCircle,
   Bot,
@@ -22,6 +22,10 @@ export function AiSettingsView() {
   const [endpoint, setEndpoint] = useState('');
   const [model, setModel] = useState('');
   const [useCodexForMerge, setUseCodexForMerge] = useState(false);
+  const [codexModel, setCodexModel] = useState('');
+  const [codexModels, setCodexModels] = useState<{ model: string; displayName: string }[]>([]);
+  const [loadingCodexModels, setLoadingCodexModels] = useState(false);
+  const [codexModelsError, setCodexModelsError] = useState('');
   const [apiKey, setApiKey] = useState('');
   const [clearApiKey, setClearApiKey] = useState(false);
   const [mergePrompt, setMergePrompt] = useState(FALLBACK_PROMPT);
@@ -38,6 +42,7 @@ export function AiSettingsView() {
     setEndpoint(value.endpoint);
     setModel(value.model);
     setUseCodexForMerge(value.useCodexForMerge);
+    setCodexModel(value.codexModel);
     setMergePrompt(value.mergePrompt || FALLBACK_PROMPT);
     setApiKey('');
     setClearApiKey(false);
@@ -58,6 +63,24 @@ export function AiSettingsView() {
     };
   }, []);
 
+  const loadCodexModels = useCallback(async () => {
+    setLoadingCodexModels(true);
+    setCodexModelsError('');
+    try {
+      const result = await api.listCodexModels();
+      setCodexModels(result);
+      if (!result.length) setCodexModelsError('Codex CLI 未返回可选模型。');
+    } catch (reason: unknown) {
+      setCodexModelsError(errorMessage(reason));
+    } finally {
+      setLoadingCodexModels(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (useCodexForMerge) void loadCodexModels();
+  }, [useCodexForMerge, loadCodexModels]);
+
   const handleSave = async () => {
     setSaving(true);
     setError('');
@@ -65,6 +88,7 @@ export function AiSettingsView() {
     try {
       const result = await api.saveAiSettings({
         useCodexForMerge,
+        codexModel,
         endpoint,
         model,
         apiKey: apiKey || undefined,
@@ -88,6 +112,7 @@ export function AiSettingsView() {
     try {
       const result = await api.testAiSettings({
         useCodexForMerge: useCodex,
+        codexModel: useCodex ? codexModel.trim() : undefined,
         endpoint: endpoint.trim(),
         model: model.trim(),
         apiKey: apiKey.trim() || undefined,
@@ -125,6 +150,7 @@ export function AiSettingsView() {
     ? endpoint !== settings.endpoint
       || model !== settings.model
       || useCodexForMerge !== settings.useCodexForMerge
+      || codexModel !== settings.codexModel
       || mergePrompt !== settings.mergePrompt
       || apiKey.length > 0
       || clearApiKey
@@ -324,9 +350,23 @@ export function AiSettingsView() {
               )}
             </div>
             {useCodexForMerge && (
-              <p className="text-xs text-slate-500 dark:text-slate-400">
-                使用本机已登录的 Codex CLI 处理冲突文件文本。AI 同步范围建议仍使用上方 API 配置。
-              </p>
+              <div className="space-y-1.5">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-xs font-medium text-slate-700 dark:text-slate-300">Codex CLI 模型</span>
+                  <button type="button" onClick={() => void loadCodexModels()} disabled={loadingCodexModels}
+                    className="inline-flex items-center gap-1 text-xs text-indigo-700 disabled:opacity-50 dark:text-indigo-300">
+                    <RefreshCw className={`size-3 ${loadingCodexModels ? 'animate-spin' : ''}`} />
+                    {loadingCodexModels ? '拉取中…' : '刷新模型'}
+                  </button>
+                </div>
+                <SelectMenu label="Codex CLI 模型" value={codexModel} onChange={setCodexModel} options={[
+                  { value: '', label: 'CLI 默认模型' },
+                  ...(codexModel && !codexModels.some(({ model }) => model === codexModel)
+                    ? [{ value: codexModel, label: `${codexModel}（已选）` }] : []),
+                  ...codexModels.map(({ model, displayName }) => ({ value: model, label: displayName })),
+                ]} />
+                {codexModelsError && <p role="status" className="text-xs text-rose-700 dark:text-rose-300">{codexModelsError}</p>}
+              </div>
             )}
             <label className="block space-y-1.5">
               <span className="text-xs font-medium text-slate-700 dark:text-slate-300">合并提示词</span>

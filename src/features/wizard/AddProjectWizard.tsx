@@ -27,7 +27,7 @@ export function AddProjectWizard({
   const [currentStep, setCurrentStep] = useState<1 | 2 | 3 | 4 | 5>(1);
 
   // Form State
-  const defaultLocalPath = 'D:/Projects/MyDevApp';
+  const defaultLocalPath = api.isTauri ? '' : 'D:/Projects/MyDevApp';
   const [projectName, setProjectName] = useState(() => localDirectoryName(defaultLocalPath));
   const [projectNameCustomized, setProjectNameCustomized] = useState(false);
   const [selectedAccountId, setSelectedAccountId] = useState(accounts[0]?.id || '');
@@ -44,6 +44,20 @@ export function AddProjectWizard({
   const [createError, setCreateError] = useState<string | null>(null);
   const [loadingPreview, setLoadingPreview] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [localCheck, setLocalCheck] = useState<{ path: string; ok: boolean; message: string } | null>(null);
+
+  useEffect(() => {
+    if (!isOpen || currentStep !== 2 || !localPath.trim()) return;
+    let active = true;
+    const timer = window.setTimeout(() => {
+      void api.checkLocalDirectory(localPath).then((real) => {
+        if (active) setLocalCheck({ path: localPath, ok: true, message: real ? '目录可读取。写入和文件安全条件将在同步时检查。' : '模拟预览：未检查实际目录。' });
+      }).catch((error) => {
+        if (active) setLocalCheck({ path: localPath, ok: false, message: getErrorMessage(error) });
+      });
+    }, 250);
+    return () => { active = false; window.clearTimeout(timer); };
+  }, [isOpen, currentStep, localPath]);
 
   useEffect(() => {
     setSelectedAccountId((currentId) =>
@@ -75,8 +89,8 @@ export function AddProjectWizard({
     try {
       const data = await api.previewInitialSync(
         selectedAccountId,
-        localPath,
-        remotePath,
+        localPath.trim(),
+        remotePath.trim(),
         rules,
         excludeGitTracked,
       );
@@ -90,6 +104,7 @@ export function AddProjectWizard({
   };
 
   const handleLocalPathChange = (path: string) => {
+    setLocalCheck(null);
     setLocalPath(path);
     if (!projectNameCustomized) setProjectName(localDirectoryName(path));
     if (!remotePathCustomized) setRemotePath(defaultRemotePath(path));
@@ -111,8 +126,8 @@ export function AddProjectWizard({
       await api.createSyncRoot({
         name: projectName,
         accountId: selectedAccountId,
-        localPath,
-        remotePath,
+        localPath: localPath.trim(),
+        remotePath: remotePath.trim(),
         rules,
         excludeGitTracked,
       });
@@ -126,11 +141,12 @@ export function AddProjectWizard({
   };
 
   const selectedAccount = accounts.find((a) => a.id === selectedAccountId);
+  const directoryCheck = localCheck?.path === localPath ? localCheck : null;
 
   return (
     <Modal
       isOpen={isOpen}
-      onClose={onClose}
+      onClose={() => { if (!submitting) onClose(); }}
       title="添加同步项目"
       maxWidth="max-w-3xl"
       headerExtra={
@@ -176,6 +192,7 @@ export function AddProjectWizard({
               variant="secondary"
               size="md"
               onClick={() => setCurrentStep((prev) => (prev - 1) as 1 | 2 | 3 | 4 | 5)}
+              disabled={submitting || loadingPreview}
               className="gap-1.5"
             >
               <ArrowLeft className="w-3.5 h-3.5" />
@@ -186,7 +203,7 @@ export function AddProjectWizard({
           )}
 
           <div className="flex items-center gap-2">
-            <Button variant="ghost" size="md" onClick={onClose}>
+            <Button variant="ghost" size="md" onClick={onClose} disabled={submitting}>
               取消
             </Button>
 
@@ -195,7 +212,9 @@ export function AddProjectWizard({
                 variant="primary"
                 size="md"
                 onClick={() => setCurrentStep((prev) => (prev + 1) as 1 | 2 | 3 | 4 | 5)}
-                disabled={currentStep === 1 && !selectedAccountId}
+                disabled={(currentStep === 1 && !selectedAccountId) ||
+                  (currentStep === 2 && (!directoryCheck?.ok || !projectName.trim())) ||
+                  (currentStep === 3 && !remotePath.trim())}
                 className="gap-1.5"
               >
                 下一步
@@ -239,28 +258,28 @@ export function AddProjectWizard({
                   尚未配置 WebDAV 节点。请先取消向导，在“WebDAV 节点”页面添加连接。
                 </div>
               ) : accounts.map((acc) => (
-                <div
+                <button
+                  type="button"
+                  aria-pressed={selectedAccountId === acc.id}
                   key={acc.id}
                   onClick={() => { if (selectedAccountId !== acc.id) remoteBrowse.setRemoteBrowsePath('/'); setSelectedAccountId(acc.id); }}
-                  className={`p-3.5 rounded-xl border cursor-pointer transition-colors flex items-center justify-between ${
+                  className={`p-3.5 text-left rounded-xl border cursor-pointer transition-colors flex items-center justify-between ${
                     selectedAccountId === acc.id
                       ? 'bg-indigo-50/70 dark:bg-indigo-950/40 border-indigo-500 text-slate-900 dark:text-slate-100 shadow-soft-sm'
                       : 'bg-white dark:bg-slate-800/70 border-slate-200 dark:border-slate-700 hover:border-slate-300 dark:hover:border-slate-600 text-slate-700 dark:text-slate-300'
                   }`}
                 >
-                  <div className="flex items-center gap-3">
+                  <span className="flex items-center gap-3">
                     <Server className="w-5 h-5 text-indigo-600 dark:text-indigo-400" />
-                    <div>
-                      <div className="font-semibold text-xs">{acc.name}</div>
+                    <span>
+                      <span className="block font-semibold text-xs">{acc.name}</span>
                       <code className="text-[11px] text-slate-500 dark:text-slate-400 font-mono">{acc.url}</code>
-                    </div>
-                  </div>
-                  <div className="text-right">
-                    <span className="text-[11px] font-mono px-2 py-0.5 rounded-md bg-emerald-50 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800">
-                      探测通过
                     </span>
-                  </div>
-                </div>
+                  </span>
+                  <span className="shrink-0 text-xs text-slate-600 dark:text-slate-300">
+                    {{ ONLINE: '已连接', OFFLINE: '离线', AUTH_FAILED: '认证失败', UNTESTED: '未测试' }[acc.status]}
+                  </span>
+                </button>
               ))}
             </div>
           </div>
@@ -269,13 +288,12 @@ export function AddProjectWizard({
             <div className="bg-slate-50 dark:bg-slate-800/50 p-3 rounded-xl border border-slate-200 dark:border-slate-700 text-xs space-y-1 text-slate-600 dark:text-slate-400">
               <div className="text-slate-900 dark:text-slate-100 font-semibold flex items-center gap-1.5">
                 <ShieldCheck className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
-                WebDAV 特性检测:
+                节点能力（目标目录仍需验证）
               </div>
-              <div className="text-xs">• 标识: <span className="font-mono">{selectedAccount.capabilities.serverHeader}</span></div>
-              <div className="text-xs">• ETag 强校验: <span className="font-mono">{selectedAccount.capabilities.etagType}</span></div>
-              <div className="text-xs">• If-Match 条件写入: <span className="font-medium">{selectedAccount.capabilities.supportsIfMatch ? '支持 (并发保护)' : '不支持'}</span></div>
-              <div className="text-xs">• WebDAV 独占锁写保护: <span className="font-medium">{selectedAccount.capabilities.supportsLock ? '已验证' : '未验证'}</span></div>
-              <div className="text-xs">• 安全新建: <span className="font-mono">{selectedAccount.capabilities.safeCreateOnly ? (selectedAccount.capabilities.supportsIfNoneMatch ? 'If-None-Match' : '独占锁') : '未验证'}</span></div>
+              <div>目录读取：{selectedAccount.capabilities.propfindDepth1Supported ? '已验证' : '未验证'}</div>
+              <div>安全新建：{selectedAccount.capabilities.safeCreateOnly ? '已验证' : '未验证'}</div>
+              <div>安全覆盖：{selectedAccount.capabilities.safeUpdateExisting ? '已验证' : '未验证'}</div>
+              {!selectedAccount.capabilities.safeCreateOnly && <p>可以继续查看预览；若目标需要新建且无法验证安全写入，应用会拦截。</p>}
             </div>
           )}
         </div>
@@ -328,10 +346,8 @@ export function AddProjectWizard({
               <HardDrive className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
               本地目录环境检查
             </div>
-            <div className="text-xs space-y-1 text-slate-600 dark:text-slate-400">
-              <div className="text-emerald-700 dark:text-emerald-300">✓ 路径存在且具有完整读写权限</div>
-              <div className="text-emerald-700 dark:text-emerald-300">✓ 路径未处于 WebDAV 挂载盘内（排除死循环递归）</div>
-              <div className="text-emerald-700 dark:text-emerald-300">✓ 大小写保留映射正常</div>
+            <div role="status" className={`text-xs ${directoryCheck && !directoryCheck.ok ? 'text-rose-700 dark:text-rose-300' : 'text-slate-600 dark:text-slate-400'}`}>
+              {directoryCheck?.message ?? (localPath.trim() ? '正在检查目录…' : '请选择本地目录。')}
             </div>
           </div>
         </div>
@@ -341,8 +357,9 @@ export function AddProjectWizard({
       {currentStep === 3 && (
         <div className="space-y-4 py-2">
           <div className="space-y-1.5">
-            <label className="text-xs font-medium text-slate-700 dark:text-slate-300">远端 WebDAV 存放路径</label>
+            <label htmlFor="remote-sync-target" className="text-xs font-medium text-slate-700 dark:text-slate-300">远端同步目标</label>
             <input
+              id="remote-sync-target"
               type="text"
               value={remotePath}
               onChange={(e) => {
@@ -363,7 +380,7 @@ export function AddProjectWizard({
 
       {currentStep === 4 && (
         <div className="py-2 space-y-4">
-          <RuleEditor rules={rules} onChange={setRules} localPath={localPath} />
+          <RuleEditor rules={rules} onChange={setRules} localPath={localPath} excludeGitTracked={excludeGitTracked} />
           <label className="flex items-start gap-3 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/50 p-3 cursor-pointer">
             <input
               type="checkbox"
@@ -384,7 +401,7 @@ export function AddProjectWizard({
       )}
 
       {/* Step 5: Initial Sync Preview & Safety Gate */}
-      {currentStep === 5 && <InitialSyncPreview {...{ loadingPreview, previewData, previewError, createError, submitting }} />}
+      {currentStep === 5 && <InitialSyncPreview {...{ loadingPreview, previewData, previewError, createError, submitting, localPath, remotePath, rules, excludeGitTracked }} />}
 
     </Modal>
   );

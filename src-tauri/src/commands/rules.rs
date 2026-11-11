@@ -22,7 +22,21 @@ pub async fn replace_sync_rules(
 }
 
 #[tauri::command]
-pub fn explain_sync_rule(path: String, rules: Vec<SyncRuleDto>) -> ApiResult<String> {
+pub async fn check_local_directory(path: String) -> ApiResult<()> {
+    api(async {
+        let path = std::path::Path::new(path.trim());
+        if !path.is_absolute() {
+            return Err(crate::domain::AppError::new("LOCAL_ROOT_INVALID", "请输入本地目录的绝对路径。"));
+        }
+        tokio::fs::read_dir(path).await.map_err(|error| {
+            crate::domain::AppError::new("LOCAL_ROOT_INVALID", format!("无法读取本地目录：{error}"))
+        })?;
+        Ok(())
+    }.await)
+}
+
+#[tauri::command]
+pub fn explain_sync_rule(path: String, rules: Vec<SyncRuleDto>, local_path: Option<String>, exclude_git_tracked: Option<bool>) -> ApiResult<String> {
     api((|| {
         let path = validate_relative_path(&path.replace('\\', "/"))?;
         let engine = RuleEngine::compile(&rules)?;
@@ -31,6 +45,16 @@ pub fn explain_sync_rule(path: String, rules: Vec<SyncRuleDto>) -> ApiResult<Str
             .any(|part| part.eq_ignore_ascii_case(".projectsync"))
         {
             return Ok("ProjectSync 内部目录不会同步。".to_string());
+        }
+        if crate::filesystem::is_generated_conflict_copy(&path) {
+            return Ok("不会同步：这是 ProjectSync 的历史冲突副本。".into());
+        }
+        if exclude_git_tracked.unwrap_or(false) {
+            let local_path = local_path.as_deref().filter(|path| !path.trim().is_empty())
+                .ok_or_else(|| crate::domain::AppError::new("LOCAL_ROOT_INVALID", "请先选择本地目录"))?;
+            if crate::git::tracked_paths(std::path::Path::new(local_path))?.contains(&crate::security::path_key(&path)) {
+                return Ok("不会同步：该文件已被 Git 跟踪，且开启了 Git 排除。".into());
+            }
         }
         for rule in rules
             .iter()

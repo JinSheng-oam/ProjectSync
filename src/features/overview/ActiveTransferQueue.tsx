@@ -2,7 +2,7 @@ import { ArrowUpRight, ArrowDownLeft, ShieldCheck, Clock, RefreshCw, X } from 'l
 import { TaskDto } from '../../types/dto';
 import { Button } from '../../components/common/UIComponents';
 
-export function ActiveTransferQueue({ tasks, onRetryTask, onCancelTask }: { tasks: TaskDto[]; onRetryTask: (taskId: string) => void; onCancelTask: (taskId: string) => void }) {
+export function ActiveTransferQueue({ tasks, onRetryTask, onCancelTask, onOpenWebDav }: { tasks: TaskDto[]; onRetryTask: (taskId: string) => void; onCancelTask: (taskId: string) => void; onOpenWebDav: () => void }) {
   const visibleTasks = tasks.filter((task) => task.status !== 'Succeeded' && task.status !== 'Cancelled');
   const activeCount = visibleTasks.filter((task) => task.status === 'Running' || task.status === 'Pending' || task.status === 'RetryWait').length;
 
@@ -26,11 +26,13 @@ export function ActiveTransferQueue({ tasks, onRetryTask, onCancelTask }: { task
         {visibleTasks.length === 0 ? (
           <div className="py-8 text-center text-slate-600 dark:text-slate-400 text-xs flex flex-col items-center justify-center gap-1.5">
             <Clock className="w-5 h-5 text-slate-400 dark:text-slate-600 mb-1" />
-            <span>当前没有正在传输的文件，两端保持一致</span>
+            <span>当前没有待显示的传输任务</span>
           </div>
         ) : (
           visibleTasks.map((task) => {
             const isUpload = task.action.startsWith('Upload');
+            const remoteTrashBlocked = task.errorCode === 'BLOCKED_SERVER_CAPABILITY' &&
+              (task.action === 'MoveRemoteToTrash' || /受保护的 MOVE|保护的远端 MOVE|强 ETag/.test(task.error ?? ''));
             const percent = task.totalBytes > 0 ? Math.round((task.bytesTransferred / task.totalBytes) * 100) : 0;
 
             return (
@@ -65,7 +67,9 @@ export function ActiveTransferQueue({ tasks, onRetryTask, onCancelTask }: { task
                     <span className="text-slate-600 dark:text-slate-400">
                       {(task.bytesTransferred / 1024).toFixed(1)} / {(task.totalBytes / 1024).toFixed(1)} KB
                     </span>
-                    {task.status === 'Failed' || task.status === 'Blocked' ? (
+                    {remoteTrashBlocked ? (
+                      <Button variant="secondary" size="sm" onClick={onOpenWebDav}>检查 WebDAV 节点</Button>
+                    ) : task.status === 'Failed' || task.status === 'Blocked' ? (
                       <Button variant="secondary" size="sm" onClick={() => onRetryTask(task.id)} className="gap-1">
                         <RefreshCw className="w-3 h-3" /> 重试
                       </Button>
@@ -83,7 +87,9 @@ export function ActiveTransferQueue({ tasks, onRetryTask, onCancelTask }: { task
 
                 {task.error && (
                   <div className="text-xs text-rose-700 dark:text-rose-400 font-mono">
-                    {task.errorCode ? `${task.errorCode}: ` : ''}{task.error}
+                    {remoteTrashBlocked
+                      ? '远端文件已保留。请重新探测节点的受保护 MOVE 能力；若想撤销本地删除，可将远端文件下载回原位置。'
+                      : <>{task.errorCode ? `${task.errorCode}: ` : ''}{task.error}</>}
                   </div>
                 )}
 

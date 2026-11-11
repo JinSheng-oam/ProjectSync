@@ -1,6 +1,20 @@
+import { useState } from 'react';
 import { AlertTriangle } from 'lucide-react';
-import { InitialSyncPreviewDto } from '../../types/dto';
+import { InitialSyncPreviewDto, SyncAction, SyncRuleDto } from '../../types/dto';
+import { RulePathDiagnostics } from '../rules/RulePathDiagnostics';
+import { SelectMenu } from '../../components/common/SelectMenu';
 
+const actionLabels: Record<SyncAction, string> = {
+  UploadNew: '上传新文件', UploadUpdate: '上传更新', DownloadNew: '下载新文件', DownloadUpdate: '下载更新',
+  CreateConflictCopy: '待处理冲突', MarkClean: '内容一致', Blocked: '已受阻', Skip: '跳过',
+  MoveLocalToTrash: '移入本地回收站', MoveRemoteToTrash: '移入远端回收站', AiMerge: 'AI 合并',
+};
+
+const groups = [
+  { value: 'all', label: '全部结果' }, { value: 'Upload', label: '待上传' },
+  { value: 'Download', label: '待下载' }, { value: 'CreateConflictCopy', label: '待处理冲突' },
+  { value: 'Blocked', label: '已受阻' }, { value: 'MarkClean', label: '内容一致' },
+];
 
 interface InitialSyncPreviewProps {
   loadingPreview: boolean;
@@ -8,97 +22,71 @@ interface InitialSyncPreviewProps {
   previewError: string | null;
   createError: string | null;
   submitting: boolean;
+  localPath: string;
+  remotePath: string;
+  rules: SyncRuleDto[];
+  excludeGitTracked: boolean;
 }
 
-export function InitialSyncPreview({ loadingPreview, previewData, previewError, createError, submitting }: InitialSyncPreviewProps) {
+export function InitialSyncPreview({ loadingPreview, previewData, previewError, createError, submitting, localPath, remotePath, rules, excludeGitTracked }: InitialSyncPreviewProps) {
+  const [filter, setFilter] = useState('all');
+  const [limit, setLimit] = useState(100);
+  const items = previewData?.items.filter((item) =>
+    filter === 'all' || item.action.startsWith(filter) ||
+    (filter === 'Blocked' && item.action.startsWith('Move'))
+  ) ?? [];
+
   return (
-    <div className="space-y-4 py-2">
+    <div className="space-y-4 py-2 text-xs">
+      <dl className="grid gap-2 rounded-xl border border-slate-200 p-3 dark:border-slate-700 sm:grid-cols-2">
+        <div><dt className="text-slate-500 dark:text-slate-400">本地目录</dt><dd className="mt-1 break-all font-mono">{localPath}</dd></div>
+        <div><dt className="text-slate-500 dark:text-slate-400">远端同步目标</dt><dd className="mt-1 break-all font-mono">{remotePath}</dd></div>
+      </dl>
       {loadingPreview ? (
-        <div className="py-12 text-center text-xs text-slate-500 dark:text-slate-400 space-y-2">
-          <div className="w-6 h-6 border-2 border-indigo-600 border-t-transparent rounded-full animate-spin mx-auto" />
-          <div>正在扫描本地与远端文件元数据，计算增量差异...</div>
+        <div role="status" className="py-8 text-center text-slate-600 dark:text-slate-300">
+          <div className="mx-auto mb-2 size-6 animate-spin rounded-full border-2 border-indigo-600 border-t-transparent motion-reduce:animate-none" />
+          正在扫描两端目录并校验内容。文件较多时可能需要一些时间。
         </div>
       ) : previewData ? (
-        <div className="space-y-4">
-          <div className="grid grid-cols-4 gap-2 text-center">
-            <div className="bg-indigo-50 dark:bg-indigo-950/40 border border-indigo-200 dark:border-indigo-800 p-2.5 rounded-xl">
-              <div className="text-[11px] text-indigo-700 dark:text-indigo-300 font-medium">待上传</div>
-              <div className="text-lg font-bold text-indigo-900 dark:text-indigo-200 font-mono tabular-nums">{previewData.uploadsCount} 项</div>
-            </div>
-            <div className="bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800 p-2.5 rounded-xl">
-              <div className="text-[11px] text-emerald-700 dark:text-emerald-300 font-medium">内容一致</div>
-              <div className="text-lg font-bold text-emerald-900 dark:text-emerald-200 font-mono tabular-nums">{previewData.identicalCount} 项</div>
-            </div>
-            <div className="bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800 p-2.5 rounded-xl">
-              <div className="text-[11px] text-amber-800 dark:text-amber-300 font-medium">检测到冲突</div>
-              <div className="text-lg font-bold text-amber-900 dark:text-amber-200 font-mono tabular-nums">{previewData.conflictsCount} 项</div>
-            </div>
-            <div className="bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 p-2.5 rounded-xl">
-              <div className="text-[11px] text-slate-600 dark:text-slate-400 font-medium">预计上传大小</div>
-              <div className="text-lg font-bold text-slate-900 dark:text-slate-100 font-mono tabular-nums">
-                {(previewData.totalUploadBytes / (1024 * 1024)).toFixed(1)} MB
+        <>
+          <dl className="grid grid-cols-2 gap-2 sm:grid-cols-5">
+            {[
+              ['待上传', previewData.uploadsCount], ['待下载', previewData.downloadsCount],
+              ['内容一致', previewData.identicalCount], ['待处理冲突', previewData.conflictsCount], ['已受阻', previewData.blockedCount],
+            ].map(([label, count]) => (
+              <div key={label} className="rounded-xl border border-slate-200 bg-slate-50 p-2.5 dark:border-slate-700 dark:bg-slate-800">
+                <dt className="text-slate-600 dark:text-slate-300">{label}</dt><dd className="mt-1 text-base font-semibold tabular-nums">{count} 项</dd>
               </div>
-            </div>
+            ))}
+          </dl>
+          <div className="flex items-center justify-between gap-3">
+            <span>同步计划 · {items.length} 个匹配结果</span>
+            <SelectMenu label="同步计划筛选" value={filter} options={groups} onChange={(value) => { setFilter(value); setLimit(100); }} />
           </div>
-
-          {/* Sample Operations Table */}
-          <div className="border border-slate-200 dark:border-slate-700 rounded-xl bg-white dark:bg-slate-800 overflow-hidden">
-            <div className="px-3 py-2 bg-slate-50 dark:bg-slate-800/80 border-b border-slate-200 dark:border-slate-700 text-[11px] font-semibold text-slate-700 dark:text-slate-300 flex justify-between">
-              <span>初始同步计划</span>
-              <span className="text-slate-500 font-mono">共 {previewData.items.length} 个动作</span>
-            </div>
-            <div className="divide-y divide-slate-100 dark:divide-slate-700 max-h-48 overflow-y-auto">
-              {previewData.items.map((item, idx) => (
-                <div key={idx} className="p-2 flex items-center justify-between text-xs">
-                  <div className="flex items-center gap-2 truncate max-w-[360px]">
-                    <span
-                      className={`px-1.5 py-0.5 rounded text-[11px] font-mono ${
-                        item.action.startsWith('Upload')
-                          ? 'bg-indigo-50 dark:bg-indigo-950 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800'
-                          : 'bg-amber-50 dark:bg-amber-950 text-amber-800 dark:text-amber-300 border border-amber-200 dark:border-amber-800'
-                      }`}
-                    >
-                      {item.action}
-                    </span>
-                    <span className="text-slate-900 dark:text-slate-100 truncate font-mono">{item.relativePath}</span>
-                  </div>
-                  <span className="text-[11px] text-slate-500 dark:text-slate-400">{item.reason}</span>
-                </div>
-              ))}
-            </div>
-          </div>
-
-          <div className="bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-700/60 rounded-xl p-3 text-xs text-amber-800 dark:text-amber-300 flex items-center gap-2">
-            <AlertTriangle className="w-4 h-4 text-amber-600 dark:text-amber-400 shrink-0" />
-            <span>
-              确认后立即开始同步。
-            </span>
-          </div>
-          {createError && (
-            <div role="alert" className="rounded-xl border border-rose-200 bg-rose-50 p-3 text-xs text-rose-800 dark:border-rose-900 dark:bg-rose-950/30 dark:text-rose-300">
-              创建同步项目失败：{createError}
-            </div>
-          )}
-          {submitting && (
-            <div role="status" aria-live="polite" className="text-xs text-slate-600 dark:text-slate-300">
-              正在初始化远端目录并保存项目；完成后会返回看板，首次扫描将在后台执行。
-            </div>
-          )}
-        </div>
-      ) : previewError ? (
-        <div role="alert" className="flex items-start gap-3 rounded-xl border border-rose-200 bg-rose-50 p-4 text-xs text-rose-800 dark:border-rose-900 dark:bg-rose-950/30 dark:text-rose-300">
-          <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
-          <div className="min-w-0 flex-1 space-y-1">
-            <div className="font-semibold">无法生成初始同步预览</div>
-            <div className="break-words">{previewError}</div>
-            <div className="text-rose-700/80 dark:text-rose-300/80">请检查本地目录、远端路径和 WebDAV 连接后重试。</div>
-          </div>
-        </div>
+          <ul className="max-h-48 divide-y divide-slate-200 overflow-y-auto rounded-xl border border-slate-200 dark:divide-slate-700 dark:border-slate-700">
+            {items.slice(0, limit).map((item) => (
+              <li key={item.relativePath} className="flex flex-wrap items-baseline gap-x-3 gap-y-1 px-3 py-2">
+                <span className="font-medium text-indigo-700 dark:text-indigo-300">{actionLabels[item.action]}</span>
+                <span className="min-w-0 break-all font-mono">{item.relativePath}</span>
+                <span className="text-slate-600 dark:text-slate-400">{item.reason}</span>
+              </li>
+            ))}
+            {!items.length && <li className="p-3 text-slate-600 dark:text-slate-400">没有符合此筛选的文件。</li>}
+          </ul>
+          {items.length > limit && <button type="button" className="text-indigo-700 underline dark:text-indigo-300" onClick={() => setLimit((value) => value + 100)}>显示更多结果</button>}
+          <p className="flex items-center gap-2 rounded-xl bg-amber-50 p-3 text-amber-900 dark:bg-amber-950 dark:text-amber-200">
+            <AlertTriangle aria-hidden="true" className="size-4 shrink-0" />
+            确认后开始执行可同步项。冲突等待裁决，受阻项不会强制写入。
+          </p>
+          {createError && <p role="alert" className="text-rose-700 dark:text-rose-300">创建同步项目失败：{createError}</p>}
+          {submitting && <p role="status">正在验证远端目标并保存项目…</p>}
+        </>
       ) : (
-        <div role="status" className="py-10 text-center text-xs text-slate-500 dark:text-slate-400">
-          尚未生成预览，请返回上一步后重新查看。
-        </div>
+        <p role="alert" className="rounded-xl bg-rose-50 p-3 text-rose-800 dark:bg-rose-950 dark:text-rose-200">
+          {previewError ? '无法生成预览：' + previewError : '尚未生成预览。'}
+        </p>
       )}
+      <RulePathDiagnostics {...{ rules, localPath, excludeGitTracked }} />
     </div>
   );
 }

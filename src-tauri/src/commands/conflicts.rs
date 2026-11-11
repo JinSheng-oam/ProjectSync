@@ -107,6 +107,11 @@ pub async fn preview_ai_merge(
     api(state.sync.preview_ai_merge(&conflict_id).await)
 }
 
+#[tauri::command]
+pub async fn regenerate_ai_merge(state: State<'_, AppState>, conflict_id: String) -> ApiResult<AiMergePreviewDto> {
+    api(state.sync.regenerate_ai_merge(&conflict_id).await)
+}
+
 #[derive(Debug, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RefineAiMergeInput {

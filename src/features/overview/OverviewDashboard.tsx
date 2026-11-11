@@ -143,6 +143,10 @@ export function OverviewDashboard({
         </div>
       )}
 
+      {tasks.length > 0 && (
+        <ActiveTransferQueue tasks={tasks} onRetryTask={onRetryTask} onCancelTask={onCancelTask} onOpenWebDav={() => onNavigate('webdav')} />
+      )}
+
       {/* Project Grid */}
       <div className="space-y-3.5">
         <div className="flex items-center justify-between">
@@ -182,8 +186,8 @@ export function OverviewDashboard({
         )}
       </div>
 
-      {/* Live Transfer Telemetry Queue */}
-      <ActiveTransferQueue tasks={tasks} onRetryTask={onRetryTask} onCancelTask={onCancelTask} />
+
+
     </div>
   );
 }

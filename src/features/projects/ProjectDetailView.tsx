@@ -421,6 +421,7 @@ export function ProjectDetailView({
                 rules={rules}
                 onChange={handleRulesChange}
                 localPath={root.localPath}
+                excludeGitTracked={root.excludeGitTracked}
               />
             </fieldset>
           ) : (

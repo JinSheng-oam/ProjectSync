@@ -42,6 +42,8 @@ export function App() {
     handleExcludeConflictFile,
     aiSession,
     aiMergeQueue,
+    mergeResults,
+    regenerateAiMerge,
     enqueueAiMerges,
     clearAiMergeQueue,
     refineAiMerge,
@@ -168,6 +170,7 @@ export function App() {
                   onExcludeFile={handleExcludeConflictFile}
                   aiSession={aiSession}
                   aiMergeQueue={aiMergeQueue}
+                  mergeResults={mergeResults}
                   onEnqueueAiMerges={enqueueAiMerges}
                   onClearAiMergeQueue={clearAiMergeQueue}
                   onOpenAiMergeModal={() => setAiSessionOpen(true)}
@@ -208,6 +211,9 @@ export function App() {
         key={aiSession?.conflictId}
         session={aiSession}
         waitingCount={aiMergeQueue.length}
+        completedCount={mergeResults.applied + mergeResults.skipped + mergeResults.failed}
+        nextPath={conflicts.find((item) => item.id === aiMergeQueue[0])?.relativePath}
+        onRegenerate={regenerateAiMerge}
         projectName={roots.find((r) => r.id === conflicts.find((c) => c.id === aiSession?.conflictId)?.rootId)?.name || 'ProjectSync'}
         onRefine={refineAiMerge}
         onApply={applyAiMerge}

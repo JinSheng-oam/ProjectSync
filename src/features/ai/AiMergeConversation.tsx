@@ -1,6 +1,6 @@
-import { Sparkles, RotateCcw, User, Bot, Send, LoaderCircle, AlertTriangle } from 'lucide-react';
+import { Sparkles, User, Bot, Send, LoaderCircle, AlertTriangle } from 'lucide-react';
 import { Button } from '../../components/common/UIComponents';
-import { AiMergeSession } from '../../stores/syncStore';
+import { AiMergeSession, needsFreshMerge } from '../../stores/syncStore';
 
 import type { RefObject } from 'react';
 
@@ -156,7 +156,7 @@ export function AiMergeConversation({
       )}
 
       {session.error && (
-        <div className="rounded-xl border border-rose-300 dark:border-rose-900 bg-rose-50/90 dark:bg-rose-950/50 p-3.5 text-xs text-rose-950 dark:text-rose-100 shadow-sm space-y-2.5 animate-in fade-in">
+        <div role="alert" className="rounded-xl border border-rose-300 dark:border-rose-900 bg-rose-50/90 dark:bg-rose-950/50 p-3.5 text-xs text-rose-950 dark:text-rose-100 shadow-sm space-y-2.5 animate-in fade-in">
           <div className="flex items-center gap-2 font-semibold text-rose-900 dark:text-rose-300">
             <AlertTriangle className="w-4 h-4 shrink-0 text-rose-600 dark:text-rose-400" />
             <span>执行遇到问题</span>
@@ -164,25 +164,13 @@ export function AiMergeConversation({
           <div className="text-[11px] leading-relaxed pl-6 break-all">
             {session.error}
           </div>
-          <div className="flex items-center justify-between pt-2 border-t border-rose-200/80 dark:border-rose-900/60 text-[11px]">
-            <button
-              type="button"
-              onClick={onOpenAiSettings}
-              className="text-indigo-600 dark:text-indigo-400 hover:underline font-medium"
-            >
-              前往 AI 设置检查配置 →
+          {needsFreshMerge(session.error) ? (
+            <p>当前草稿已失效。请重新扫描并生成新稿，或跳过此文件。</p>
+          ) : /AI_NOT_CONFIGURED|CODEX_NOT_FOUND|CODEX_START_FAILED|AI_SETTINGS_INVALID/.test(session.error) ? (
+            <button type="button" onClick={onOpenAiSettings} className="text-indigo-700 underline dark:text-indigo-300">
+              检查 AI 设置
             </button>
-            <Button
-              variant="secondary"
-              size="sm"
-              onClick={() => void handleSendInstruction()}
-              disabled={isBusyApplying || isBusyMerging}
-              className="bg-white dark:bg-slate-900 border-rose-300 dark:border-rose-800 text-rose-700 dark:text-rose-300 hover:bg-rose-50"
-            >
-              <RotateCcw className="w-3.5 h-3.5 mr-1" />
-              <span>重试</span>
-            </Button>
-          </div>
+          ) : null}
         </div>
       )}
 
@@ -197,7 +185,7 @@ export function AiMergeConversation({
           <button
             key={chip}
             type="button"
-            disabled={isBusyMerging}
+            disabled={isBusyMerging || isBusyApplying || session.status !== 'ready'}
             onClick={() => {
               setAgentInstruction(chip);
               inputRef.current?.focus();
@@ -222,14 +210,14 @@ export function AiMergeConversation({
               void handleSendInstruction();
             }
           }}
-          disabled={isBusyMerging}
+          disabled={isBusyMerging || isBusyApplying || session.status !== 'ready'}
           placeholder="输入微调指令，如：把第 20 行配置改为远端版本…"
           className="flex-1 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-3.5 py-2 text-xs text-slate-900 dark:text-slate-100 outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/15 disabled:opacity-50 transition-all"
         />
         <Button
           variant="primary"
           size="md"
-          disabled={!agentInstruction.trim() || isBusyMerging}
+          disabled={!agentInstruction.trim() || isBusyMerging || isBusyApplying || session.status !== 'ready'}
           onClick={() => void handleSendInstruction()}
           className="gap-1.5 shrink-0 px-3.5 py-2"
         >

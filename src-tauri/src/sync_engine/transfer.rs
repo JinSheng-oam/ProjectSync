@@ -347,18 +347,16 @@ impl SyncCoordinator {
                 Ok(local.size)
             }
             SyncAction::MoveRemoteToTrash => {
-                if !capabilities.safe_move_no_overwrite || !capabilities.safe_update_existing {
-                    return Err(AppError::new(
-                        "BLOCKED_SERVER_CAPABILITY",
-                        "服务端未验证受 ETag 保护的远端 MOVE；删除操作已阻止",
-                    ));
-                }
                 let remote = item
                     .remote
                     .as_ref()
                     .ok_or_else(|| AppError::new("DAV_NOT_FOUND", "待回收远端文件不存在"))?;
-                let etag = remote.etag.as_deref().ok_or_else(|| {
-                    AppError::new("BLOCKED_SERVER_CAPABILITY", "远端文件没有可验证的 ETag")
+                let etag = plan::remote_trash_etag(capabilities, remote).ok_or_else(|| {
+                    AppError::new("BLOCKED_SERVER_CAPABILITY", if capabilities.safe_move_no_overwrite && capabilities.safe_update_existing {
+                        "远端文件没有可用的强 ETag；远端文件已保留。"
+                    } else {
+                        plan::REMOTE_TRASH_CAPABILITY_MESSAGE
+                    })
                 })?;
                 let trash = format!(
                     "{}/.projectsync/trash/{}/{}-{}",

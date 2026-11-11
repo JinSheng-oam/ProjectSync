@@ -207,7 +207,11 @@ export function WebDavManager({ accounts, onRefresh }: WebDavManagerProps) {
                   </div>
                   <div className="bg-slate-50 dark:bg-slate-800/60 p-2 rounded-lg border border-slate-200 dark:border-slate-700 flex justify-between">
                     <span>PROPFIND Depth 1:</span>
-                    <span className="text-emerald-700 dark:text-emerald-300 font-semibold">通过</span>
+                    <span className="font-semibold">{acc.capabilities.propfindDepth1Supported ? '通过' : '未验证'}</span>
+                  </div>
+                  <div className="flex justify-between gap-2 rounded-lg border border-slate-200 bg-slate-50 p-2 dark:border-slate-700 dark:bg-slate-800/60">
+                    <span>远端回收站（受保护的 MOVE）</span>
+                    <span className="shrink-0 font-semibold">{acc.capabilities.safeMoveNoOverwrite ? '已验证' : '未验证'}</span>
                   </div>
                   <div className="bg-slate-50 dark:bg-slate-800/60 p-2 rounded-lg border border-slate-200 dark:border-slate-700 flex justify-between">
                     <span>吞吐带宽:</span>

@@ -154,7 +154,13 @@ pub(super) async fn scan_remote(
         if !visited.insert(directory.clone()) {
             continue;
         }
-        let props = client.propfind(&directory, 1).await?;
+        let props = client.propfind(&directory, 1).await.map_err(|error| {
+            if directory != root_path && error.code == "DAV_NOT_FOUND" {
+                AppError::retryable("SCAN_INCOMPLETE", "扫描期间远端子目录已变化，请重新扫描。")
+            } else {
+                error
+            }
+        })?;
         let mut downloads = Vec::new();
         for prop in props {
             let dav_path = href_to_dav_path(client, &prop.path, &directory)?;
@@ -224,7 +230,13 @@ pub(super) async fn scan_remote(
                     let staging = staging_dir.join(format!("remote-scan-{}.bin", uuid::Uuid::new_v4()));
                     async move {
                         let result = async {
-                            entry.size = client.get_to_file(&dav_path, &staging).await?;
+                            entry.size = client.get_to_file(&dav_path, &staging).await.map_err(|error| {
+                                if error.code == "DAV_NOT_FOUND" {
+                                    AppError::retryable("SCAN_INCOMPLETE", "扫描期间远端文件已变化，请重新扫描。")
+                                } else {
+                                    error
+                                }
+                            })?;
                             let hash_path = staging.clone();
                             entry.hash = tokio::task::spawn_blocking(move || hash_file(&hash_path))
                                 .await

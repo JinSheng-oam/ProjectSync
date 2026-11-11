@@ -5,7 +5,9 @@ import { SyncRuleDto } from '../../types/dto';
 import { api } from '../../services/api';
 
 
-export function RulePathDiagnostics({ rules }: { rules: SyncRuleDto[] }) {
+export function RulePathDiagnostics({ rules, localPath, excludeGitTracked }: {
+  rules: SyncRuleDto[]; localPath?: string; excludeGitTracked?: boolean;
+}) {
   // Path diagnostics state
   const [showDiagnostics, setShowDiagnostics] = useState(false);
   const [checkPath, setCheckPath] = useState('');
@@ -14,13 +16,13 @@ export function RulePathDiagnostics({ rules }: { rules: SyncRuleDto[] }) {
 
   useEffect(() => {
     setCheckResult('');
-  }, [rules]);
+  }, [rules, localPath, excludeGitTracked, checkPath]);
 
   const handleExplainPath = async () => {
     if (!checkPath.trim()) return;
     setChecking(true);
     try {
-      const result = await api.explainSyncRule(checkPath.trim(), rules);
+      const result = await api.explainSyncRule(checkPath.trim(), rules, localPath, excludeGitTracked);
       setCheckResult(result);
     } catch (error: unknown) {
       setCheckResult(

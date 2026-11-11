@@ -226,6 +226,7 @@ export interface DiscoveredProject { accountId: string; remotePath: string; remo
 
 export interface AiSettingsDto {
   useCodexForMerge: boolean;
+    codexModel: string;
   endpoint: string;
   model: string;
   hasApiKey: boolean;
@@ -235,6 +236,7 @@ export interface AiSettingsDto {
 
 export interface SaveAiSettingsInput {
   useCodexForMerge: boolean;
+    codexModel: string;
   endpoint: string;
   model: string;
   apiKey?: string;

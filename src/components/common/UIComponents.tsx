@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Copy, Check, AlertTriangle, CheckCircle2, PauseCircle, RefreshCw, XCircle } from 'lucide-react';
 import { SyncRootStatus } from '../../types/dto';
+import { useDialogFocus } from './useDialogFocus';
 
 export function StatusBadge({ status, pulse = false }: { status: SyncRootStatus | 'ONLINE' | 'OFFLINE'; pulse?: boolean }) {
   switch (status) {
@@ -189,6 +190,7 @@ export function Modal({
   footer?: React.ReactNode;
   bodyClassName?: string;
 }) {
+  const dialogFocus = useDialogFocus(isOpen, onClose);
   if (!isOpen) return null;
 
   const modalContent = (
@@ -196,6 +198,9 @@ export function Modal({
       <div
         className={`bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-soft-lg w-full ${maxWidth} flex flex-col max-h-[88vh] overflow-hidden`}
         role="dialog"
+        aria-modal="true"
+        aria-label={title}
+        {...dialogFocus}
       >
         <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200 dark:border-slate-800 bg-slate-50/70 dark:bg-slate-950/60 shrink-0">
           <div>
@@ -204,6 +209,7 @@ export function Modal({
           </div>
           <button
             type="button"
+            aria-label="关闭对话框"
             onClick={onClose}
             className="text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 p-1.5 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
           >

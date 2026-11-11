@@ -204,19 +204,19 @@ class MockEngine {
     await this.delay(600);
     return {
       rootId: 'preview_root',
-      uploadsCount: 14,
-      downloadsCount: 0,
-      identicalCount: 22,
+      uploadsCount: 3,
+      downloadsCount: 1,
+      identicalCount: 0,
       conflictsCount: 1,
       blockedCount: 0,
-      totalUploadBytes: 1024 * 1024 * 4.2,
-      totalDownloadBytes: 0,
+      totalUploadBytes: 6892 + 6166 + 990,
+      totalDownloadBytes: 7941,
       items: [
         { relativePath: 'docs/01_PRD.md', action: 'UploadNew', sizeBytes: 6892, reason: '本地新增文件' },
         { relativePath: 'docs/02_ARCHITECTURE.md', action: 'UploadNew', sizeBytes: 6166, reason: '本地新增文件' },
         { relativePath: 'docs/03_SYNC_ALGORITHM.md', action: 'CreateConflictCopy', sizeBytes: 7228, reason: '远端已存在同名但不同Hash文件，命中初次同步冲突' },
         { relativePath: 'config/project.example.toml', action: 'UploadNew', sizeBytes: 990, reason: '本地新增文件' },
-        { relativePath: 'sql/0001_initial.sql', action: 'UploadNew', sizeBytes: 7941, reason: '本地新增文件' },
+        { relativePath: 'sql/0001_initial.sql', action: 'DownloadNew', sizeBytes: 7941, reason: '仅远端存在' },
       ],
     };
   }

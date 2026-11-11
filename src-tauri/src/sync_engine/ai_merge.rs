@@ -98,6 +98,43 @@ fn parse_ai_merge_response(response: &str) -> (String, Option<String>) {
 }
 
 impl SyncCoordinator {
+    pub async fn regenerate_ai_merge(&self, conflict_id: &str) -> AppResult<AiMergePreviewDto> {
+        let (root_id, _, _, _, _, _) = self.db.conflict_record(conflict_id).await?;
+        {
+            let lock = self.lock_for(&root_id)?;
+            let _guard = lock.lock().await;
+            let (_, path, _, _, _, _) = self.db.conflict_record(conflict_id).await?;
+            let root = self.db.root(&root_id).await?;
+            let rules = self.db.rules(&root_id).await?;
+            if !RuleEngine::compile(&rules)?.includes(&path)
+                || (root.exclude_git_tracked && crate::git::tracked_paths(&root.local_path)?.contains(&path_key(&path)))
+            {
+                return Err(AppError::new("AI_MERGE_UNSUPPORTED", "该路径已被同步规则排除。"));
+            }
+            let target = ensure_safe_parent(&root.local_path, &path)?;
+            let metadata = fs::metadata(&target)
+                .map_err(|_| AppError::new("LOCAL_NOT_FOUND", "本地版本不存在，请回到冲突中心手动裁决。"))?;
+            if !metadata.is_file() || metadata.len() > AI_MERGE_SOURCE_LIMIT {
+                return Err(AppError::new("AI_MERGE_UNSUPPORTED", "本地版本不是可合并的小型文本文件。"));
+            }
+            let local_hash = hash_file(&target)?;
+            let (_, client) = self.client_for(&root.account_id).await?;
+            let remote_path = remote_file_path(&root.remote_path, &path)?;
+            let props = client.propfind(&remote_path, 0).await?;
+            let remote_size = props.iter().find(|entry| !entry.is_collection).map(|entry| entry.size)
+                .ok_or_else(|| AppError::new("DAV_NOT_FOUND", "远端版本不存在，请回到冲突中心手动裁决。"))?;
+            if remote_size > AI_MERGE_SOURCE_LIMIT {
+                return Err(AppError::new("AI_MERGE_TOO_LARGE", "远端文本超过 64 KiB。"));
+            }
+            let remote = read_remote_snapshot(&client, &root.remote_path, &path, &self.data_dir).await?;
+            if local_hash == remote.hash {
+                return Err(AppError::new("AI_MERGE_NOT_NEEDED", "两端内容已一致，请返回项目执行同步以清除冲突。"));
+            }
+            self.db.refresh_conflict_versions(conflict_id, &local_hash, &remote).await?;
+        }
+        self.preview_ai_merge(conflict_id).await
+    }
+
     pub async fn preview_ai_merge(&self, conflict_id: &str) -> AppResult<AiMergePreviewDto> {
         let config = load_merge_config(&self.db)
             .await?
@@ -177,6 +214,14 @@ impl SyncCoordinator {
         let _ = tokio::fs::remove_file(&remote_stage).await;
         let remote_bytes = remote_read?;
         let local_bytes = fs::read(&target)?;
+        if local_bytes.len() as u64 > AI_MERGE_SOURCE_LIMIT
+            || blake3::hash(&local_bytes).to_hex().as_str() != local_hash
+        {
+            return Err(AppError::retryable(
+                "LOCAL_FILE_CHANGED",
+                "读取草稿输入期间本地文件发生变化，请重新扫描。",
+            ));
+        }
         let local_text = String::from_utf8(local_bytes)
             .map_err(|_| AppError::new("AI_MERGE_BINARY", "AI 合并仅支持 UTF-8 文本文件"))?;
         let remote_text = String::from_utf8(remote_bytes)

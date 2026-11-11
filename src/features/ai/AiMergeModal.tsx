@@ -2,7 +2,9 @@ import { useEffect, useState, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { Sparkles, Cpu, Minimize2, X, Copy, Check, LoaderCircle, AlertTriangle } from 'lucide-react';
 import { Button } from '../../components/common/UIComponents';
-import { AiMergeSession } from '../../stores/syncStore';
+import { AiMergeSession, needsFreshMerge } from '../../stores/syncStore';
+import { useDialogFocus } from '../../components/common/useDialogFocus';
+import { MergeLineDiff } from './MergeLineDiff';
 
 import { AiMergeEditor } from './AiMergeEditor';
 import { AiMergeConversation } from './AiMergeConversation';
@@ -10,6 +12,9 @@ import { AiMergeConversation } from './AiMergeConversation';
 interface AiMergeModalProps {
   session: AiMergeSession | null;
   waitingCount: number;
+  completedCount: number;
+  nextPath?: string;
+  onRegenerate: () => Promise<void>;
   projectName?: string;
   onRefine: (instruction: string, currentContent?: string) => Promise<void>;
   onApply: (finalContent?: string) => Promise<void>;
@@ -21,6 +26,9 @@ interface AiMergeModalProps {
 export function AiMergeModal({
   session,
   waitingCount,
+  completedCount,
+  nextPath,
+  onRegenerate,
   projectName = 'ProjectSync',
   onRefine,
   onApply,
@@ -34,8 +42,14 @@ export function AiMergeModal({
   const [copiedCode, setCopiedCode] = useState(false);
   const [agentInstruction, setAgentInstruction] = useState('');
   const [confirmCancel, setConfirmCancel] = useState(false);
+  const [previousDraft, setPreviousDraft] = useState<string | null>(null);
+  const [showDiff, setShowDiff] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  const dialogFocus = useDialogFocus(Boolean(session?.isOpen), () => {
+    if (session?.status !== 'applying') onClose();
+  });
+  const confirmFocus = useDialogFocus(confirmCancel, () => setConfirmCancel(false));
 
   useEffect(() => {
     if (session?.preview?.mergedContent !== undefined) {
@@ -45,6 +59,7 @@ export function AiMergeModal({
 
   useEffect(() => {
     setAiSourceView('merged');
+    setShowDiff(false);
   }, [session?.conflictId, session?.preview?.previewId]);
 
   useEffect(() => {
@@ -115,7 +130,7 @@ export function AiMergeModal({
 
   const modalDom = (
     <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-900/60 p-4 backdrop-blur-sm dark:bg-black/80 animate-in fade-in duration-150">
-      <div className="flex h-[84vh] max-h-[780px] min-h-[540px] w-full max-w-6xl flex-col rounded-2xl border border-slate-200/90 bg-white shadow-soft-lg dark:border-slate-800 dark:bg-slate-900 overflow-hidden">
+      <div role="dialog" aria-modal={!confirmCancel} aria-label="AI 合并评审" {...dialogFocus} className="flex h-[88vh] max-h-[780px] min-h-0 w-full max-w-6xl flex-col rounded-2xl border border-slate-200/90 bg-white shadow-soft-lg dark:border-slate-800 dark:bg-slate-900 overflow-hidden">
         {/* Modal Top Header */}
         <div className="flex items-center justify-between gap-4 border-b border-slate-200 px-5 py-3 dark:border-slate-800 bg-slate-50/80 dark:bg-slate-950/80 shrink-0">
           <div className="flex items-center gap-3 min-w-0">
@@ -176,8 +191,10 @@ export function AiMergeModal({
           </div>
 
           <div className="flex items-center gap-1.5 shrink-0">
-            {waitingCount > 0 && (
-              <span className="text-xs text-slate-500 dark:text-slate-400">还有 {waitingCount} 个排队</span>
+            {(waitingCount > 0 || completedCount > 0) && (
+              <span className="text-xs text-slate-600 dark:text-slate-300" title={nextPath && `下一项：${nextPath}`}>
+                第 {completedCount + 1} / {completedCount + 1 + waitingCount} 项
+              </span>
             )}
             {session.preview?.model && (
               <span className="hidden md:flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2.5 py-1 font-mono text-[11px] text-slate-600 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300 mr-1">
@@ -212,9 +229,28 @@ export function AiMergeModal({
           </div>
         </div>
 
+        <div className="flex flex-wrap items-center gap-2 border-b border-slate-200 px-5 py-1.5 text-xs dark:border-slate-800">
+          {aiPreview && <Button variant="secondary" size="sm" onClick={() => setShowDiff((value) => !value)}>
+            {showDiff ? '返回编辑器' : '查看行级差异'}
+          </Button>}
+          {session.status === 'error' && (
+            <Button variant="secondary" size="sm" onClick={() => {
+              if (session.preview || localDraftContent) setPreviousDraft(localDraftContent);
+              void onRegenerate();
+            }}>{needsFreshMerge(session.error) ? '重新扫描并生成新稿' : '重试生成草稿'}</Button>
+          )}
+          {previousDraft !== null && (
+            <Button variant="secondary" size="sm" onClick={() => void navigator.clipboard.writeText(previousDraft)}>复制旧草稿</Button>
+          )}
+          {nextPath && <span className="min-w-0 truncate text-slate-600 dark:text-slate-300" title={nextPath}>下一项：{nextPath}</span>}
+        </div>
         {/* Modal Main Body: 7 Cols Editor + 5 Cols Agent Interaction */}
         <div className="flex-1 grid grid-cols-1 lg:grid-cols-12 min-h-0 overflow-hidden divide-y lg:divide-y-0 lg:divide-x divide-slate-200 dark:divide-slate-800">
-          <AiMergeEditor
+          {showDiff && aiPreview ? (
+            <div className="flex min-h-0 flex-col overflow-hidden lg:col-span-7">
+              <MergeLineDiff local={aiPreview.localContent ?? ''} remote={aiPreview.remoteContent ?? ''} draft={localDraftContent} />
+            </div>
+          ) : <AiMergeEditor
             aiSourceView={aiSourceView}
             setAiSourceView={setAiSourceView}
             isModified={isModified}
@@ -228,7 +264,7 @@ export function AiMergeModal({
             isBusyMerging={isBusyMerging}
             isBusyApplying={isBusyApplying}
             currentViewContent={currentViewContent}
-          />
+          />}
           <AiMergeConversation
             session={session}
             isBusyMerging={isBusyMerging}
@@ -267,7 +303,7 @@ export function AiMergeModal({
               className="gap-1.5"
             >
               <Minimize2 className="h-3.5 w-3.5" />
-              <span>后台暂存</span>
+              <span title="仅在应用本次运行期间保留">后台暂存</span>
             </Button>
             <Button
               variant="danger"
@@ -287,7 +323,7 @@ export function AiMergeModal({
               variant="primary"
               size="md"
               onClick={() => void onApply(localDraftContent)}
-              disabled={isBusyMerging || isBusyApplying || !localDraftContent.trim()}
+              disabled={session.status !== 'ready' || !localDraftContent.trim()}
               className="gap-1.5 shadow-soft-sm"
             >
               {isBusyApplying ? (
@@ -304,7 +340,7 @@ export function AiMergeModal({
       {/* Confirmation Sub-Modal for Discarding Edited Content */}
       {confirmCancel && (
         <div className="fixed inset-0 z-[110] flex items-center justify-center p-4 bg-slate-900/60 dark:bg-black/80 backdrop-blur-sm animate-in fade-in duration-150">
-          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-soft-lg w-full max-w-md p-6 space-y-4">
+          <div role="dialog" aria-modal="true" aria-label="放弃合并修改" {...confirmFocus} className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-soft-lg w-full max-w-md p-6 space-y-4">
             <div className="flex items-center gap-3 text-rose-600">
               <AlertTriangle className="w-6 h-6 shrink-0" />
               <h4 className="text-base font-semibold text-slate-900 dark:text-slate-100">

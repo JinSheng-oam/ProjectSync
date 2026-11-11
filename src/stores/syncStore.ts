@@ -39,6 +39,10 @@ export interface AiMergeSession {
   isOpen: boolean;
 }
 
+export function needsFreshMerge(message: string | null) {
+  return /LOCAL_FILE_CHANGED|DAV_PRECONDITION_FAILED|HASH_MISMATCH|AI_MERGE_PREVIEW_STALE|AI_MERGE_PREVIEW_EXPIRED/.test(message ?? '');
+}
+
 export function useSyncStore() {
   const [theme, setTheme] = useState<'dark' | 'light'>(() => {
     if (typeof window !== 'undefined') {
@@ -60,6 +64,7 @@ export function useSyncStore() {
   const [bannerAlert, setBannerAlert] = useState<string | null>(null);
   const [aiSession, setAiSession] = useState<AiMergeSession | null>(null);
   const [aiMergeQueue, setAiMergeQueue] = useState<string[]>([]);
+  const [mergeResults, setMergeResults] = useState({ applied: 0, skipped: 0, failed: 0 });
   const refreshInFlight = useRef(false);
   const progressByTaskId = useRef(new Map<string, number>());
 
@@ -258,7 +263,7 @@ export function useSyncStore() {
     }
   };
 
-  const generateAiMerge = useCallback(async (conflict: ConflictItemDto) => {
+  const generateAiMerge = useCallback(async (conflict: Pick<ConflictItemDto, 'id' | 'relativePath'>, refresh = false) => {
     setAiSession({
       conflictId: conflict.id,
       relativePath: conflict.relativePath,
@@ -271,7 +276,7 @@ export function useSyncStore() {
     });
 
     try {
-      const preview = await api.previewAiMerge(conflict.id);
+      const preview = await (refresh ? api.regenerateAiMerge(conflict.id) : api.previewAiMerge(conflict.id));
       const suggestions = preview.suggestions || '已自动完成双端差异智能合并，请审阅下方代码。';
       setAiSession((prev) => {
         if (!prev || prev.conflictId !== conflict.id) return prev;
@@ -304,6 +309,7 @@ export function useSyncStore() {
   }, []);
 
   const enqueueAiMerges = (ids: string[]) => {
+    if (!aiSession && aiMergeQueue.length === 0) setMergeResults({ applied: 0, skipped: 0, failed: 0 });
     setAiMergeQueue((queue) => [...new Set([
       ...queue,
       ...ids.filter((id) => id !== aiSession?.conflictId),
@@ -316,6 +322,7 @@ export function useSyncStore() {
     const conflict = conflicts.find((item) => item.id === id && item.status === 'UNRESOLVED');
     setAiMergeQueue((queue) => queue.filter((item) => item !== id));
     if (conflict?.hasLocalVersion && conflict.hasRemoteVersion) void generateAiMerge(conflict);
+    else setMergeResults((result) => ({ ...result, skipped: result.skipped + 1 }));
   }, [aiMergeQueue, aiSession, conflicts, generateAiMerge]);
 
   const refineAiMerge = async (instruction: string, currentContent?: string) => {
@@ -368,7 +375,7 @@ export function useSyncStore() {
         if (!prev) return null;
         return {
           ...prev,
-          status: 'ready',
+          status: needsFreshMerge(msg) ? 'error' : 'ready',
           error: `调整失败: ${msg}`,
         };
       });
@@ -393,13 +400,14 @@ export function useSyncStore() {
       }
       const result = await api.applyAiMerge(conflictId, activePreviewId);
       if (!result.success) throw new Error(result.message);
+      setMergeResults((counts) => ({ ...counts, applied: counts.applied + 1 }));
       setBannerAlert(result.message);
       setTimeout(() => setBannerAlert(null), 7000);
       await refreshAll();
       setAiSession(null);
     } catch (err: unknown) {
       const msg = getErrorMessage(err, '写入本地与 WebDAV 失败');
-      setAiSession((prev) => (prev ? { ...prev, status: 'ready', error: msg } : null));
+      setAiSession((prev) => (prev ? { ...prev, status: needsFreshMerge(msg) ? 'error' : 'ready', error: msg } : null));
     }
   };
 
@@ -408,9 +416,15 @@ export function useSyncStore() {
   };
 
   const cancelAiMerge = () => {
-    setAiSession((session) =>
-      session?.status === 'merging' || session?.status === 'applying' ? session : null
-    );
+    if (!aiSession || aiSession.status === 'merging' || aiSession.status === 'applying') return;
+    const key = aiSession.status === 'error' ? 'failed' : 'skipped';
+    setMergeResults((counts) => ({ ...counts, [key]: counts[key] + 1 }));
+    setAiSession(null);
+  };
+
+  const regenerateAiMerge = async () => {
+    if (aiSession?.status !== 'error') return;
+    await generateAiMerge({ id: aiSession.conflictId, relativePath: aiSession.relativePath }, needsFreshMerge(aiSession.error));
   };
 
   const handlePreviewAiMerge = async (conflictId: string): Promise<AiMergePreviewDto> => {
@@ -460,8 +474,13 @@ export function useSyncStore() {
     handleApplyAiMerge,
     aiSession,
     aiMergeQueue,
+    mergeResults,
+    regenerateAiMerge,
     enqueueAiMerges,
-    clearAiMergeQueue: () => setAiMergeQueue([]),
+    clearAiMergeQueue: () => {
+      setMergeResults((counts) => ({ ...counts, skipped: counts.skipped + aiMergeQueue.length }));
+      setAiMergeQueue([]);
+    },
     refineAiMerge,
     applyAiMerge,
     setAiSessionOpen,

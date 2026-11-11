@@ -24,6 +24,7 @@ interface ConflictCenterProps {
   onExcludeFile: (conflictId: string) => Promise<void>;
   aiSession?: AiMergeSession | null;
   aiMergeQueue: string[];
+  mergeResults: { applied: number; skipped: number; failed: number };
   onEnqueueAiMerges: (ids: string[]) => void;
   onClearAiMergeQueue: () => void;
   onOpenAiMergeModal: () => void;
@@ -37,6 +38,7 @@ export function ConflictCenter({
   onExcludeFile,
   aiSession,
   aiMergeQueue,
+  mergeResults,
   onEnqueueAiMerges,
   onClearAiMergeQueue,
   onOpenAiMergeModal,
@@ -105,6 +107,11 @@ export function ConflictCenter({
   const allChecked = selectableIds.length > 0 && selectedBatch.length === selectableIds.length;
   const isActiveQueued = activeConflict ? queuedIds.has(activeConflict.id) : false;
   const missingVersion = activeConflict && (!activeConflict.hasLocalVersion ? '本地' : !activeConflict.hasRemoteVersion ? '远端' : null);
+  const conflictLabels: Record<ConflictItemDto['conflictType'], string> = {
+    ConcurrentModification: '两端均已修改', InitialSyncDifferent: '首次同步内容不同',
+    LocalDeleteRemoteModified: '本地删除、远端修改', RemoteDeleteLocalModified: '远端删除、本地修改',
+    CaseCollision: '文件名大小写冲突',
+  };
 
   return (
     <div className="space-y-6 max-w-7xl mx-auto">
@@ -130,6 +137,11 @@ export function ConflictCenter({
         </div>
       </div>
 
+      {mergeResults.applied + mergeResults.skipped + mergeResults.failed > 0 && (
+        <p role="status" className="text-xs text-slate-600 dark:text-slate-300">
+          本轮 AI 评审：已写入 {mergeResults.applied} · 已跳过 {mergeResults.skipped} · 未处理的失败 {mergeResults.failed}
+        </p>
+      )}
       {unresolvedConflicts.length === 0 ? (
         <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-12 text-center space-y-3 shadow-soft-sm transition-colors">
           <div className="w-12 h-12 rounded-2xl bg-emerald-50 dark:bg-emerald-950/60 border border-emerald-200 dark:border-emerald-800 flex items-center justify-center mx-auto text-emerald-600 dark:text-emerald-400">
@@ -176,6 +188,9 @@ export function ConflictCenter({
                 批量 AI 合并{selectedBatch.length > 0 ? `（${selectedBatch.length}）` : ''}
               </Button>
             </div>
+            {aiConfigured && <p className="px-4 py-2 text-xs text-slate-600 dark:text-slate-400">
+              合并会把所选文件的本地与远端文本发送至 {aiSettings?.useCodexForMerge ? 'Codex CLI' : '已配置的 AI 服务'}。
+            </p>}
             {aiMergeQueue.length > 0 && (
               <div className="flex items-center justify-between gap-2 border-b border-slate-200 px-4 py-2 text-xs text-slate-600 dark:border-slate-800 dark:text-slate-300">
                 <span role="status">{aiMergeQueue.length} 个文件排队</span>
@@ -213,7 +228,10 @@ export function ConflictCenter({
                           }}
                           className="accent-indigo-600"
                         />
-                        <span className="truncate text-xs font-mono font-medium" title={item.relativePath}>{item.relativePath}</span>
+                        <button type="button" aria-pressed={isSelected} onClick={(event) => { event.stopPropagation(); setSelectedId(item.id); }}
+                          className="min-w-0 truncate rounded text-left text-xs font-mono font-medium focus-visible:outline-indigo-600" title={item.relativePath}>
+                          {item.relativePath}
+                        </button>
                       </div>
                       <div className="flex items-center gap-1 shrink-0">
                         {hasSession && (
@@ -224,13 +242,15 @@ export function ConflictCenter({
                         )}
                         {queuedIds.has(item.id) && <span className="text-[11px] text-indigo-600 dark:text-indigo-300">排队中</span>}
                         <span className="text-[11px] font-mono px-2 py-0.5 rounded-md bg-amber-100 dark:bg-amber-950 text-amber-900 dark:text-amber-200 border border-amber-300 dark:border-amber-700">
-                          {item.conflictType}
+                          {conflictLabels[item.conflictType]}
                         </span>
                       </div>
                     </div>
 
                     <div className="flex items-center justify-between text-[11px] text-slate-600 dark:text-slate-400 font-mono">
-                      <span>{new Date(item.detectedAt).toLocaleTimeString()}</span>
+                      <span className="truncate" title={roots.find((root) => root.id === item.rootId)?.name}>
+                        {roots.find((root) => root.id === item.rootId)?.name ?? '未知项目'}
+                      </span>
                       <span>{!item.hasLocalVersion ? '本地版本缺失' : !item.hasRemoteVersion ? '远端版本缺失' : `${(item.localVersion.sizeBytes / 1024).toFixed(1)} KB`}</span>
                     </div>
                   </div>
@@ -369,29 +389,29 @@ export function ConflictCenter({
 
                 <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3">
                   {/* Action 1: KEEP_BOTH (Default Recommended) */}
-                  <div
+                  <button type="button" disabled={Boolean(missingVersion)}
                     onClick={() =>
                       setConfirmResolution({
                         id: activeConflict.id,
                         resolution: 'KeepBoth',
                         title: '确认保留双端版本（推荐）',
-                        description: `系统将保留两端内容：下载远端文件并自动重命名为 ${activeConflict.relativePath}.conflict-${new Date().toISOString().slice(0, 10)}.md，本地现有文件原样保留，不会丢失任何数据。`,
+                        description: '先将本地版本保存为远端冲突副本；若远端不支持安全新建，则备份到 ProjectSync 回收站。然后用远端版本替换本地同步文件。',
                       })
                     }
-                    className="p-3.5 rounded-xl border border-indigo-300 dark:border-indigo-700 bg-indigo-50/70 dark:bg-indigo-950/30 hover:bg-indigo-100/70 dark:hover:bg-indigo-950/50 cursor-pointer transition-all space-y-1.5 shadow-soft-sm"
+                    className="p-3.5 text-left focus-visible:ring-2 focus-visible:ring-indigo-500 disabled:cursor-not-allowed disabled:opacity-60 rounded-xl border border-indigo-300 dark:border-indigo-700 bg-indigo-50/70 dark:bg-indigo-950/30 hover:bg-indigo-100/70 dark:hover:bg-indigo-950/50 cursor-pointer transition-all space-y-1.5 shadow-soft-sm"
                   >
-                    <div className="text-xs font-semibold text-indigo-800 dark:text-indigo-300 flex items-center gap-1.5">
+                    <span className="text-xs font-semibold text-indigo-800 dark:text-indigo-300 flex items-center gap-1.5">
                       <Copy className="w-4 h-4 text-indigo-600 dark:text-indigo-400" />
                       <span>保留双端版本 (推荐)</span>
-                    </div>
-                    <p className="text-[11px] text-slate-700 dark:text-slate-300 leading-normal">
-                      推荐首选。为远端内容创建独立冲突副本，本地修改原样保留，确保两端数据均不丢失。
-                    </p>
-                  </div>
+                    </span>
+                    <span className="block text-[11px] text-slate-700 dark:text-slate-300 leading-normal">
+                      先备份本地版本，再让本地同步文件采用远端内容。
+                    </span>
+                  </button>
 
                   {/* Action 2: AI text merge with Agent Refinement */}
-                  <div
-                    className={`p-3.5 rounded-xl border space-y-1.5 shadow-soft-sm transition-all cursor-pointer ${
+                  <button type="button" disabled={Boolean(missingVersion) || isActiveQueued}
+                    className={`p-3.5 text-left focus-visible:ring-2 focus-visible:ring-indigo-500 disabled:cursor-not-allowed disabled:opacity-60 rounded-xl border space-y-1.5 shadow-soft-sm transition-all cursor-pointer ${
                       isAiMergingThis
                         ? 'border-indigo-500 bg-indigo-50/80 dark:border-indigo-500 dark:bg-indigo-950/40 ring-2 ring-indigo-500/20'
                         : aiConfigured && !missingVersion
@@ -411,7 +431,7 @@ export function ConflictCenter({
                       }
                     }}
                   >
-                    <div className="flex items-center justify-between gap-2 text-xs font-semibold text-amber-900 dark:text-amber-200">
+                    <span className="flex items-center justify-between gap-2 text-xs font-semibold text-amber-900 dark:text-amber-200">
                       <span className="flex items-center gap-1.5">
                         <Sparkles className="h-4 w-4 text-amber-600 dark:text-amber-400" />
                         <span>
@@ -426,8 +446,8 @@ export function ConflictCenter({
                       {isAiMergingThis && aiSession?.status === 'merging' && (
                         <LoaderCircle className="h-3.5 w-3.5 animate-spin text-amber-600" />
                       )}
-                    </div>
-                    <p className="text-[11px] leading-normal text-slate-600 dark:text-slate-400">
+                    </span>
+                    <span className="block text-[11px] leading-normal text-slate-600 dark:text-slate-400">
                       {isAiMergingThis
                         ? '已保留合并状态，点击即可继续与 AI Agent 交互微调并确认写入。'
                         : missingVersion
@@ -437,53 +457,53 @@ export function ConflictCenter({
                         : aiConfigured
                         ? '生成合并草稿，审阅后逐个确认写入。'
                         : '请先选择并保存 AI 合并后端。'}
-                    </p>
-                  </div>
+                    </span>
+                  </button>
 
                   {/* Action 3: KEEP_LOCAL */}
-                  <div
+                  <button type="button" disabled={!activeConflict.hasLocalVersion}
                     onClick={() =>
                       setConfirmResolution({
                         id: activeConflict.id,
                         resolution: 'KeepLocal',
-                        title: '确认以本地版本为准（覆盖远端）',
-                        description: `本地版本将上传并覆盖 WebDAV 远端的对应文件。写入前会重新核对远端版本，并使用服务端已验证的 If-Match 或独占锁保护；发现变化时会停止覆盖。`,
+                        title: activeConflict.hasRemoteVersion ? '确认以本地版本为准' : '确认恢复远端文件',
+                        description: activeConflict.hasRemoteVersion ? '上传本地版本覆盖远端。写入前将重新核对版本。' : '上传现存的本地版本，在远端安全新建此文件。',
                       })
                     }
-                    className="p-3.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 hover:bg-slate-50 dark:hover:bg-slate-800/50 cursor-pointer transition-all space-y-1.5 shadow-soft-sm"
+                    className="p-3.5 text-left focus-visible:ring-2 focus-visible:ring-indigo-500 disabled:cursor-not-allowed disabled:opacity-60 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 hover:bg-slate-50 dark:hover:bg-slate-800/50 cursor-pointer transition-all space-y-1.5 shadow-soft-sm"
                   >
-                    <div className="text-xs font-semibold text-slate-900 dark:text-slate-100 flex items-center gap-1.5">
+                    <span className="text-xs font-semibold text-slate-900 dark:text-slate-100 flex items-center gap-1.5">
                       <HardDrive className="w-4 h-4 text-slate-500 dark:text-slate-400" />
-                      <span>以本地为准 (覆盖远端)</span>
-                    </div>
-                    <p className="text-[11px] text-slate-600 dark:text-slate-400 leading-normal">
-                      以本地修改为准，上传覆盖 WebDAV 远端内容。写入前核对远端版本，由条件写入或独占锁保护。
-                    </p>
-                  </div>
+                      <span>{activeConflict.hasRemoteVersion ? '以本地为准' : '恢复到远端'}</span>
+                    </span>
+                    <span className="block text-[11px] text-slate-600 dark:text-slate-400 leading-normal">
+                      {activeConflict.hasRemoteVersion ? '使用本地内容覆盖远端。' : '把现存的本地版本上传到远端。'}
+                    </span>
+                  </button>
 
                   {/* Action 4: KEEP_REMOTE */}
-                  <div
+                  <button type="button" disabled={!activeConflict.hasRemoteVersion}
                     onClick={() =>
                       setConfirmResolution({
                         id: activeConflict.id,
                         resolution: 'KeepRemote',
-                        title: '确认以远端版本为准（覆盖本地）',
-                        description: `远端版本将下载并替换本地文件。为保证安全，本地现有文件将被备份至回收站 (.projectsync/trash)，可随时找回。`,
+                        title: activeConflict.hasLocalVersion ? '确认以远端版本为准' : '确认恢复本地文件',
+                        description: activeConflict.hasLocalVersion ? '备份当前本地版本，再用远端版本替换。' : '下载现存的远端版本，恢复本地文件。',
                       })
                     }
-                    className="p-3.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 hover:bg-slate-50 dark:hover:bg-slate-800/50 cursor-pointer transition-all space-y-1.5 shadow-soft-sm"
+                    className="p-3.5 text-left focus-visible:ring-2 focus-visible:ring-indigo-500 disabled:cursor-not-allowed disabled:opacity-60 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 hover:bg-slate-50 dark:hover:bg-slate-800/50 cursor-pointer transition-all space-y-1.5 shadow-soft-sm"
                   >
-                    <div className="text-xs font-semibold text-slate-900 dark:text-slate-100 flex items-center gap-1.5">
+                    <span className="text-xs font-semibold text-slate-900 dark:text-slate-100 flex items-center gap-1.5">
                       <Cloud className="w-4 h-4 text-slate-500 dark:text-slate-400" />
-                      <span>以远端为准 (覆盖本地)</span>
-                    </div>
-                    <p className="text-[11px] text-slate-600 dark:text-slate-400 leading-normal">
-                      下载远端文件覆盖本地。本地当前文件会自动移入备份回收站 (.projectsync/trash)。
-                    </p>
-                  </div>
+                      <span>{activeConflict.hasLocalVersion ? '以远端为准' : '恢复到本地'}</span>
+                    </span>
+                    <span className="block text-[11px] text-slate-600 dark:text-slate-400 leading-normal">
+                      {activeConflict.hasLocalVersion ? '下载远端内容，备份并替换本地文件。' : '把现存的远端版本下载到本地。'}
+                    </span>
+                  </button>
                 </div>
 
-                {aiSession?.error && (
+                {isAiMergingThis && aiSession?.error && (
                   <div role="alert" className="flex items-start gap-2 rounded-xl border border-rose-200 bg-rose-50 p-3 text-xs text-rose-800 dark:border-rose-900 dark:bg-rose-950/30 dark:text-rose-300">
                     <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
                     <span className="break-words">{aiSession.error}</span>

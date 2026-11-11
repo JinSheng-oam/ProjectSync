@@ -7,6 +7,19 @@ use crate::{
 };
 use std::collections::{BTreeSet, HashMap, HashSet};
 
+pub(super) const REMOTE_TRASH_CAPABILITY_MESSAGE: &str =
+    "本地文件已删除，但 WebDAV 未验证受保护的 MOVE；远端文件已保留。请重新探测节点，或把远端文件恢复到本地。";
+
+pub(super) fn remote_trash_etag<'a>(capabilities: &WebDavCapabilities, remote: &'a RemoteEntry) -> Option<&'a str> {
+    if !capabilities.safe_move_no_overwrite || !capabilities.safe_update_existing {
+        return None;
+    }
+    remote.etag.as_deref().map(str::trim).filter(|etag| {
+        etag.strip_prefix('"').and_then(|rest| rest.strip_suffix('"'))
+            .is_some_and(|opaque| !opaque.contains('"'))
+    })
+}
+
 pub(super) fn build_plan(
     local: &[LocalEntry],
     remote: &[RemoteEntry],
@@ -184,8 +197,7 @@ pub(super) fn build_plan(
             (None, Some(remote)) if local_complete => {
                 if state == "PRESENT" {
                     if Some(remote.hash.as_str()) == base_hash {
-                        if capabilities.safe_move_no_overwrite && capabilities.safe_update_existing
-                        {
+                        if let Some(etag) = remote_trash_etag(capabilities, remote) {
                             plan.push(with_etag(
                                 plan_item(
                                     &path,
@@ -195,7 +207,7 @@ pub(super) fn build_plan(
                                     Some((*remote).clone()),
                                     "本地已删除且远端仍为基线版本；移入远端回收站",
                                 ),
-                                remote.etag.clone(),
+                                Some(etag.to_owned()),
                             ));
                         } else {
                             plan.push(plan_item(
@@ -204,7 +216,11 @@ pub(super) fn build_plan(
                                 None,
                                 None,
                                 Some((*remote).clone()),
-                                "服务端未验证受保护的 MOVE/删除能力",
+                                if capabilities.safe_move_no_overwrite && capabilities.safe_update_existing {
+                                    "本地文件已删除，但远端文件没有可用的强 ETag；远端文件已保留。"
+                                } else {
+                                    REMOTE_TRASH_CAPABILITY_MESSAGE
+                                },
                             ));
                         }
                     } else {

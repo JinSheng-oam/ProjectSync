@@ -13,10 +13,12 @@ export function RuleEditor({
   rules,
   onChange,
   localPath,
+  excludeGitTracked,
 }: {
   rules: SyncRuleDto[];
   onChange: (rules: SyncRuleDto[]) => void;
   localPath: string;
+  excludeGitTracked?: boolean;
 }) {
   const [pattern, setPattern] = useState('');
   const [type, setType] = useState<RuleType>('EXCLUDE');
@@ -233,6 +235,8 @@ export function RuleEditor({
       </div>
 
       {/* 3. Custom Rules List & Add Bar */}
+      <details className="space-y-2">
+        <summary className="cursor-pointer rounded-lg px-2 py-2 text-xs font-medium text-slate-700 dark:text-slate-300">高级规则（{rules.length} 条）</summary>
       <div className="border border-slate-200 dark:border-slate-700 rounded-xl bg-white dark:bg-slate-800/80 overflow-hidden shadow-soft-sm">
         {/* Header & Filter Tabs */}
         <div className="px-3.5 py-2.5 bg-slate-50/80 dark:bg-slate-900/70 border-b border-slate-200 dark:border-slate-700 flex flex-wrap items-center justify-between gap-2">
@@ -414,6 +418,7 @@ export function RuleEditor({
         </div>
       </div>
 
+      </details>
       {message && (
         <div
           role="status"
@@ -426,7 +431,7 @@ export function RuleEditor({
 
       {/* 4 & 5. Side-by-side Auxiliary Tools: Path Diagnostics & AI Scope Recommendation */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-3 items-start">
-        <RulePathDiagnostics rules={rules} />
+        <RulePathDiagnostics rules={rules} localPath={localPath} excludeGitTracked={excludeGitTracked} />
 
         <AiScope key={localPath} localPath={localPath} onApply={onChange} />
       </div>

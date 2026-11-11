@@ -1,21 +1,51 @@
 use super::*;
 
 impl Database {
+    pub async fn refresh_conflict_versions(&self, id: &str, local_hash: &str, remote: &RemoteEntry) -> AppResult<()> {
+        let result = sqlx::query("UPDATE sync_conflicts SET local_hash=?,remote_hash=?,remote_etag=?,updated_at=? WHERE id=? AND status='UNRESOLVED'")
+            .bind(local_hash).bind(&remote.hash).bind(remote.etag.as_deref())
+            .bind(unix_ms()).bind(id).execute(&self.pool).await?;
+        if result.rows_affected() == 0 {
+            return Err(AppError::new("CONFLICT_NOT_FOUND", "冲突不存在或已处理"));
+        }
+        Ok(())
+    }
+
     pub async fn create_conflict(
         &self,
         root_id: &str,
         item: &PlannedAction,
         base_hash: Option<&str>,
     ) -> AppResult<(String, bool)> {
-        let existing = sqlx::query("SELECT id FROM sync_conflicts WHERE root_id=? AND relative_path=? AND status='UNRESOLVED' ORDER BY created_at DESC LIMIT 1").bind(root_id).bind(&item.path).fetch_optional(&self.pool).await?;
-        if let Some(row) = existing {
-            return Ok((row.get("id"), false));
-        }
+        let conflict_type = item.conflict.as_ref().map(ConflictType::as_db)
+            .unwrap_or("CONCURRENT_MODIFICATION");
+        let local_hash = item.local.as_ref().map(|v| v.hash.as_str());
+        let remote_hash = item.remote.as_ref().map(|v| v.hash.as_str());
+        let remote_etag = item.remote.as_ref().and_then(|v| v.etag.as_deref());
         let id = uuid::Uuid::new_v4().to_string();
         let now = unix_ms();
+        // Keep the conflict ID, but refresh the inputs used to validate manual and AI resolutions.
+        let existing_id = sqlx::query_scalar::<_, String>(
+            "UPDATE sync_conflicts
+             SET updated_at=CASE WHEN conflict_type IS NOT ?1 OR local_hash IS NOT ?2
+                 OR remote_hash IS NOT ?3 OR base_hash IS NOT ?4 OR remote_etag IS NOT ?5
+                 THEN ?6 ELSE updated_at END,
+                 conflict_type=?1,local_hash=?2,remote_hash=?3,base_hash=?4,remote_etag=?5
+             WHERE status='UNRESOLVED' AND id=(
+                 SELECT id FROM sync_conflicts WHERE root_id=?7 AND relative_path=?8
+                 AND status='UNRESOLVED' ORDER BY created_at DESC LIMIT 1
+             ) RETURNING id",
+        )
+        .bind(conflict_type).bind(local_hash).bind(remote_hash).bind(base_hash)
+        .bind(remote_etag).bind(now).bind(root_id).bind(&item.path)
+        .fetch_optional(&self.pool).await?;
+        if let Some(existing_id) = existing_id {
+            return Ok((existing_id, false));
+        }
         sqlx::query("INSERT INTO sync_conflicts(id,root_id,relative_path,conflict_type,local_hash,remote_hash,base_hash,remote_etag,status,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,'UNRESOLVED',?,?)")
-            .bind(&id).bind(root_id).bind(&item.path).bind(item.conflict.as_ref().map(ConflictType::as_db).unwrap_or("CONCURRENT_MODIFICATION"))
-            .bind(item.local.as_ref().map(|v|v.hash.as_str())).bind(item.remote.as_ref().map(|v|v.hash.as_str())).bind(base_hash).bind(item.remote.as_ref().and_then(|v|v.etag.as_deref())).bind(now).bind(now).execute(&self.pool).await?;
+            .bind(&id).bind(root_id).bind(&item.path).bind(conflict_type)
+            .bind(local_hash).bind(remote_hash).bind(base_hash).bind(remote_etag)
+            .bind(now).bind(now).execute(&self.pool).await?;
         Ok((id, true))
     }
 
