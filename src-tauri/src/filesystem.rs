@@ -100,7 +100,6 @@ pub fn scan_local_cached_excluding(
         return Err(AppError::new("LOCAL_ROOT_INVALID", "本地同步路径不是目录"));
     }
     let rule_engine = RuleEngine::compile(rules)?;
-    let scan_incomplete = std::cell::Cell::new(false);
     let cache = cache
         .iter()
         .filter_map(|entry| {
@@ -112,75 +111,53 @@ pub fn scan_local_cached_excluding(
         .collect::<std::collections::HashMap<_, _>>();
     let mut entries = Vec::new();
     let mut case_names = std::collections::HashMap::<String, String>::new();
-    let walker = WalkDir::new(&root)
+    let mut walker = WalkDir::new(&root)
         .follow_links(false)
         .sort_by_file_name()
-        .into_iter()
-        .filter_entry(|entry| {
-            if entry.depth() == 0 {
-                return true;
-            }
-            let file_type = entry.file_type();
-            let relative = match entry.path().strip_prefix(&root) {
-                Ok(relative) => relative
-                    .components()
-                    .map(|part| part.as_os_str().to_string_lossy())
-                    .collect::<Vec<_>>()
-                    .join("/"),
-                Err(_) => {
-                    scan_incomplete.set(true);
-                    return false;
-                }
-            };
-            if relative
-                .split('/')
-                .any(|part| part.eq_ignore_ascii_case(".projectsync"))
-            {
-                return false;
-            }
-            if excluded_paths.contains(&path_key(&relative)) {
-                return false;
-            }
-            if file_type.is_file() && is_generated_conflict_copy(&relative) {
-                return false;
-            }
-            if rule_engine.is_excluded(&relative, file_type.is_dir() || file_type.is_symlink()) {
-                return false;
-            }
-            if file_type.is_symlink() {
-                scan_incomplete.set(true);
-                return false;
-            }
-            match fs::symlink_metadata(entry.path()) {
-                Ok(metadata) if is_reparse_point(&metadata) => {
-                    scan_incomplete.set(true);
-                    false
-                }
-                Ok(_) => true,
-                Err(_) => {
-                    scan_incomplete.set(true);
-                    false
-                }
-            }
-        });
-    for walk in walker.skip(1) {
+        .into_iter();
+    while let Some(walk) = walker.next() {
         let item = walk.map_err(|error| {
-            AppError::new("SCAN_INCOMPLETE", format!("本地目录扫描失败：{error}"))
+            let location = error
+                .path()
+                .and_then(|path| path.strip_prefix(&root).ok())
+                .filter(|path| !path.as_os_str().is_empty())
+                .map(|path| relative_scan_path(path))
+                .unwrap_or_else(|| "项目根目录".into());
+            let reason = error
+                .io_error()
+                .map_or_else(|| error.to_string(), ToString::to_string);
+            incomplete_local_scan(&location, &reason)
         })?;
-        let meta = item.metadata().map_err(|error| {
-            AppError::new("SCAN_INCOMPLETE", format!("读取本地文件属性失败：{error}"))
-        })?;
-        if item.file_type().is_symlink() || is_reparse_point(&meta) || !meta.is_file() {
+        if item.depth() == 0 {
             continue;
         }
-        let relative = item
-            .path()
-            .strip_prefix(&root)
-            .map_err(|_| AppError::new("LOCAL_PATH_INVALID", "扫描结果越过了根目录"))?
-            .components()
-            .map(|c| c.as_os_str().to_string_lossy())
-            .collect::<Vec<_>>()
-            .join("/");
+        let relative = relative_scan_path(
+            item.path()
+                .strip_prefix(&root)
+                .map_err(|_| incomplete_local_scan("项目根目录", "扫描结果越过了根目录"))?,
+        );
+        let file_type = item.file_type();
+        if rule_engine.is_excluded(&relative, file_type.is_dir() || file_type.is_symlink())
+            || excluded_paths.contains(&path_key(&relative))
+            || (file_type.is_file() && is_generated_conflict_copy(&relative))
+        {
+            if file_type.is_dir() {
+                walker.skip_current_dir();
+            }
+            continue;
+        }
+        let meta = fs::symlink_metadata(item.path()).map_err(|error| {
+            incomplete_local_scan(&relative, &format!("无法读取文件属性：{error}"))
+        })?;
+        if meta.file_type().is_symlink() || is_reparse_point(&meta) {
+            return Err(incomplete_local_scan(
+                &relative,
+                "检测到符号链接或重解析点。若无需同步此路径，请将它加入排除规则",
+            ));
+        }
+        if !meta.is_file() {
+            continue;
+        }
         let relative = validate_relative_path(&relative)?;
         if !rule_engine.includes(&relative) {
             continue;
@@ -213,13 +190,68 @@ pub fn scan_local_cached_excluding(
             mtime_ns: modified,
         });
     }
-    if scan_incomplete.get() {
-        return Err(AppError::new(
-            "SCAN_INCOMPLETE",
-            "本地目录包含符号链接、重解析点或无法检查的目录；为避免误判删除，本轮同步已停止",
-        ));
-    }
     Ok(entries)
+}
+
+fn relative_scan_path(path: &Path) -> String {
+    path.components()
+        .map(|part| part.as_os_str().to_string_lossy())
+        .collect::<Vec<_>>()
+        .join("/")
+}
+
+fn incomplete_local_scan(path: &str, reason: &str) -> AppError {
+    AppError::new(
+        "SCAN_INCOMPLETE",
+        format!("本地扫描在「{path}」停止：{reason}。为避免误判删除，本轮同步已停止。"),
+    )
+}
+
+#[cfg(all(test, windows))]
+#[test]
+fn local_scan_reports_junction_and_resumes_with_an_explicit_exclusion() {
+    let root = std::env::temp_dir().join(format!("projectsync-junction-{}", uuid::Uuid::new_v4()));
+    let parent = root.join("tools");
+    let junction = parent.join("sdk");
+    let target = root.join("target");
+    fs::create_dir_all(&parent).unwrap();
+    fs::create_dir(&target).unwrap();
+    let created = std::process::Command::new("pwsh")
+        .args([
+            "-NoProfile",
+            "-NonInteractive",
+            "-Command",
+            "New-Item -ItemType Junction -Path $env:PSYNC_TEST_LINK -Target $env:PSYNC_TEST_TARGET -ErrorAction Stop | Out-Null",
+        ])
+        .env("PSYNC_TEST_LINK", &junction)
+        .env("PSYNC_TEST_TARGET", &target)
+        .output()
+        .unwrap();
+    assert!(created.status.success(), "{}", String::from_utf8_lossy(&created.stderr));
+    let document = root.join("README.md");
+    fs::write(&document, b"content").unwrap();
+    let blocked = scan_local(&root, &[]).err();
+    let unblocked = scan_local(
+        &root,
+        &[SyncRuleDto {
+            id: None,
+            rule_type: crate::domain::RuleType::Exclude,
+            pattern: "tools/sdk".into(),
+            priority: 100,
+            enabled: true,
+        }],
+    );
+    fs::remove_dir(junction).unwrap();
+    fs::remove_dir(parent).unwrap();
+    fs::remove_dir(target).unwrap();
+    fs::remove_file(document).unwrap();
+    fs::remove_dir(root).unwrap();
+    let blocked = blocked.expect("an unexcluded junction must block sync");
+    assert_eq!(blocked.code, "SCAN_INCOMPLETE");
+    assert!(blocked.message.contains("tools/sdk"));
+    let files = unblocked.unwrap();
+    assert_eq!(files.len(), 1);
+    assert_eq!(files[0].relative_path, "README.md");
 }
 
 fn is_transfer_staging_file(path: &str) -> bool {
