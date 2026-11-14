@@ -203,13 +203,15 @@ export function App() {
       </div>
 
       {/* 5-Step Project Wizard Modal */}
-      <AddProjectWizard
-        isOpen={isWizardOpen}
-        remoteProject={remoteProject}
-        onClose={() => { setIsWizardOpen(false); setRemoteProject(null); }}
-        accounts={accounts}
-        onProjectCreated={refreshAll}
-      />
+      {isWizardOpen && (
+        <AddProjectWizard
+          isOpen
+          remoteProject={remoteProject}
+          onClose={() => { setIsWizardOpen(false); setRemoteProject(null); }}
+          accounts={accounts}
+          onProjectCreated={refreshAll}
+        />
+      )}
 
       {/* Global AI Merge & Agent Workspace Modal */}
       <AiMergeModal
