@@ -10,7 +10,7 @@ import { ActiveTransferQueue } from './ActiveTransferQueue';
 import { SyncRootDto, ConflictItemDto, WebDavAccountDto, TaskDto } from '../../types/dto';
 import { Button } from '../../components/common/UIComponents';
 import { ActiveNav } from '../../stores/syncStore';
-import emptySyncIllustration from '../../assets/empty-sync-indigo.png';
+import emptySyncIllustration from '../../assets/empty-sync-indigo.webp';
 
 interface OverviewDashboardProps {
   roots: SyncRootDto[];

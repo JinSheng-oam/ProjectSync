@@ -13,7 +13,7 @@ import {
 import { Button, StatusBadge, formatDisplayPath } from '../../components/common/UIComponents';
 import { DiscoveredProject, SyncRootDto, WebDavAccountDto } from '../../types/dto';
 import { RemoteProjects } from './RemoteProjects';
-import emptySyncIllustration from '../../assets/empty-sync-indigo.png';
+import emptySyncIllustration from '../../assets/empty-sync-indigo.webp';
 
 type ProjectFilter = 'all' | 'active' | 'paused' | 'attention';
 
