@@ -180,7 +180,7 @@ impl WebDavClient {
         let mut etag_type = "None".to_owned();
         let mut created = false;
 
-        if self.mkcol(&probe_path).await.is_ok() {
+        if self.create_collection(&probe_path).await.unwrap_or(false) {
             created = true;
             let first = format!("{probe_path}/a.bin");
             let a = temp_file(b"projectsync capability probe A")?;
@@ -297,10 +297,11 @@ impl WebDavClient {
             let _ = tokio::fs::remove_file(a).await;
             let _ = tokio::fs::remove_file(b).await;
         }
-        let lock_exclusion_safe = self
-            .probe_lock_exclusion_in(&probe_path)
-            .await
-            .unwrap_or(false);
+        let lock_exclusion_safe = if created {
+            self.probe_lock_exclusion_in(&probe_path).await.unwrap_or(false)
+        } else {
+            false
+        };
         let native_if_none_match = safe_create_only;
         let native_if_match = safe_update_existing || safe_delete;
         if lock_exclusion_safe {

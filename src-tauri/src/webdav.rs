@@ -407,6 +407,11 @@ impl WebDavClient {
     }
 
     pub async fn mkcol(&self, path: &str) -> AppResult<()> {
+        self.create_collection(path).await.map(|_| ())
+    }
+
+    // Returns true only when this request created the collection.
+    async fn create_collection(&self, path: &str) -> AppResult<bool> {
         let response = self
             .send(
                 Method::from_bytes(b"MKCOL")
@@ -416,12 +421,22 @@ impl WebDavClient {
                 None,
             )
             .await?;
-        if response.status() == StatusCode::METHOD_NOT_ALLOWED
-            || response.status() == StatusCode::CONFLICT
-        {
-            return Ok(());
+        if response.status() == StatusCode::METHOD_NOT_ALLOWED {
+            let normalized = normalize_remote_path(path)?;
+            let request_url = self.url_for(path)?;
+            for entry in self.propfind(path, 0).await? {
+                if self.dav_path_for_href(&entry.path, &request_url)? == normalized {
+                    return if entry.is_collection {
+                        Ok(false)
+                    } else {
+                        Err(AppError::new("DAV_CONFLICT", "WebDAV 路径已被普通文件占用，无法创建目录"))
+                    };
+                }
+            }
+            return Err(AppError::new("DAV_INVALID_RESPONSE", "无法确认 WebDAV 目录是否存在"));
         }
-        Self::check_status(response.status(), "MKCOL")
+        Self::check_status(response.status(), "MKCOL")?;
+        Ok(true)
     }
 
     pub async fn ensure_collection(&self, path: &str) -> AppResult<()> {
@@ -613,5 +628,106 @@ impl FromStr for PutCondition {
         } else {
             Err(AppError::new("DAV_REQUEST_FAILED", "未知的写入条件"))
         }
+    }
+}
+
+#[cfg(test)]
+mod mkcol_tests {
+    use super::*;
+    use std::{
+        io::{BufRead, BufReader, Read, Write},
+        net::TcpListener,
+        sync::{atomic::{AtomicBool, Ordering}, Mutex},
+        thread,
+        time::Duration,
+    };
+
+    fn mock_server(mkcol_status: u16, collection: bool) -> (String, Arc<AtomicBool>, Arc<Mutex<Vec<String>>>, thread::JoinHandle<()>) {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        listener.set_nonblocking(true).unwrap();
+        let address = format!("http://{}/", listener.local_addr().unwrap());
+        let stopped = Arc::new(AtomicBool::new(false));
+        let requests = Arc::new(Mutex::new(Vec::new()));
+        let stop = stopped.clone();
+        let seen = requests.clone();
+        let handle = thread::spawn(move || {
+            while !stop.load(Ordering::Relaxed) {
+                let Ok((mut stream, _)) = listener.accept() else {
+                    thread::sleep(Duration::from_millis(5));
+                    continue;
+                };
+                let _ = stream.set_read_timeout(Some(Duration::from_secs(2)));
+                let mut reader = BufReader::new(stream.try_clone().unwrap());
+                let mut line = String::new();
+                reader.read_line(&mut line).unwrap();
+                let mut parts = line.split_whitespace();
+                let method = parts.next().unwrap_or("").to_string();
+                let path = parts.next().unwrap_or("/").to_string();
+                seen.lock().unwrap().push(method.clone());
+                let mut length = 0;
+                loop {
+                    line.clear();
+                    reader.read_line(&mut line).unwrap();
+                    if line == "\r\n" || line.is_empty() { break; }
+                    if let Some((name, value)) = line.split_once(':') {
+                        if name.eq_ignore_ascii_case("content-length") {
+                            length = value.trim().parse().unwrap_or(0);
+                        }
+                    }
+                }
+                let mut body = vec![0; length];
+                reader.read_exact(&mut body).unwrap();
+                let (status, body) = match method.as_str() {
+                    "OPTIONS" => (200, String::new()),
+                    "MKCOL" => (mkcol_status, String::new()),
+                    "PROPFIND" => (207, format!(
+                        r#"<D:multistatus xmlns:D="DAV:"><D:response><D:href>{path}</D:href><D:propstat><D:prop><D:resourcetype>{}</D:resourcetype></D:prop><D:status>HTTP/1.1 200 OK</D:status></D:propstat></D:response></D:multistatus>"#,
+                        if collection { "<D:collection/>" } else { "" }
+                    )),
+                    _ => (500, String::new()),
+                };
+                write!(stream, "HTTP/1.1 {status} Test\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len()).unwrap();
+                stream.flush().unwrap();
+                thread::sleep(Duration::from_millis(20));
+            }
+        });
+        (address, stopped, requests, handle)
+    }
+
+    #[tokio::test]
+    async fn mkcol_does_not_treat_409_or_a_file_as_an_existing_collection() {
+        for (status, collection, expected) in [(409, false, Some("DAV_CONFLICT")), (405, false, Some("DAV_CONFLICT")), (405, true, None)] {
+            let (url, stopped, _, handle) = mock_server(status, collection);
+            let client = WebDavClient::new(&url, "user", "password".into(), true).unwrap();
+            let mut result = client.mkcol("/parent").await;
+            for _ in 0..3 {
+                if !result.as_ref().is_err_and(|error| error.code == "DAV_CONNECTION_FAILED") { break; }
+                result = client.mkcol("/parent").await;
+            }
+            stopped.store(true, Ordering::Relaxed);
+            handle.join().unwrap();
+            assert_eq!(result.err().map(|error| error.code), expected.map(str::to_owned));
+        }
+    }
+
+    #[tokio::test]
+    async fn failed_probe_directory_creation_does_not_probe_or_delete_it() {
+        let (url, stopped, requests, handle) = mock_server(409, true);
+        let client = WebDavClient::new(&url, "user", "password".into(), true).unwrap();
+        let mut observed = None;
+        for _ in 0..5 {
+            if let Ok(result) = client.test_connection().await {
+                if requests.lock().unwrap().iter().any(|method| method == "MKCOL") {
+                    observed = Some(result);
+                    break;
+                }
+            }
+        }
+        stopped.store(true, Ordering::Relaxed);
+        handle.join().unwrap();
+        let result = observed.expect("the mock must observe the attempted MKCOL");
+        assert!(!result.supports_lock);
+        assert!(!result.safe_create_only);
+        assert!(requests.lock().unwrap().iter().all(|method| method != "LOCK" && method != "DELETE"));
     }
 }
