@@ -1,4 +1,5 @@
 use super::*;
+use crate::domain::SyncAction;
 
 #[tauri::command]
 pub async fn query_sync_history(
@@ -7,16 +8,31 @@ pub async fn query_sync_history(
     root_id: Option<String>,
     limit: Option<u32>,
     offset: Option<u32>,
+    action: Option<SyncAction>,
+    status: Option<String>,
+    before_timestamp: Option<i64>,
+    before_id: Option<String>,
 ) -> ApiResult<Vec<HistoryItemDto>> {
-    api(state
-        .db
-        .history(
+    api(async {
+        let before = match (before_timestamp, before_id.as_deref()) {
+            (None, None) => None,
+            (Some(time), Some(id)) => Some((time, id.parse::<i64>().map_err(|_| crate::domain::AppError::new("HISTORY_CURSOR_INVALID", "日志分页位置无效"))?)),
+            _ => return Err(crate::domain::AppError::new("HISTORY_CURSOR_INVALID", "日志分页位置不完整")),
+        };
+        if status.as_deref().is_some_and(|value| !matches!(value, "SUCCESS" | "FAILED" | "BLOCKED")) {
+            return Err(crate::domain::AppError::new("HISTORY_FILTER_INVALID", "日志状态筛选无效"));
+        }
+        state.db.history(
             keyword.as_deref().unwrap_or(""),
             root_id.as_deref(),
             limit.unwrap_or(100),
             offset.unwrap_or(0),
+            action.as_ref().map(SyncAction::as_db),
+            status.as_deref(),
+            before,
         )
-        .await)
+        .await
+    }.await)
 }
 
 #[tauri::command]

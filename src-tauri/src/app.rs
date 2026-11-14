@@ -176,7 +176,7 @@ impl AppState {
 
     pub async fn export_diagnostics(&self, destination: &std::path::Path) -> AppResult<()> {
         use std::{fs::File, io::Write};
-        let history = self.db.history("", None, 100, 0).await?;
+        let history = self.db.history("", None, 100, 0, None, None, None).await?;
         let roots = self.db.roots().await?.into_iter().map(|root|serde_json::json!({
             "id":root.id,"remoteProjectId":root.remote_project_id,"accountId":root.account_id,
             "enabled":root.enabled,"status":root.status,"pollIntervalSeconds":root.poll_interval_seconds,

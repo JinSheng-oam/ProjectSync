@@ -20,6 +20,7 @@ import {
   INITIAL_FILES,
   INITIAL_HISTORY,
 } from './mockData';
+import type { HistoryFilters } from './api';
 
 // In-memory state for mock mode
 class MockEngine {
@@ -302,13 +303,19 @@ class MockEngine {
         !(task.action === 'Blocked' && /受保护的 MOVE|保护的远端 MOVE|远端文件没有可用的强 ETag/.test(task.error ?? ''))));
   }
 
-  async querySyncHistory(keyword = '', limit = 50, rootId?: string, offset = 0): Promise<HistoryItemDto[]> {
+  async querySyncHistory(keyword = '', limit = 50, rootId?: string, offset = 0, filters: HistoryFilters = {}): Promise<HistoryItemDto[]> {
     await this.delay(150);
     let result = [...this.history];
     if (keyword) {
       result = result.filter((h) => h.relativePath.toLowerCase().includes(keyword.toLowerCase()) || h.projectName.toLowerCase().includes(keyword.toLowerCase()));
     }
     if (rootId) result = result.filter((entry) => entry.rootId === rootId);
+    if (filters.action) result = result.filter((entry) => entry.action === filters.action);
+    if (filters.status) result = result.filter((entry) => entry.status === filters.status);
+    if (filters.before) {
+      const cursor = result.findIndex((entry) => entry.id === filters.before?.id);
+      result = cursor < 0 ? [] : result.slice(cursor + 1);
+    }
     return result.slice(offset, offset + limit);
   }
 }

@@ -1,5 +1,40 @@
 use super::*;
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn history_filters_before_paging_and_uses_a_stable_cursor() {
+        let pool = SqlitePoolOptions::new().max_connections(1)
+            .connect_with(SqliteConnectOptions::new().in_memory(true).foreign_keys(false))
+            .await.unwrap();
+        sqlx::migrate!("./migrations").run(&pool).await.unwrap();
+        let db = Database { pool, path: PathBuf::new() };
+        for id in ["r1", "r2"] {
+            sqlx::query("INSERT INTO sync_roots(id,remote_project_id,account_id,name,local_path,remote_path,created_at,updated_at) VALUES (?,'remote','account',?,'C:/tmp',?,1,1)")
+                .bind(id).bind(id).bind(format!("/{id}")).execute(&db.pool).await.unwrap();
+        }
+        for index in 0..7 {
+            sqlx::query("INSERT INTO sync_history(root_id,relative_path,operation,result,created_at) VALUES ('r1',?,'DOWNLOAD_NEW','FAILED',100)")
+                .bind(format!("文档-{index}.md")).execute(&db.pool).await.unwrap();
+        }
+        sqlx::query("INSERT INTO sync_history(root_id,relative_path,operation,result,created_at) VALUES ('r2','文档-other.md','DOWNLOAD_NEW','FAILED',100)")
+            .execute(&db.pool).await.unwrap();
+        let first = db.history("文档", Some("r1"), 3, 0, Some("DOWNLOAD_NEW"), Some("FAILED"), None).await.unwrap();
+        assert_eq!(first.len(), 3);
+        let cursor = first.last().unwrap();
+        let before = Some((cursor.timestamp, cursor.id.parse().unwrap()));
+        sqlx::query("INSERT INTO sync_history(root_id,relative_path,operation,result,created_at) VALUES ('r1','new.md','DOWNLOAD_NEW','FAILED',200)")
+            .execute(&db.pool).await.unwrap();
+        let second = db.history("文档", Some("r1"), 3, 0, Some("DOWNLOAD_NEW"), Some("FAILED"), before).await.unwrap();
+        assert_eq!(second.len(), 3);
+        assert!(second.iter().all(|entry| !first.iter().any(|old| old.id == entry.id)));
+        assert!(db.history("文档", Some("r1"), 20, 0, Some("UPLOAD_NEW"), None, None).await.unwrap().is_empty());
+        assert!(db.history("文档", Some("r1"), 20, 0, None, Some("SUCCESS"), None).await.unwrap().is_empty());
+    }
+}
+
 impl Database {
     pub async fn add_history(&self, entry: HistoryEntry<'_>) -> AppResult<i64> {
         let (code, message) = entry
@@ -31,10 +66,17 @@ impl Database {
         root_id: Option<&str>,
         limit: u32,
         offset: u32,
+        action: Option<&str>,
+        status: Option<&str>,
+        before: Option<(i64, i64)>,
     ) -> AppResult<Vec<HistoryItemDto>> {
-        let like = format!("%{}%", keyword.replace('%', "\\%").replace('_', "\\_"));
-        let rows = sqlx::query("SELECT h.*,r.name AS project_name FROM sync_history h JOIN sync_roots r ON r.id=h.root_id WHERE (?='' OR h.relative_path LIKE ? ESCAPE '\\' OR r.name LIKE ? ESCAPE '\\') AND (? IS NULL OR h.root_id=?) ORDER BY h.created_at DESC,h.id DESC LIMIT ? OFFSET ?")
-            .bind(keyword).bind(&like).bind(&like).bind(root_id).bind(root_id).bind(limit.clamp(1,500) as i64).bind(offset as i64).fetch_all(&self.pool).await?;
+        let like = format!("%{}%", keyword.replace('\\', "\\\\").replace('%', "\\%").replace('_', "\\_"));
+        let (before_time, before_id) = before.map(|(time, id)| (Some(time), Some(id))).unwrap_or((None, None));
+        let rows = sqlx::query("SELECT h.*,r.name AS project_name FROM sync_history h JOIN sync_roots r ON r.id=h.root_id WHERE (?='' OR h.relative_path LIKE ? ESCAPE '\\' OR r.name LIKE ? ESCAPE '\\') AND (? IS NULL OR h.root_id=?) AND (? IS NULL OR h.operation=?) AND (? IS NULL OR h.result=?) AND (? IS NULL OR h.created_at < ? OR (h.created_at = ? AND h.id < ?)) ORDER BY h.created_at DESC,h.id DESC LIMIT ? OFFSET ?")
+            .bind(keyword).bind(&like).bind(&like).bind(root_id).bind(root_id)
+            .bind(action).bind(action).bind(status).bind(status)
+            .bind(before_time).bind(before_time).bind(before_time).bind(before_id)
+            .bind(limit.clamp(1,500) as i64).bind(offset as i64).fetch_all(&self.pool).await?;
         Ok(rows
             .iter()
             .map(|r| HistoryItemDto {

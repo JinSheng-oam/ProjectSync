@@ -21,10 +21,17 @@ import type {
   AiConnectionTestDto,
   AiMergePreviewDto,
   RefineAiMergeInput,
+  SyncAction,
 } from '../types/dto';
 import { mockEngine } from './mockEngine';
 
 export { mockEngine } from './mockEngine';
+
+export interface HistoryFilters {
+  action?: SyncAction;
+  status?: HistoryItemDto['status'];
+  before?: { timestamp: number; id: string };
+}
 
 // Check if running in real Tauri window
 const isTauriEnv = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
@@ -208,12 +215,16 @@ export const api = {
     return mockEngine.handleRetainedRemoteFile(taskId, restore);
   },
 
-  async querySyncHistory(keyword = '', limit = 50, rootId?: string, offset = 0): Promise<HistoryItemDto[]> {
+  async querySyncHistory(keyword = '', limit = 50, rootId?: string, offset = 0, filters: HistoryFilters = {}): Promise<HistoryItemDto[]> {
     if (isTauriEnv) {
       const { invoke } = await import('@tauri-apps/api/core');
-      return invoke('query_sync_history', { keyword, rootId: rootId ?? null, limit, offset });
+      return invoke('query_sync_history', {
+        keyword, rootId: rootId ?? null, limit, offset,
+        action: filters.action ?? null, status: filters.status ?? null,
+        beforeTimestamp: filters.before?.timestamp ?? null, beforeId: filters.before?.id ?? null,
+      });
     }
-    return mockEngine.querySyncHistory(keyword, limit, rootId, offset);
+    return mockEngine.querySyncHistory(keyword, limit, rootId, offset, filters);
   },
 
   async updateWebDavAccount(accountId: string, account: { name: string; url: string; username: string; password?: string; tlsVerify: boolean }): Promise<WebDavAccountDto> {

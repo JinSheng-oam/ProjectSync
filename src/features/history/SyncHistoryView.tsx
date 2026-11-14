@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   History,
   Search,
@@ -7,8 +7,10 @@ import {
   CheckCircle2,
   AlertTriangle,
 } from 'lucide-react';
-import { HistoryItemDto } from '../../types/dto';
+import { HistoryItemDto, SyncAction } from '../../types/dto';
 import { Button } from '../../components/common/UIComponents';
+import { api, HistoryFilters } from '../../services/api';
+import { getErrorMessage } from '../../services/errorMessage';
 
 import { SelectMenu } from '../../components/common/SelectMenu';
 
@@ -16,32 +18,95 @@ export function SyncHistoryView({ history }: { history: HistoryItemDto[] }) {
   const [searchTerm, setSearchTerm] = useState('');
   const [actionFilter, setActionFilter] = useState<string>('ALL');
   const [statusFilter, setStatusFilter] = useState<string>('ALL');
+  const [filteredHistory, setFilteredHistory] = useState<HistoryItemDto[]>([]);
+  const [hasMore, setHasMore] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [exporting, setExporting] = useState(false);
+  const [error, setError] = useState('');
+  const generation = useRef(0);
+  const pageSize = 100;
 
-  const filteredHistory = history.filter((item) => {
-    const matchesSearch =
-      item.relativePath.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      item.projectName.toLowerCase().includes(searchTerm.toLowerCase());
-    const matchesAction = actionFilter === 'ALL' || item.action === actionFilter;
-    const matchesStatus = statusFilter === 'ALL' || item.status === statusFilter;
-    return matchesSearch && matchesAction && matchesStatus;
-  });
+  const filters: HistoryFilters = {
+    action: actionFilter === 'ALL' ? undefined : actionFilter as SyncAction,
+    status: statusFilter === 'ALL' ? undefined : statusFilter as HistoryItemDto['status'],
+  };
 
-  const handleExportCSV = () => {
-    const header = 'id,projectName,relativePath,action,status,bytes,timestamp,errorCode\n';
-    const rows = filteredHistory
-      .map(
-        (h) =>
-          `"${h.id}","${h.projectName}","${h.relativePath}","${h.action}","${h.status}",${h.bytes},"${new Date(h.timestamp).toISOString()}","${h.errorCode || ''}"`
-      )
-      .join('\n');
-    const blob = new Blob([header + rows], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.setAttribute('download', `projectsync-audit-${Date.now()}.csv`);
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
+  useEffect(() => {
+    const request = ++generation.current;
+    setLoading(true);
+    setFilteredHistory([]);
+    setHasMore(false);
+    setError('');
+    const timer = window.setTimeout(() => {
+      void api.querySyncHistory(searchTerm, pageSize, undefined, 0, {
+        action: actionFilter === 'ALL' ? undefined : actionFilter as SyncAction,
+        status: statusFilter === 'ALL' ? undefined : statusFilter as HistoryItemDto['status'],
+      }).then((rows) => {
+        if (generation.current !== request) return;
+        setFilteredHistory(rows);
+        setHasMore(rows.length === pageSize);
+      }).catch((cause: unknown) => {
+        if (generation.current === request) setError(getErrorMessage(cause, '无法加载同步日志'));
+      }).finally(() => {
+        if (generation.current === request) setLoading(false);
+      });
+    }, 200);
+    return () => { window.clearTimeout(timer); generation.current++; };
+  }, [searchTerm, actionFilter, statusFilter, history[0]?.id]);
+
+  const loadMore = async () => {
+    const last = filteredHistory[filteredHistory.length - 1];
+    if (!last || loading) return;
+    const request = generation.current;
+    setLoading(true);
+    setError('');
+    try {
+      const rows = await api.querySyncHistory(searchTerm, pageSize, undefined, 0, {
+        ...filters, before: { timestamp: last.timestamp, id: last.id },
+      });
+      if (generation.current !== request) return;
+      setFilteredHistory((previous) => [...previous, ...rows]);
+      setHasMore(rows.length === pageSize);
+    } catch (cause: unknown) {
+      if (generation.current === request) setError(getErrorMessage(cause, '无法加载更多日志'));
+    } finally {
+      if (generation.current === request) setLoading(false);
+    }
+  };
+
+  const handleExportCSV = async () => {
+    setExporting(true);
+    setError('');
+    try {
+      const allRows: HistoryItemDto[] = [];
+      let before: HistoryFilters['before'];
+      do {
+        const rows = await api.querySyncHistory(searchTerm, 500, undefined, 0, { ...filters, before });
+        allRows.push(...rows);
+        if (rows.length < 500) break;
+        const last = rows[rows.length - 1];
+        if (before?.id === last.id && before.timestamp === last.timestamp) throw new Error('日志分页位置未前进');
+        before = { timestamp: last.timestamp, id: last.id };
+      } while (true);
+      const cell = (value: unknown) => `"${String(value ?? '').replace(/"/g, '""')}"`;
+      const rows = [
+        ['id', 'projectName', 'relativePath', 'action', 'status', 'bytes', 'timestamp', 'errorCode', 'errorMessage'],
+        ...allRows.map((h) => [h.id, h.projectName, h.relativePath, h.action, h.status, h.bytes, new Date(h.timestamp).toISOString(), h.errorCode ?? '', h.errorMessage ?? '']),
+      ];
+      const blob = new Blob(['\ufeff', rows.map((row) => row.map(cell).join(',')).join('\r\n')], { type: 'text/csv;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `projectsync-audit-${Date.now()}.csv`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+    } catch (cause: unknown) {
+      setError(getErrorMessage(cause, '导出同步日志失败'));
+    } finally {
+      setExporting(false);
+    }
   };
 
   return (
@@ -60,11 +125,12 @@ export function SyncHistoryView({ history }: { history: HistoryItemDto[] }) {
         <Button
           variant="secondary"
           size="md"
-          onClick={handleExportCSV}
+          onClick={() => void handleExportCSV()}
+          disabled={exporting}
           className="gap-2 shrink-0"
         >
           <Download className="w-4 h-4 text-indigo-600 dark:text-indigo-400" />
-          <span>导出 CSV</span>
+          <span>{exporting ? '正在导出…' : '导出 CSV'}</span>
         </Button>
       </div>
 
@@ -87,7 +153,7 @@ export function SyncHistoryView({ history }: { history: HistoryItemDto[] }) {
           <Filter className="w-3.5 h-3.5 text-slate-500 dark:text-slate-400" />
           <SelectMenu label="同步动作" value={actionFilter} onChange={setActionFilter} options={[
             { value: 'ALL', label: '全部动作' },
-            ...['UploadUpdate', 'DownloadUpdate', 'CreateConflictCopy', 'AiMerge', 'MoveLocalToTrash']
+            ...['UploadNew', 'UploadUpdate', 'DownloadNew', 'DownloadUpdate', 'MoveRemoteToTrash', 'MoveLocalToTrash', 'CreateConflictCopy', 'AiMerge', 'MarkClean', 'Skip', 'Blocked']
               .map((action) => ({ value: action, label: action })),
           ]} />
           <SelectMenu label="同步状态" value={statusFilter} onChange={setStatusFilter} options={[
@@ -101,6 +167,7 @@ export function SyncHistoryView({ history }: { history: HistoryItemDto[] }) {
 
       {/* History Ledger Table with Horizontal Scroll Support to Prevent Truncation */}
       <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-soft-sm transition-colors overflow-hidden">
+        {error && <p role="alert" className="p-3 text-xs text-rose-700 dark:text-rose-300">{error}</p>}
         <div className="overflow-x-auto w-full">
           <table className="w-full text-left text-xs font-mono min-w-[840px] divide-y divide-slate-100 dark:divide-slate-800">
             <thead className="bg-slate-50 dark:bg-slate-800/60 border-b border-slate-200 dark:border-slate-800 text-slate-600 dark:text-slate-400 text-[11px]">
@@ -117,7 +184,7 @@ export function SyncHistoryView({ history }: { history: HistoryItemDto[] }) {
               {filteredHistory.length === 0 ? (
                 <tr>
                   <td colSpan={6} className="py-12 text-center text-slate-500 dark:text-slate-400 font-sans">
-                    没有找到符合筛选条件的同步历史记录
+                    {loading ? '正在加载同步记录…' : '没有找到符合筛选条件的同步历史记录'}
                   </td>
                 </tr>
               ) : (
@@ -174,10 +241,10 @@ export function SyncHistoryView({ history }: { history: HistoryItemDto[] }) {
             </tbody>
           </table>
         </div>
-        {filteredHistory.length > 0 && (
+        {(filteredHistory.length > 0 || hasMore) && (
           <div className="px-4 py-2 border-t border-slate-100 dark:border-slate-800 bg-slate-50/60 dark:bg-slate-800/40 text-[11px] text-slate-500 dark:text-slate-400 flex items-center justify-between">
-            <span>共记录 {filteredHistory.length} 项同步操作</span>
-            <span className="hidden sm:inline">在较窄屏幕下可左右滑动表格浏览完整字段</span>
+            <span>已加载 {filteredHistory.length} 项同步操作</span>
+            {hasMore && <Button variant="secondary" size="sm" disabled={loading} onClick={() => void loadMore()}>{loading ? '加载中…' : '加载更多'}</Button>}
           </div>
         )}
       </div>
