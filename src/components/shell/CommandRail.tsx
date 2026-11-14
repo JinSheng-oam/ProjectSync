@@ -19,6 +19,7 @@ interface CommandRailProps {
   roots: SyncRootDto[];
   conflicts: ConflictItemDto[];
   accounts: WebDavAccountDto[];
+  deviceName: string;
   onOpenWizard: () => void;
 }
 
@@ -28,6 +29,7 @@ export function CommandRail({
   roots,
   conflicts,
   accounts,
+  deviceName,
   onOpenWizard,
 }: CommandRailProps) {
   const unresolvedConflictsCount = conflicts.filter((c) => c.status === 'UNRESOLVED').length;
@@ -160,7 +162,7 @@ export function CommandRail({
             设备标识
           </span>
           <code className="font-mono text-[11px] text-slate-800 dark:text-slate-200 bg-white dark:bg-slate-800 px-1.5 py-0.5 rounded border border-slate-200 dark:border-slate-700">
-            Win11-Office-PC
+            {deviceName || '未设置'}
           </code>
         </div>
         <div className="flex items-center justify-between text-slate-600 dark:text-slate-400">

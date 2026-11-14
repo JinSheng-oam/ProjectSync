@@ -59,6 +59,7 @@ export function useSyncStore() {
   const [conflicts, setConflicts] = useState<ConflictItemDto[]>([]);
   const [tasks, setTasks] = useState<TaskDto[]>([]);
   const [history, setHistory] = useState<HistoryItemDto[]>([]);
+  const [deviceName, setDeviceName] = useState('');
   const [isWizardOpen, setIsWizardOpen] = useState(false);
   const [loading, setLoading] = useState(true);
   const [bannerAlert, setBannerAlert] = useState<string | null>(null);
@@ -94,8 +95,9 @@ export function useSyncStore() {
         api.listConflicts(),
         api.getPendingTasks(),
         api.querySyncHistory(),
+        api.getAppSettings(),
       ]);
-      const [rootsResult, accountsResult, conflictsResult, tasksResult, historyResult] = results;
+      const [rootsResult, accountsResult, conflictsResult, tasksResult, historyResult, settingsResult] = results;
       if (rootsResult.status === 'fulfilled') setRoots(rootsResult.value);
       if (accountsResult.status === 'fulfilled') setAccounts(accountsResult.value);
       if (conflictsResult.status === 'fulfilled') setConflicts(conflictsResult.value);
@@ -110,6 +112,7 @@ export function useSyncStore() {
         })));
       }
       if (historyResult.status === 'fulfilled') setHistory(historyResult.value);
+      if (settingsResult.status === 'fulfilled' && settingsResult.value) setDeviceName(settingsResult.value.deviceName);
       const failed = results.find((result) => result.status === 'rejected');
       if (failed?.status === 'rejected') console.error('Some ProjectSync data could not be refreshed', failed.reason);
     } catch (err: unknown) {
@@ -456,6 +459,7 @@ export function useSyncStore() {
     conflicts,
     tasks,
     history,
+    deviceName,
     isWizardOpen,
     setIsWizardOpen,
     loading,

@@ -27,6 +27,7 @@ export function App() {
     conflicts,
     tasks,
     history,
+    deviceName,
     isWizardOpen,
     setIsWizardOpen,
     loading,
@@ -54,15 +55,15 @@ export function App() {
 
   const [remoteProject, setRemoteProject] = useState<DiscoveredProject | null>(null);
   const handleSyncAll = () => {
-    roots.forEach((r) => handleSyncNow(r.id));
+    roots.filter((r) => r.enabled && r.status !== 'PAUSED').forEach((r) => handleSyncNow(r.id));
   };
 
   const handlePauseAll = () => {
-    roots.forEach((r) => handlePauseSync(r.id));
+    roots.filter((r) => r.enabled && r.status !== 'PAUSED').forEach((r) => handlePauseSync(r.id));
   };
 
   const handleResumeAll = () => {
-    roots.forEach((r) => handleResumeSync(r.id));
+    roots.filter((r) => r.enabled && r.status === 'PAUSED').forEach((r) => handleResumeSync(r.id));
   };
 
   const navTitles = {
@@ -85,6 +86,7 @@ export function App() {
         roots={roots}
         conflicts={conflicts}
         accounts={accounts}
+        deviceName={deviceName}
         onOpenWizard={() => setIsWizardOpen(true)}
       />
 
@@ -94,6 +96,7 @@ export function App() {
         <TopHeader
           title={navTitles[currentNav] || 'ProjectSync'}
           roots={roots}
+          accounts={accounts}
           theme={theme}
           onToggleTheme={toggleTheme}
           onSyncAll={handleSyncAll}
@@ -167,6 +170,7 @@ export function App() {
                 <ConflictCenter
                   conflicts={conflicts}
                   roots={roots}
+                  accounts={accounts}
                   onResolve={handleResolveConflict}
                   onExcludeFile={handleExcludeConflictFile}
                   aiSession={aiSession}

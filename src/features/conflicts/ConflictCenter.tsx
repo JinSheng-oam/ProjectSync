@@ -12,7 +12,7 @@ import {
   Sparkles,
   EyeOff,
 } from 'lucide-react';
-import { AiSettingsDto, ConflictItemDto, ConflictResolution, SyncRootDto } from '../../types/dto';
+import { AiSettingsDto, ConflictItemDto, ConflictResolution, SyncRootDto, WebDavAccountDto } from '../../types/dto';
 import { Button } from '../../components/common/UIComponents';
 import { api } from '../../services/api';
 import { AiMergeSession } from '../../stores/syncStore';
@@ -20,6 +20,7 @@ import { AiMergeSession } from '../../stores/syncStore';
 interface ConflictCenterProps {
   conflicts: ConflictItemDto[];
   roots: SyncRootDto[];
+  accounts: WebDavAccountDto[];
   onResolve: (conflictId: string, resolution: ConflictResolution) => Promise<void>;
   onExcludeFile: (conflictId: string) => Promise<void>;
   aiSession?: AiMergeSession | null;
@@ -34,6 +35,7 @@ interface ConflictCenterProps {
 export function ConflictCenter({
   conflicts,
   roots,
+  accounts,
   onResolve,
   onExcludeFile,
   aiSession,
@@ -62,6 +64,9 @@ export function ConflictCenter({
   const activeConflict = unresolvedConflicts.find((c) => c.id === selectedId) || unresolvedConflicts[0];
   const activeProjectName = activeConflict
     ? roots.find((root) => root.id === activeConflict.rootId)?.name
+    : undefined;
+  const activeAccount = activeConflict
+    ? accounts.find((account) => account.id === roots.find((root) => root.id === activeConflict.rootId)?.accountId)
     : undefined;
 
   useEffect(() => {
@@ -344,7 +349,7 @@ export function ConflictCenter({
                   <div className="space-y-2 text-xs text-slate-700 dark:text-slate-300">
                     <div className="flex justify-between border-b border-slate-200 dark:border-slate-700/60 pb-1">
                       <span className="text-slate-500 dark:text-slate-400">存储服务:</span>
-                      <span className="font-mono text-slate-900 dark:text-slate-100">hacdias/webdav</span>
+                      <span className="font-mono text-slate-900 dark:text-slate-100">{activeAccount?.name || 'WebDAV 节点'}</span>
                     </div>
                     <div className="flex justify-between border-b border-slate-200 dark:border-slate-700/60 pb-1">
                       <span className="text-slate-500 dark:text-slate-400">文件大小:</span>

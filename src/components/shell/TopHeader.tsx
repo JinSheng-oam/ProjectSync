@@ -1,4 +1,3 @@
-import { useState } from 'react';
 import {
   RefreshCw,
   Pause,
@@ -11,12 +10,13 @@ import {
   Sparkles,
 } from 'lucide-react';
 import { Button } from '../common/UIComponents';
-import { SyncRootDto } from '../../types/dto';
+import { SyncRootDto, WebDavAccountDto } from '../../types/dto';
 import { AiMergeSession } from '../../stores/syncStore';
 
 interface TopHeaderProps {
   title: string;
   roots: SyncRootDto[];
+  accounts: WebDavAccountDto[];
   theme: 'dark' | 'light';
   onToggleTheme: () => void;
   onSyncAll: () => void;
@@ -30,6 +30,7 @@ interface TopHeaderProps {
 export function TopHeader({
   title,
   roots,
+  accounts,
   theme,
   onToggleTheme,
   onSyncAll,
@@ -39,17 +40,19 @@ export function TopHeader({
   aiSession,
   onOpenAiMerge,
 }: TopHeaderProps) {
-  const [isOnline, setIsOnline] = useState(true);
-  const [allPaused, setAllPaused] = useState(false);
+  const enabledRoots = roots.filter((root) => root.enabled && root.status !== 'DISABLED');
+  const allPaused = enabledRoots.length > 0 && enabledRoots.every((root) => root.status === 'PAUSED');
+  const onlineCount = accounts.filter((account) => account.status === 'ONLINE').length;
+  const statusLabel = accounts.length === 0 || (onlineCount === 0 && accounts.some((account) => account.status === 'UNTESTED'))
+    ? '未检测'
+    : onlineCount === accounts.length ? '在线' : onlineCount > 0 ? '部分在线' : '离线';
   const isSyncingAny = roots.some((r) => r.status === 'SYNCING');
 
   const togglePause = () => {
     if (allPaused) {
       onResumeAll();
-      setAllPaused(false);
     } else {
       onPauseAll();
-      setAllPaused(true);
     }
   };
 
@@ -124,25 +127,16 @@ export function TopHeader({
           )}
         </button>
 
-        {/* Simulate Offline button */}
-        <button
-          type="button"
-          onClick={() => setIsOnline(!isOnline)}
-          title={isOnline ? '模拟离线状态' : '恢复在线连接'}
-          className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium border transition-colors shadow-soft-sm ${
-            isOnline
-              ? 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-700'
-              : 'bg-rose-50 dark:bg-rose-950/80 text-rose-700 dark:text-rose-300 border-rose-300 dark:border-rose-800'
-          }`}
-        >
-          {isOnline ? <Wifi className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" /> : <WifiOff className="w-3.5 h-3.5 text-rose-600 dark:text-rose-400" />}
-          <span>{isOnline ? '在线' : '离线'}</span>
-        </button>
+        <span title="WebDAV 节点最近一次连接状态" className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300">
+          {onlineCount > 0 ? <Wifi className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" /> : <WifiOff className="w-3.5 h-3.5 text-slate-500" />}
+          {statusLabel}
+        </span>
 
         <Button
           variant="secondary"
           size="sm"
           onClick={togglePause}
+          disabled={enabledRoots.length === 0}
           className="gap-1.5"
         >
           {allPaused ? <Play className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" /> : <Pause className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400" />}
