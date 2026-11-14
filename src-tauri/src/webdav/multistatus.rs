@@ -7,18 +7,42 @@ pub(super) fn percent_decode(value: &str) -> String {
 }
 
 pub(super) fn parse_multistatus(body: &[u8], base_url: &Url, request_url: &Url) -> AppResult<Vec<DavEntry>> {
+    #[derive(Default)]
+    struct Properties {
+        size: Option<u64>,
+        modified_at: Option<i64>,
+        etag: Option<String>,
+        is_collection: Option<bool>,
+        status: Option<u16>,
+    }
+
+    fn ends_with(stack: &[String], parts: &[&str]) -> bool {
+        stack.len() == parts.len() + 1
+            && stack[0] == "multistatus"
+            && stack[1..].iter().map(String::as_str).eq(parts.iter().copied())
+    }
+
+    fn captures_text(stack: &[String]) -> bool {
+        ends_with(stack, &["response", "href"])
+            || ends_with(stack, &["response", "status"])
+            || ends_with(stack, &["response", "propstat", "status"])
+            || ["getcontentlength", "getlastmodified", "getetag"].iter().any(|tag|
+                ends_with(stack, &["response", "propstat", "prop", tag]))
+    }
+
     let mut reader = Reader::from_reader(body);
-    reader.config_mut().trim_text(true);
     let mut buffer = Vec::new();
     let mut stack: Vec<String> = Vec::new();
     let mut current: Option<DavEntry> = None;
+    let mut properties = Properties::default();
+    let mut response_status = None;
+    let mut value = String::new();
     let mut entries = Vec::new();
-    let mut propstat_ok = true;
     loop {
         match reader.read_event_into(&mut buffer) {
             Ok(Event::Start(event)) => {
                 let name = local_name(event.name().as_ref());
-                if name == "response" {
+                if name == "response" && stack.last().is_some_and(|tag| tag == "multistatus") {
                     current = Some(DavEntry {
                         path: String::new(),
                         size: 0,
@@ -26,65 +50,71 @@ pub(super) fn parse_multistatus(body: &[u8], base_url: &Url, request_url: &Url) 
                         etag: None,
                         is_collection: false,
                     });
+                    response_status = None;
                 }
-                if name == "propstat" {
-                    propstat_ok = true;
+                if name == "propstat" && ends_with(&stack, &["response"]) {
+                    properties = Properties::default();
                 }
-                if name == "collection" && stack.iter().any(|tag| tag == "resourcetype") {
-                    if let Some(entry) = current.as_mut() {
-                        entry.is_collection = true;
-                    }
+                if name == "resourcetype" && ends_with(&stack, &["response", "propstat", "prop"]) {
+                    properties.is_collection = Some(false);
+                }
+                if name == "collection" && ends_with(&stack, &["response", "propstat", "prop", "resourcetype"]) {
+                    properties.is_collection = Some(true);
                 }
                 stack.push(name);
+                if captures_text(&stack) { value.clear(); }
             }
             Ok(Event::Empty(event)) => {
                 let name = local_name(event.name().as_ref());
-                if name == "collection" {
-                    if let Some(entry) = current.as_mut() {
-                        entry.is_collection = true;
-                    }
+                if name == "resourcetype" && ends_with(&stack, &["response", "propstat", "prop"]) {
+                    properties.is_collection = Some(false);
+                } else if name == "collection" && ends_with(&stack, &["response", "propstat", "prop", "resourcetype"]) {
+                    properties.is_collection = Some(true);
                 }
             }
             Ok(Event::Text(event)) => {
-                let text = event.unescape().map_err(|e| {
-                    AppError::new(
-                        "DAV_INVALID_RESPONSE",
-                        format!("PROPFIND XML 解码失败：{e}"),
-                    )
-                })?;
-                let value = text.trim();
-                let tag = stack.last().map(String::as_str).unwrap_or("");
-                if tag == "status" && stack.iter().any(|v| v == "propstat") {
-                    propstat_ok = value
-                        .split_whitespace()
-                        .nth(1)
-                        .and_then(|s| s.parse::<u16>().ok())
-                        .is_some_and(|s| (200..300).contains(&s));
+                if captures_text(&stack) {
+                    value.push_str(&event.unescape().map_err(|e|
+                        AppError::new("DAV_INVALID_RESPONSE", format!("PROPFIND XML 解码失败：{e}")))?);
                 }
-                if let Some(entry) = current.as_mut() {
-                    if tag == "href" {
-                        // href belongs to the response element, not a propstat. Servers may
-                        // return it before a later 404 propstat for unsupported properties.
-                        entry.path = normalize_href(value);
-                    } else if propstat_ok {
-                        match tag {
-                            "getcontentlength" => entry.size = value.parse().unwrap_or(0),
-                            "getlastmodified" => {
-                                entry.modified_at = chrono::DateTime::parse_from_rfc2822(value)
-                                    .map(|d| d.timestamp_millis())
-                                    .unwrap_or_default()
-                            }
-                            "getetag" if !value.is_empty() => entry.etag = Some(value.to_owned()),
-                            _ => {}
-                        }
-                    }
+            }
+            Ok(Event::CData(event)) => {
+                if captures_text(&stack) {
+                    value.push_str(&reader.decoder().decode(event.as_ref()).map_err(|e|
+                        AppError::new("DAV_INVALID_RESPONSE", format!("PROPFIND XML 解码失败：{e}")))?);
                 }
             }
             Ok(Event::End(event)) => {
                 let name = local_name(event.name().as_ref());
-                if name == "response" {
+                let text = value.trim();
+                if ends_with(&stack, &["response", "href"]) {
+                    if let Some(entry) = current.as_mut() {
+                        entry.path = normalize_href(text);
+                    }
+                } else if ends_with(&stack, &["response", "status"]) {
+                    response_status = text.split_whitespace().nth(1).and_then(|s| s.parse::<u16>().ok());
+                } else if ends_with(&stack, &["response", "propstat", "status"]) {
+                    properties.status = text.split_whitespace().nth(1).and_then(|s| s.parse::<u16>().ok());
+                } else if ends_with(&stack, &["response", "propstat", "prop", "getcontentlength"]) {
+                    properties.size = text.parse().ok();
+                } else if ends_with(&stack, &["response", "propstat", "prop", "getlastmodified"]) {
+                    properties.modified_at = chrono::DateTime::parse_from_rfc2822(text).ok().map(|d| d.timestamp_millis());
+                } else if ends_with(&stack, &["response", "propstat", "prop", "getetag"]) && !text.is_empty() {
+                    properties.etag = Some(text.to_owned());
+                }
+                if ends_with(&stack, &["response", "propstat"]) {
+                    if properties.status.is_some_and(|status| (200..300).contains(&status)) {
+                        if let Some(entry) = current.as_mut() {
+                            if let Some(size) = properties.size { entry.size = size; }
+                            if let Some(modified_at) = properties.modified_at { entry.modified_at = modified_at; }
+                            if let Some(etag) = properties.etag.take() { entry.etag = Some(etag); }
+                            if let Some(is_collection) = properties.is_collection { entry.is_collection = is_collection; }
+                        }
+                    }
+                }
+                if name == "response" && ends_with(&stack, &["response"]) {
                     if let Some(entry) = current.take() {
-                        if !entry.path.is_empty() {
+                        if !entry.path.is_empty() && response_status.is_none_or(|status| (200..300).contains(&status)) {
                             entries.push(entry);
                         }
                     }
@@ -163,5 +193,26 @@ mod browse_parser_tests {
                 ("/readme.txt".into(), false)
             ]
         );
+    }
+
+    #[test]
+    fn preserves_split_text_and_ignores_failed_properties_and_nested_hrefs() {
+        let client = WebDavClient::new("https://example.test/dav/", "u", "p".into(), true).unwrap();
+        let request = client.url_for("/").unwrap();
+        let xml = br#"<D:multistatus xmlns:D="DAV:">
+          <D:response>
+            <D:href>/dav/a&amp;<![CDATA[b]]>.txt</D:href>
+            <D:error><D:href>/dav/wrong.txt</D:href><D:collection/></D:error>
+            <D:propstat><D:prop><D:getetag>"bad"</D:getetag><D:resourcetype><D:collection/></D:resourcetype></D:prop><D:status>HTTP/1.1 404 Not Found</D:status></D:propstat>
+            <D:propstat><D:prop><D:getetag>"a&amp;<![CDATA[b]]>"</D:getetag><D:getcontentlength>12</D:getcontentlength><D:resourcetype/></D:prop><D:status>HTTP/1.1 200 OK</D:status></D:propstat>
+          </D:response>
+          <D:response><D:href>/dav/gone</D:href><D:status>HTTP/1.1 404 Not Found</D:status></D:response>
+        </D:multistatus>"#;
+        let rows = parse_multistatus(xml, &client.base_url, &request).unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(href_to_dav_path(&client, &rows[0].path, "/").unwrap(), "/a&b.txt");
+        assert_eq!(rows[0].etag.as_deref(), Some("\"a&b\""));
+        assert_eq!(rows[0].size, 12);
+        assert!(!rows[0].is_collection);
     }
 }
