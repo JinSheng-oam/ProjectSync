@@ -54,10 +54,20 @@ impl Database {
             reconcile_migration_line_endings(&pool, &migrator).await?;
         }
 
-        migrator
-            .run(&pool)
-            .await
+        // SQLite only changes foreign_keys outside a transaction. Migration 5
+        // rebuilds the parent table while retaining every dependent row.
+        let mut migration_conn = pool.acquire().await?;
+        sqlx::query("PRAGMA foreign_keys = OFF")
+            .execute(&mut *migration_conn)
+            .await?;
+        let migration_result = migrator.run(&mut *migration_conn).await;
+        let restore_result = sqlx::query("PRAGMA foreign_keys = ON")
+            .execute(&mut *migration_conn)
+            .await;
+        restore_result?;
+        migration_result
             .map_err(|e| AppError::new("DATABASE_MIGRATION_FAILED", e.to_string()))?;
+        drop(migration_conn);
         let db = Self {
             pool,
             path: path.to_path_buf(),

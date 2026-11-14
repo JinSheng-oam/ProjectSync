@@ -59,24 +59,25 @@ impl Database {
     }
 
     pub async fn delete_account(&self, id: &str) -> AppResult<String> {
-        let account = self.account(id).await?;
-        let references: i64 =
-            sqlx::query("SELECT COUNT(*) AS count FROM sync_roots WHERE account_id=?")
-                .bind(id)
-                .fetch_one(&self.pool)
-                .await?
-                .get("count");
-        if references > 0 {
-            return Err(AppError::new(
-                "ACCOUNT_IN_USE",
-                "仍有同步项目使用此账号，不能删除",
-            ));
-        }
-        sqlx::query("DELETE FROM webdav_accounts WHERE id=?")
+        // Keep deleted projects and their history, while atomically refusing
+        // to remove an account that still has an active binding.
+        let reference = sqlx::query_scalar::<_, String>(
+            "DELETE FROM webdav_accounts WHERE id=? AND NOT EXISTS
+             (SELECT 1 FROM sync_roots WHERE account_id=? AND deleted_at IS NULL)
+             RETURNING credential_ref",
+        )
             .bind(id)
-            .execute(&self.pool)
+            .bind(id)
+            .fetch_optional(&self.pool)
             .await?;
-        Ok(account.credential_ref)
+        if let Some(reference) = reference {
+            return Ok(reference);
+        }
+        let _ = self.account(id).await?;
+        Err(AppError::new(
+            "ACCOUNT_IN_USE",
+            "仍有同步项目使用此账号，不能删除",
+        ))
     }
 
     pub async fn save_capabilities(
