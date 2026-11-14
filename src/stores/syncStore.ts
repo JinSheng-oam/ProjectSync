@@ -68,6 +68,7 @@ export function useSyncStore() {
   const [mergeResults, setMergeResults] = useState({ applied: 0, skipped: 0, failed: 0 });
   const refreshInFlight = useRef(false);
   const progressByTaskId = useRef(new Map<string, number>());
+  const aiOperationInFlight = useRef(false);
 
   useEffect(() => {
     if (typeof document !== 'undefined') {
@@ -329,7 +330,10 @@ export function useSyncStore() {
   }, [aiMergeQueue, aiSession, conflicts, generateAiMerge]);
 
   const refineAiMerge = async (instruction: string, currentContent?: string) => {
-    if (aiSession?.status !== 'ready' || !aiSession.preview) return;
+    if (aiSession?.status !== 'ready' || !aiSession.preview || aiOperationInFlight.current) return;
+    aiOperationInFlight.current = true;
+    const conflictId = aiSession.conflictId;
+    const previewId = aiSession.preview.previewId;
     const userMsg: AiMergeMessage = {
       id: `u-${Date.now()}`,
       role: 'user',
@@ -338,7 +342,7 @@ export function useSyncStore() {
     };
 
     setAiSession((prev) => {
-      if (!prev) return null;
+      if (!prev || prev.conflictId !== conflictId || prev.preview?.previewId !== previewId) return prev;
       return {
         ...prev,
         status: 'merging',
@@ -349,8 +353,8 @@ export function useSyncStore() {
 
     try {
       const updatedPreview = await api.refineAiMerge({
-        conflictId: aiSession.conflictId,
-        previewId: aiSession.preview.previewId,
+        conflictId,
+        previewId,
         instruction,
         currentContent,
       });
@@ -363,7 +367,7 @@ export function useSyncStore() {
       };
 
       setAiSession((prev) => {
-        if (!prev || prev.conflictId !== aiSession.conflictId) return prev;
+        if (!prev || prev.conflictId !== conflictId || prev.preview?.previewId !== previewId) return prev;
         return {
           ...prev,
           status: 'ready',
@@ -375,20 +379,23 @@ export function useSyncStore() {
     } catch (err: unknown) {
       const msg = getErrorMessage(err, 'AI 调整合并内容失败');
       setAiSession((prev) => {
-        if (!prev) return null;
+        if (!prev || prev.conflictId !== conflictId || prev.preview?.previewId !== previewId) return prev;
         return {
           ...prev,
           status: needsFreshMerge(msg) ? 'error' : 'ready',
           error: `调整失败: ${msg}`,
         };
       });
+    } finally {
+      aiOperationInFlight.current = false;
     }
   };
 
   const applyAiMerge = async (finalContent?: string) => {
-    if (aiSession?.status !== 'ready' || !aiSession.preview) return;
+    if (aiSession?.status !== 'ready' || !aiSession.preview || aiOperationInFlight.current) return;
+    aiOperationInFlight.current = true;
     const { conflictId, preview } = aiSession;
-    setAiSession((prev) => (prev ? { ...prev, status: 'applying' } : null));
+    setAiSession((prev) => (prev?.conflictId === conflictId && prev.preview?.previewId === preview.previewId ? { ...prev, status: 'applying' } : prev));
     try {
       let activePreviewId = preview.previewId;
       if (finalContent !== undefined && finalContent !== preview.mergedContent) {
@@ -407,10 +414,13 @@ export function useSyncStore() {
       setBannerAlert(result.message);
       setTimeout(() => setBannerAlert(null), 7000);
       await refreshAll();
-      setAiSession(null);
+      setAiSession((prev) => (prev?.conflictId === conflictId && prev.preview?.previewId === preview.previewId ? null : prev));
     } catch (err: unknown) {
       const msg = getErrorMessage(err, '写入本地与 WebDAV 失败');
-      setAiSession((prev) => (prev ? { ...prev, status: needsFreshMerge(msg) ? 'error' : 'ready', error: msg } : null));
+      setAiSession((prev) => (prev?.conflictId === conflictId && prev.preview?.previewId === preview.previewId
+        ? { ...prev, status: needsFreshMerge(msg) ? 'error' : 'ready', error: msg } : prev));
+    } finally {
+      aiOperationInFlight.current = false;
     }
   };
 

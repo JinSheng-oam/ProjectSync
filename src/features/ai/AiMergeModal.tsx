@@ -91,13 +91,13 @@ export function AiMergeModal({
   };
 
   const handleResetToPreview = () => {
-    if (session.preview?.mergedContent) {
+    if (session.preview?.mergedContent !== undefined) {
       setLocalDraftContent(session.preview.mergedContent);
     }
   };
 
   const handleSendInstruction = async () => {
-    if (!agentInstruction.trim() || session.status === 'merging') return;
+    if (!agentInstruction.trim() || session.status !== 'ready' || !session.preview) return;
     const instruction = agentInstruction.trim();
     setAgentInstruction('');
     await onRefine(instruction, localDraftContent);
