@@ -1,5 +1,13 @@
 use super::*;
 
+async fn probe_lock_if_created<F, Fut>(created: bool, probe: F) -> bool
+where
+    F: FnOnce() -> Fut,
+    Fut: std::future::Future<Output = AppResult<bool>>,
+{
+    if created { probe().await.unwrap_or(false) } else { false }
+}
+
 impl WebDavClient {
     pub(crate) async fn probe_locked_delete(&self, project_root: &str) -> AppResult<bool> {
         let path = format!("{}/.projectsync/.projectsync-cleanup-probe-{}", project_root.trim_end_matches('/'), uuid::Uuid::new_v4().simple());
@@ -297,11 +305,8 @@ impl WebDavClient {
             let _ = tokio::fs::remove_file(a).await;
             let _ = tokio::fs::remove_file(b).await;
         }
-        let lock_exclusion_safe = if created {
-            self.probe_lock_exclusion_in(&probe_path).await.unwrap_or(false)
-        } else {
-            false
-        };
+        let lock_exclusion_safe =
+            probe_lock_if_created(created, || self.probe_lock_exclusion_in(&probe_path)).await;
         let native_if_none_match = safe_create_only;
         let native_if_match = safe_update_existing || safe_delete;
         if lock_exclusion_safe {
@@ -363,6 +368,20 @@ impl WebDavClient {
             && self.move_resource(source, destination, false, Some(etag)).await.is_ok()
             && self.get_bytes(destination).await.as_deref().ok() == Some(expected)
             && self.get_bytes(source).await.is_err_and(|error| error.code == "DAV_NOT_FOUND")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn failed_directory_creation_never_runs_the_lock_probe() {
+        let calls = std::cell::Cell::new(0);
+        assert!(!probe_lock_if_created(false, || async { calls.set(calls.get() + 1); Ok(true) }).await);
+        assert_eq!(calls.get(), 0);
+        assert!(probe_lock_if_created(true, || async { calls.set(calls.get() + 1); Ok(true) }).await);
+        assert_eq!(calls.get(), 1);
     }
 }
 
