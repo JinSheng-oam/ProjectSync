@@ -24,9 +24,9 @@ use crate::{
         SyncAction, SyncRuleDto, SyncSummaryDto, WebDavCapabilities,
     },
     filesystem::{
-        atomic_replace, copy_to_trash, ensure_safe_parent, hash_file, move_to_trash, scan_local,
-        scan_local_cached_excluding, is_generated_conflict_copy,
-        move_generated_conflict_copies_to_trash, RuleEngine,
+        atomic_replace, copy_to_trash_async, ensure_safe_parent, hash_file, hash_file_async, move_to_trash, move_to_trash_async, scan_local_async,
+        scan_local_cached_excluding_async, is_generated_conflict_copy,
+        move_generated_conflict_copies_to_trash_async, RuleEngine,
     },
     security::{normalize_remote_path, path_key, unix_ms, validate_relative_path},
     storage::Database,
@@ -370,7 +370,7 @@ impl SyncCoordinator {
     async fn sync_locked(&self, root: &RootRecord, summary: &mut SyncSummaryDto) -> AppResult<()> {
         self.ensure_sync_active(&root.id).await?;
         let git_tracked_paths = if root.exclude_git_tracked {
-            crate::git::tracked_paths(&root.local_path)?
+            crate::git::tracked_paths_async(&root.local_path).await?
         } else {
             HashSet::new()
         };
@@ -402,7 +402,7 @@ impl SyncCoordinator {
             );
         }
         let cleaned_conflict_copies =
-            move_generated_conflict_copies_to_trash(&root.local_path, &self.data_dir, &root.id)?;
+            move_generated_conflict_copies_to_trash_async(&root.local_path, &self.data_dir, &root.id).await?;
         if cleaned_conflict_copies > 0 {
             tracing::info!(
                 root_id = %root.id,
@@ -437,12 +437,12 @@ impl SyncCoordinator {
             .apply_rule_state(&root.id, &ignored, &reenabled)
             .await?;
         self.db.set_root_status(&root.id, "SCANNING_LOCAL").await?;
-        let local = scan_local_cached_excluding(
+        let local = scan_local_cached_excluding_async(
             &root.local_path,
             &rules,
             &old_baseline,
             &git_tracked_paths,
-        )?;
+        ).await?;
         self.ensure_sync_active(&root.id).await?;
         self.db.set_root_status(&root.id, "SCANNING_REMOTE").await?;
         let remote = scan_remote(

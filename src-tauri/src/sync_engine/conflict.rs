@@ -17,8 +17,8 @@ impl SyncCoordinator {
         let rules = self.db.rules(&root_id).await?;
         let target = ensure_safe_parent(&root.local_path, &path)?;
         let remote_path = remote_file_path(&root.remote_path, &path)?;
-        let current_local = if target.exists() {
-            Some(hash_file(&target)?)
+        let current_local = if tokio::fs::try_exists(&target).await? {
+            Some(hash_file_async(&target).await?)
         } else {
             None
         };
@@ -58,7 +58,7 @@ impl SyncCoordinator {
         let message = match resolution {
             ConflictResolution::KeepLocal => {
                 let local_path = target.clone();
-                if !local_path.exists() {
+                if !tokio::fs::try_exists(&local_path).await? {
                     return Err(AppError::new("LOCAL_NOT_FOUND", "本地冲突版本不存在"));
                 }
                 if current_remote.is_some() {
@@ -88,10 +88,10 @@ impl SyncCoordinator {
                     )
                     .await?;
                 }
-                let hash = hash_file(&local_path)?;
+                let hash = hash_file_async(&local_path).await?;
                 let observed =
                     verify_remote_hash(&client, &remote_path, &hash).await?;
-                let local = scan_local(&root.local_path, &rules)?
+                let local = scan_local_async(&root.local_path, &rules).await?
                     .into_iter()
                     .find(|e| e.relative_path == path);
                 self.db
@@ -112,15 +112,15 @@ impl SyncCoordinator {
                         uuid::Uuid::new_v4()
                     ));
                     client.get_to_file(&remote_path, &stage).await?;
-                    let hash = hash_file(&stage)?;
+                    let hash = hash_file_async(&stage).await?;
                     if Some(hash.as_str()) != remote_hash.as_deref() {
                         return Err(AppError::retryable(
                             "HASH_MISMATCH",
                             "远端冲突版本读取后发生变化",
                         ));
                     }
-                    if target.exists() {
-                        move_to_trash(&self.data_dir, &root.id, &path, &target)?;
+                    if tokio::fs::try_exists(&target).await? {
+                        move_to_trash_async(&self.data_dir, &root.id, &path, &target).await?;
                     }
                     atomic_replace(&stage, &target)?;
                     let local = LocalEntry {
@@ -128,21 +128,21 @@ impl SyncCoordinator {
                         path_key: path_key(&path),
                         absolute_path: target.clone(),
                         hash: hash.clone(),
-                        size: fs::metadata(&target)?.len(),
+                        size: tokio::fs::metadata(&target).await?.len(),
                         mtime_ns: unix_ms() * 1_000_000,
                     };
                     self.db
                         .update_base(&root.id, &path, Some(&hash), Some(&local), Some(remote))
                         .await?;
                 } else {
-                    if target.exists() {
-                        if Some(hash_file(&target)?.as_str()) != local_hash.as_deref() {
+                    if tokio::fs::try_exists(&target).await? {
+                        if Some(hash_file_async(&target).await?.as_str()) != local_hash.as_deref() {
                             return Err(AppError::retryable(
                                 "LOCAL_FILE_CHANGED",
                                 "确认期间本地旧文件发生变化；本地文件已保留",
                             ));
                         }
-                        move_to_trash(&self.data_dir, &root.id, &path, &target)?;
+                        move_to_trash_async(&self.data_dir, &root.id, &path, &target).await?;
                     }
                     self.db
                         .update_base(&root.id, &path, None, None, None)
@@ -170,7 +170,7 @@ impl SyncCoordinator {
                         .await?;
                         verify_remote_hash(&client, &conflict_remote, local_hash).await?;
                     } else {
-                        copy_to_trash(&self.data_dir, &root.id, &path, "keep-both", &target)?;
+                        copy_to_trash_async(&self.data_dir, &root.id, &path, "keep-both", &target).await?;
                     }
                     if let Some(remote) = current_remote.as_ref() {
                         let stage = target.with_file_name(format!(
@@ -178,13 +178,13 @@ impl SyncCoordinator {
                             uuid::Uuid::new_v4()
                         ));
                         client.get_to_file(&remote_path, &stage).await?;
-                        if hash_file(&stage)? != remote.hash {
+                        if hash_file_async(&stage).await? != remote.hash {
                             return Err(AppError::retryable(
                                 "HASH_MISMATCH",
                                 "读取远端版本时内容发生变化；冲突副本已保留",
                             ));
                         }
-                        if hash_file(&target)? != local_hash {
+                        if hash_file_async(&target).await? != local_hash {
                             return Err(AppError::retryable(
                                 "LOCAL_FILE_CHANGED",
                                 "保存本地冲突版本后原文件发生变化",
@@ -222,7 +222,7 @@ impl SyncCoordinator {
                         let observed =
                             verify_remote_hash(&client, &remote_path, local_hash)
                                 .await?;
-                        let local = scan_local(&root.local_path, &rules)?
+                        let local = scan_local_async(&root.local_path, &rules).await?
                             .into_iter()
                             .find(|e| e.relative_path == path);
                         self.db
@@ -246,7 +246,7 @@ impl SyncCoordinator {
                         uuid::Uuid::new_v4()
                     ));
                     client.get_to_file(&remote_path, &stage).await?;
-                    if hash_file(&stage)? != remote.hash {
+                    if hash_file_async(&stage).await? != remote.hash {
                         return Err(AppError::retryable(
                             "HASH_MISMATCH",
                             "远端版本读取后发生变化",

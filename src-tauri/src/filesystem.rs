@@ -112,6 +112,25 @@ pub fn scan_local(root: &Path, rules: &[SyncRuleDto]) -> AppResult<Vec<LocalEntr
     scan_local_cached(root, rules, &[])
 }
 
+pub async fn scan_local_async(root: &Path, rules: &[SyncRuleDto]) -> AppResult<Vec<LocalEntry>> {
+    scan_local_cached_excluding_async(root, rules, &[], &HashSet::new()).await
+}
+
+pub async fn scan_local_cached_excluding_async(
+    root: &Path,
+    rules: &[SyncRuleDto],
+    cache: &[crate::domain::BaselineEntry],
+    excluded_paths: &HashSet<String>,
+) -> AppResult<Vec<LocalEntry>> {
+    let root = root.to_owned();
+    let rules = rules.to_vec();
+    let cache = cache.to_vec();
+    let excluded_paths = excluded_paths.clone();
+    tokio::task::spawn_blocking(move || scan_local_cached_excluding(&root, &rules, &cache, &excluded_paths))
+        .await
+        .map_err(|error| AppError::new("LOCAL_SCAN_FAILED", format!("本地扫描任务失败：{error}")))?
+}
+
 pub fn scan_local_cached(
     root: &Path,
     rules: &[SyncRuleDto],
@@ -412,10 +431,30 @@ pub fn move_generated_conflict_copies_to_trash(
     Ok(moved)
 }
 
+pub async fn move_generated_conflict_copies_to_trash_async(
+    root: &Path,
+    data_dir: &Path,
+    root_id: &str,
+) -> AppResult<usize> {
+    let root = root.to_owned();
+    let data_dir = data_dir.to_owned();
+    let root_id = root_id.to_owned();
+    tokio::task::spawn_blocking(move || move_generated_conflict_copies_to_trash(&root, &data_dir, &root_id))
+        .await
+        .map_err(|error| AppError::new("LOCAL_TRASH_FAILED", format!("历史冲突副本整理失败：{error}")))?
+}
+
 pub fn hash_file(path: &Path) -> AppResult<String> {
     let mut file = File::open(path)
         .map_err(|e| AppError::new("LOCAL_FILE_READ", format!("无法读取文件：{e}")))?;
     hash_reader(&mut file)
+}
+
+pub async fn hash_file_async(path: &Path) -> AppResult<String> {
+    let path = path.to_owned();
+    tokio::task::spawn_blocking(move || hash_file(&path))
+        .await
+        .map_err(|error| AppError::new("LOCAL_FILE_READ", format!("计算文件摘要失败：{error}")))?
 }
 
 fn hash_reader(reader: &mut impl Read) -> AppResult<String> {
@@ -639,6 +678,15 @@ pub fn move_to_trash(
     Ok(destination)
 }
 
+pub async fn move_to_trash_async(data_dir: &Path, root_id: &str, relative_path: &str, source: &Path) -> AppResult<PathBuf> {
+    let data_dir = data_dir.to_owned();
+    let root_id = root_id.to_owned();
+    let relative_path = relative_path.to_owned();
+    let source = source.to_owned();
+    tokio::task::spawn_blocking(move || move_to_trash(&data_dir, &root_id, &relative_path, &source))
+        .await.map_err(|error| AppError::new("LOCAL_TRASH_FAILED", format!("本地回收任务失败：{error}")))?
+}
+
 pub fn unique_conflict_path(original: &str, device_name: &str) -> AppResult<String> {
     let normalized = validate_relative_path(original)?;
     let source = Path::new(&normalized);
@@ -732,6 +780,16 @@ pub fn copy_to_trash(
         ));
     }
     Ok(destination)
+}
+
+pub async fn copy_to_trash_async(data_dir: &Path, root_id: &str, relative_path: &str, label: &str, source: &Path) -> AppResult<PathBuf> {
+    let data_dir = data_dir.to_owned();
+    let root_id = root_id.to_owned();
+    let relative_path = relative_path.to_owned();
+    let label = label.to_owned();
+    let source = source.to_owned();
+    tokio::task::spawn_blocking(move || copy_to_trash(&data_dir, &root_id, &relative_path, &label, &source))
+        .await.map_err(|error| AppError::new("LOCAL_TRASH_FAILED", format!("本地备份任务失败：{error}")))?
 }
 
 #[cfg(test)]

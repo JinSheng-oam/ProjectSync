@@ -12,8 +12,10 @@ impl SyncCoordinator {
 
         let root = self.db.root(&root_id).await?;
         let target = ensure_safe_parent(&root.local_path, &path)?;
-        if target.symlink_metadata().is_ok() {
-            return Err(AppError::new("LOCAL_FILE_CHANGED", "本地原位置已有文件，未覆盖"));
+        match tokio::fs::symlink_metadata(&target).await {
+            Ok(_) => return Err(AppError::new("LOCAL_FILE_CHANGED", "本地原位置已有文件，未覆盖")),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => return Err(error.into()),
         }
         let (account, client) = self.client_for(&root.account_id).await?;
         let remote = read_remote_snapshot(&client, &root.remote_path, &path).await?;
@@ -227,7 +229,7 @@ impl SyncCoordinator {
                     .local
                     .as_ref()
                     .ok_or_else(|| AppError::new("LOCAL_FILE_CHANGED", "上传源文件已不存在"))?;
-                if hash_file(&local.absolute_path)? != local.hash {
+                if hash_file_async(&local.absolute_path).await? != local.hash {
                     return Err(AppError::retryable(
                         "LOCAL_FILE_CHANGED",
                         "上传期间本地文件发生变化",
@@ -267,7 +269,7 @@ impl SyncCoordinator {
                 }
                 let observed =
                     verify_remote_hash(client, &destination, &local.hash).await?;
-                if hash_file(&local.absolute_path)? != local.hash {
+                if hash_file_async(&local.absolute_path).await? != local.hash {
                     return Err(AppError::retryable(
                         "LOCAL_FILE_CHANGED",
                         "上传完成后本地文件已再次变化；基准未更新",
@@ -290,7 +292,7 @@ impl SyncCoordinator {
                     .as_ref()
                     .ok_or_else(|| AppError::new("DAV_NOT_FOUND", "远端文件已不存在"))?;
                 let target = ensure_safe_parent(&root.local_path, &item.path)?;
-                if item.action == SyncAction::DownloadNew && target.exists() {
+                if item.action == SyncAction::DownloadNew && tokio::fs::try_exists(&target).await? {
                     return Err(AppError::new(
                         "LOCAL_FILE_CHANGED",
                         "下载目标已由本地新文件占用",
@@ -303,7 +305,7 @@ impl SyncCoordinator {
                 let size = client
                     .get_to_file_with_progress(&destination, &staging, Some(progress))
                     .await?;
-                let hash = hash_file(&staging)?;
+                let hash = hash_file_async(&staging).await?;
                 if hash != remote.hash {
                     return Err(AppError::retryable(
                         "HASH_MISMATCH",
@@ -322,14 +324,14 @@ impl SyncCoordinator {
                 }
                 if item.action == SyncAction::DownloadUpdate {
                     if let Some(local) = item.local.as_ref() {
-                        if !target.exists() || hash_file(&target)? != local.hash {
+                        if !tokio::fs::try_exists(&target).await? || hash_file_async(&target).await? != local.hash {
                             return Err(AppError::retryable(
                                 "LOCAL_FILE_CHANGED",
                                 "下载期间本地文件发生变化；未替换",
                             ));
                         }
                     }
-                } else if target.exists() {
+                } else if tokio::fs::try_exists(&target).await? {
                     return Err(AppError::new(
                         "LOCAL_FILE_CHANGED",
                         "下载目标已存在；未覆盖",
@@ -340,7 +342,7 @@ impl SyncCoordinator {
                 } else {
                     atomic_replace(&staging, &target)?;
                 }
-                let verified = hash_file(&target)?;
+                let verified = hash_file_async(&target).await?;
                 if verified != remote.hash {
                     return Err(AppError::new(
                         "HASH_MISMATCH",
@@ -381,7 +383,7 @@ impl SyncCoordinator {
                         ));
                     }
                 }
-                if hash_file(&local.absolute_path)? != local.hash {
+                if hash_file_async(&local.absolute_path).await? != local.hash {
                     return Err(AppError::retryable(
                         "LOCAL_FILE_CHANGED",
                         "本地文件在同步期间发生变化",

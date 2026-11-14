@@ -14,7 +14,7 @@ impl SyncCoordinator {
         if name.is_empty() {
             return Err(AppError::new("ROOT_NAME_INVALID", "项目名称不能为空"));
         }
-        let local = fs::canonicalize(&local_path).map_err(|e| {
+        let local = tokio::fs::canonicalize(&local_path).await.map_err(|e| {
             AppError::new(
                 "LOCAL_ROOT_INVALID",
                 format!("本地目录不存在或无法访问：{e}"),
@@ -92,7 +92,7 @@ impl SyncCoordinator {
                     .data_dir
                     .join("staging")
                     .join(format!("manifest-{}.json", uuid::Uuid::new_v4()));
-                fs::create_dir_all(path.parent().unwrap_or(&self.data_dir))?;
+                tokio::fs::create_dir_all(path.parent().unwrap_or(&self.data_dir)).await?;
                 let bytes = serde_json::to_vec_pretty(&manifest)
                     .map_err(|e| AppError::new("SERIALIZATION_ERROR", e.to_string()))?;
                 tokio::fs::write(&path, bytes).await?;
@@ -195,7 +195,7 @@ impl SyncCoordinator {
         exclude_git_tracked: bool,
     ) -> AppResult<InitialSyncPreviewDto> {
         let _ = RuleEngine::compile(rules)?;
-        let local_root = fs::canonicalize(local_path).map_err(|e| {
+        let local_root = tokio::fs::canonicalize(local_path).await.map_err(|e| {
             AppError::new(
                 "LOCAL_ROOT_INVALID",
                 format!("本地目录不存在或无法访问：{e}"),
@@ -205,11 +205,11 @@ impl SyncCoordinator {
         let (account, client) = self.client_for(account_id).await?;
         let capabilities = account.capabilities.unwrap_or_else(unsafe_capabilities);
         let git_tracked_paths = if exclude_git_tracked {
-            crate::git::tracked_paths(&local_root)?
+            crate::git::tracked_paths_async(&local_root).await?
         } else {
             HashSet::new()
         };
-        let local = scan_local_cached_excluding(&local_root, rules, &[], &git_tracked_paths)?;
+        let local = scan_local_cached_excluding_async(&local_root, rules, &[], &git_tracked_paths).await?;
         let remote =
             match scan_remote(
                 &client,

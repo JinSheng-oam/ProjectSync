@@ -41,8 +41,8 @@ pub async fn check_local_directory(path: String) -> ApiResult<()> {
 }
 
 #[tauri::command]
-pub fn explain_sync_rule(path: String, rules: Vec<SyncRuleDto>, local_path: Option<String>, exclude_git_tracked: Option<bool>) -> ApiResult<String> {
-    api((|| {
+pub async fn explain_sync_rule(path: String, rules: Vec<SyncRuleDto>, local_path: Option<String>, exclude_git_tracked: Option<bool>) -> ApiResult<String> {
+    api(async {
         let path = validate_relative_path(&path.replace('\\', "/"))?;
         let engine = RuleEngine::compile(&rules)?;
         if path
@@ -57,7 +57,7 @@ pub fn explain_sync_rule(path: String, rules: Vec<SyncRuleDto>, local_path: Opti
         if exclude_git_tracked.unwrap_or(false) {
             let local_path = local_path.as_deref().filter(|path| !path.trim().is_empty())
                 .ok_or_else(|| crate::domain::AppError::new("LOCAL_ROOT_INVALID", "请先选择本地目录"))?;
-            if crate::git::tracked_paths(std::path::Path::new(local_path))?.contains(&crate::security::path_key(&path)) {
+            if crate::git::tracked_paths_async(std::path::Path::new(local_path)).await?.contains(&crate::security::path_key(&path)) {
                 return Ok("不会同步：该文件已被 Git 跟踪，且开启了 Git 排除。".into());
             }
         }
@@ -74,7 +74,7 @@ pub fn explain_sync_rule(path: String, rules: Vec<SyncRuleDto>, local_path: Opti
         } else {
             Ok("不会同步：未匹配任何启用的包含规则。".to_string())
         }
-    })())
+    }.await)
 }
 
 #[tauri::command]
@@ -87,15 +87,15 @@ pub async fn preview_rule_impact(
         let root = state.db.root(&root_id).await?;
         let old_rules = state.db.rules(&root_id).await?;
         let git_tracked_paths = if root.exclude_git_tracked {
-            crate::git::tracked_paths(&root.local_path)?
+            crate::git::tracked_paths_async(&root.local_path).await?
         } else {
             HashSet::new()
         };
-        let old = scan_local_cached_excluding(&root.local_path, &old_rules, &[], &git_tracked_paths)?
+        let old = scan_local_cached_excluding_async(&root.local_path, &old_rules, &[], &git_tracked_paths).await?
             .into_iter()
             .map(|entry| entry.relative_path)
             .collect::<HashSet<_>>();
-        let new = scan_local_cached_excluding(&root.local_path, &rules, &[], &git_tracked_paths)?
+        let new = scan_local_cached_excluding_async(&root.local_path, &rules, &[], &git_tracked_paths).await?
             .into_iter()
             .map(|entry| entry.relative_path)
             .collect::<HashSet<_>>();

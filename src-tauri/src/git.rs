@@ -56,6 +56,13 @@ pub fn tracked_paths(sync_root: &Path) -> AppResult<HashSet<String>> {
     Ok(tracked)
 }
 
+pub async fn tracked_paths_async(sync_root: &Path) -> AppResult<HashSet<String>> {
+    let root = sync_root.to_owned();
+    tokio::task::spawn_blocking(move || tracked_paths(&root))
+        .await
+        .map_err(|error| AppError::new("GIT_SCAN_FAILED", format!("Git 扫描任务失败：{error}")))?
+}
+
 fn run_git(root: &Path, args: &[&str]) -> AppResult<Output> {
     let mut command = Command::new("git");
     #[cfg(windows)]

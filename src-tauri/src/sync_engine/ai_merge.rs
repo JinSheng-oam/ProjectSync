@@ -1,4 +1,5 @@
 use super::*;
+use tokio::io::AsyncWriteExt;
 
 const AI_MERGE_SOURCE_LIMIT: u64 = 64 * 1024;
 const AI_MERGE_OUTPUT_LIMIT: usize = 256 * 1024;
@@ -114,17 +115,17 @@ impl SyncCoordinator {
             let root = self.db.root(&root_id).await?;
             let rules = self.db.rules(&root_id).await?;
             if !RuleEngine::compile(&rules)?.includes(&path)
-                || (root.exclude_git_tracked && crate::git::tracked_paths(&root.local_path)?.contains(&path_key(&path)))
+                || (root.exclude_git_tracked && crate::git::tracked_paths_async(&root.local_path).await?.contains(&path_key(&path)))
             {
                 return Err(AppError::new("AI_MERGE_UNSUPPORTED", "该路径已被同步规则排除。"));
             }
             let target = ensure_safe_parent(&root.local_path, &path)?;
-            let metadata = fs::metadata(&target)
+            let metadata = tokio::fs::metadata(&target).await
                 .map_err(|_| AppError::new("LOCAL_NOT_FOUND", "本地版本不存在，请回到冲突中心手动裁决。"))?;
             if !metadata.is_file() || metadata.len() > AI_MERGE_SOURCE_LIMIT {
                 return Err(AppError::new("AI_MERGE_UNSUPPORTED", "本地版本不是可合并的小型文本文件。"));
             }
-            let local_hash = hash_file(&target)?;
+            let local_hash = hash_file_async(&target).await?;
             let (_, client) = self.client_for(&root.account_id).await?;
             let remote_path = remote_file_path(&root.remote_path, &path)?;
             let props = client.propfind(&remote_path, 0).await?;
@@ -154,7 +155,7 @@ impl SyncCoordinator {
             .ok_or_else(|| AppError::new("AI_MERGE_UNSUPPORTED", "远端冲突版本不存在，无法合并。请在冲突中心手动裁决。"))?;
         let root = self.db.root(&root_id).await?;
         let target = ensure_safe_parent(&root.local_path, &path)?;
-        let local_meta = fs::metadata(&target)
+        let local_meta = tokio::fs::metadata(&target).await
             .map_err(|_| AppError::new("LOCAL_NOT_FOUND", "本地冲突版本不存在"))?;
         if !local_meta.is_file() {
             return Err(AppError::new(
@@ -168,7 +169,7 @@ impl SyncCoordinator {
                 "本地文本超过 64 KiB，无法安全发送给 AI 合并",
             ));
         }
-        if hash_file(&target)? != local_hash {
+        if hash_file_async(&target).await? != local_hash {
             return Err(AppError::retryable(
                 "LOCAL_FILE_CHANGED",
                 "冲突检测后本地版本发生变化；请重新扫描",
@@ -208,7 +209,7 @@ impl SyncCoordinator {
                     "远端文本超过 64 KiB，无法安全发送给 AI 合并",
                 ));
             }
-            let hash = hash_file(&remote_stage)?;
+            let hash = hash_file_async(&remote_stage).await?;
             if hash != remote_hash {
                 return Err(AppError::retryable(
                     "HASH_MISMATCH",
@@ -220,7 +221,7 @@ impl SyncCoordinator {
         .await;
         let _ = tokio::fs::remove_file(&remote_stage).await;
         let remote_bytes = remote_read?;
-        let local_bytes = fs::read(&target)?;
+        let local_bytes = tokio::fs::read(&target).await?;
         if local_bytes.len() as u64 > AI_MERGE_SOURCE_LIMIT
             || blake3::hash(&local_bytes).to_hex().as_str() != local_hash
         {
@@ -297,7 +298,10 @@ impl SyncCoordinator {
                 .map_err(|error| AppError::new("SERIALIZATION_ERROR", error.to_string()))?,
         )
         .await?;
-        cleanup_ai_merge_previews(&self.data_dir);
+        let cleanup_dir = self.data_dir.clone();
+        if let Err(error) = tokio::task::spawn_blocking(move || cleanup_ai_merge_previews(&cleanup_dir)).await {
+            tracing::warn!(%error, "AI merge preview cleanup did not complete");
+        }
         Ok(AiMergePreviewDto {
             preview_id,
             conflict_id: conflict_id.to_owned(),
@@ -349,7 +353,7 @@ impl SyncCoordinator {
             let (root_id, path, _, _, _, _) = self.db.conflict_record(conflict_id).await?;
             let root = self.db.root(&root_id).await?;
             let target = ensure_safe_parent(&root.local_path, &path)?;
-            let local_meta = fs::metadata(&target).map_err(|_| AppError::new("LOCAL_NOT_FOUND", "本地冲突版本不存在"))?;
+            let local_meta = tokio::fs::metadata(&target).await.map_err(|_| AppError::new("LOCAL_NOT_FOUND", "本地冲突版本不存在"))?;
 
             record.merged_content = base_content.to_string();
             record.suggestions = Some("已保存用户在编辑器中手动调整的代码内容。".to_string());
@@ -379,7 +383,7 @@ impl SyncCoordinator {
         let (root_id, path, _, _, _, _) = self.db.conflict_record(conflict_id).await?;
         let root = self.db.root(&root_id).await?;
         let target = ensure_safe_parent(&root.local_path, &path)?;
-        let local_meta = fs::metadata(&target).map_err(|_| AppError::new("LOCAL_NOT_FOUND", "本地冲突版本不存在"))?;
+        let local_meta = tokio::fs::metadata(&target).await.map_err(|_| AppError::new("LOCAL_NOT_FOUND", "本地冲突版本不存在"))?;
 
         let base_content = current_content.unwrap_or(&record.merged_content);
         let user_message = serde_json::to_string_pretty(&serde_json::json!({
@@ -485,7 +489,7 @@ impl SyncCoordinator {
             ));
         }
         let target = ensure_safe_parent(&root.local_path, &path)?;
-        if !target.is_file() || hash_file(&target)? != preview.local_hash {
+        if !tokio::fs::metadata(&target).await.is_ok_and(|meta| meta.is_file()) || hash_file_async(&target).await? != preview.local_hash {
             return Err(AppError::retryable(
                 "LOCAL_FILE_CHANGED",
                 "生成预览后本地版本发生变化，请重新合并",
@@ -516,38 +520,40 @@ impl SyncCoordinator {
         }
         let result = async {
             client.get_to_file(&remote_path, &remote_stage).await?;
-            if hash_file(&remote_stage)? != preview.remote_hash {
+            if hash_file_async(&remote_stage).await? != preview.remote_hash {
                 return Err(AppError::retryable(
                     "HASH_MISMATCH",
                     "生成预览后远端内容发生变化，请重新合并",
                 ));
             }
-            let mut merged_file = fs::OpenOptions::new()
+            let mut merged_file = tokio::fs::OpenOptions::new()
                 .write(true)
                 .create_new(true)
                 .open(&merged_stage)
+                .await
                 .map_err(|error| {
                     local_file_operation_error("创建合并暂存文件失败", &merged_stage, error)
                 })?;
             merged_file
                 .write_all(preview.merged_content.as_bytes())
+                .await
                 .map_err(|error| {
                     local_file_operation_error("写入合并暂存文件失败", &merged_stage, error)
                 })?;
-            merged_file.sync_all().map_err(|error| {
+            merged_file.sync_all().await.map_err(|error| {
                 local_file_operation_error("刷新合并暂存文件失败", &merged_stage, error)
             })?;
             drop(merged_file);
-            let merged_hash = hash_file(&merged_stage)?;
+            let merged_hash = hash_file_async(&merged_stage).await?;
 
-            let _local_backup = copy_to_trash(
+            let _local_backup = copy_to_trash_async(
                 &self.data_dir,
                 &root.id,
                 &path,
                 "before-ai-merge-local",
                 &target,
             )
-            .map_err(|mut error| {
+            .await.map_err(|mut error| {
                 error.message = format!(
                     "备份本地原文件失败（{}）：{}",
                     target.display(),
@@ -555,14 +561,14 @@ impl SyncCoordinator {
                 );
                 error
             })?;
-            let _remote_backup = copy_to_trash(
+            let _remote_backup = copy_to_trash_async(
                 &self.data_dir,
                 &root.id,
                 &path,
                 "before-ai-merge-remote",
                 &remote_stage,
             )
-            .map_err(|mut error| {
+            .await.map_err(|mut error| {
                 error.message = format!(
                     "备份远端原文件到本地回收站失败（{}）：{}",
                     remote_stage.display(),
@@ -610,7 +616,7 @@ impl SyncCoordinator {
                     },
                 ));
             }
-            let local_meta = fs::metadata(&target)?;
+            let local_meta = tokio::fs::metadata(&target).await?;
             let local_mtime_ns = local_meta
                 .modified()
                 .ok()

@@ -14,7 +14,7 @@ use crate::{
         SyncStatusDto, SyncSummaryDto, TaskDto, WebDavAccountDto, WebDavAccountInput,
         WebDavCapabilities,
     },
-    filesystem::{scan_local_cached_excluding, RuleEngine},
+    filesystem::{scan_local_cached_excluding_async, RuleEngine},
     security::{normalize_remote_path, validate_relative_path, validate_webdav_url},
     webdav::href_to_dav_path,
 };
