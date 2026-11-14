@@ -64,7 +64,7 @@ export function WebDavManager({ accounts, onRefresh }: WebDavManagerProps) {
       await api.deleteWebDavAccount(accountId);
       onRefresh();
     } catch (err: unknown) {
-      alert((err as Error).message);
+      alert(getErrorMessage(err, '删除 WebDAV 节点失败'));
     } finally {
       setDeletingId(null);
     }
@@ -106,7 +106,7 @@ export function WebDavManager({ accounts, onRefresh }: WebDavManagerProps) {
       const res = await api.testWebDavConnection(url, username, password, tlsVerify);
       setTestResult(res);
     } catch (err: unknown) {
-      setTestError((err as Error).message);
+      setTestError(getErrorMessage(err, 'WebDAV 连接测试失败'));
     } finally {
       setTesting(false);
     }
@@ -127,7 +127,7 @@ export function WebDavManager({ accounts, onRefresh }: WebDavManagerProps) {
       setIsModalOpen(false);
       onRefresh();
     } catch (err: unknown) {
-      alert((err as Error).message);
+      alert(getErrorMessage(err, '保存 WebDAV 节点失败'));
     } finally {
       setSaving(false);
     }

@@ -302,13 +302,14 @@ class MockEngine {
         !(task.action === 'Blocked' && /受保护的 MOVE|保护的远端 MOVE|远端文件没有可用的强 ETag/.test(task.error ?? ''))));
   }
 
-  async querySyncHistory(keyword = '', limit = 50): Promise<HistoryItemDto[]> {
+  async querySyncHistory(keyword = '', limit = 50, rootId?: string, offset = 0): Promise<HistoryItemDto[]> {
     await this.delay(150);
     let result = [...this.history];
     if (keyword) {
       result = result.filter((h) => h.relativePath.toLowerCase().includes(keyword.toLowerCase()) || h.projectName.toLowerCase().includes(keyword.toLowerCase()));
     }
-    return result.slice(0, limit);
+    if (rootId) result = result.filter((entry) => entry.rootId === rootId);
+    return result.slice(offset, offset + limit);
   }
 }
 

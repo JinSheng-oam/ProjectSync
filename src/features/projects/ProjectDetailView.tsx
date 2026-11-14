@@ -31,6 +31,7 @@ import {
 } from '../../components/common/UIComponents';
 import { api } from '../../services/api';
 import { RuleEditor } from '../rules/RuleEditor';
+import { getErrorMessage } from '../../services/errorMessage';
 
 interface ProjectDetailViewProps {
   rootId: string;
@@ -68,19 +69,27 @@ export function ProjectDetailView({
 
   // History state
   const [historyList, setHistoryList] = useState<HistoryItemDto[]>([]);
+  const [filesError, setFilesError] = useState('');
+  const [historyError, setHistoryError] = useState('');
 
   // Advanced settings state
   const [pollInterval, setPollInterval] = useState(root?.pollIntervalSeconds || 30);
   const [debounceMs, setDebounceMs] = useState(root?.debounceMs || 500);
   const [excludeGitTracked, setExcludeGitTracked] = useState(root?.excludeGitTracked ?? false);
+  const [settingsDirty, setSettingsDirty] = useState(false);
 
   useEffect(() => {
+    setSettingsDirty(false);
+  }, [rootId]);
+
+  useEffect(() => {
+    if (settingsDirty) return;
     if (!root) return;
     setProjectName(root.name);
     setPollInterval(root.pollIntervalSeconds);
     setDebounceMs(root.debounceMs);
     setExcludeGitTracked(root.excludeGitTracked);
-  }, [rootId]);
+  }, [rootId, root?.name, root?.pollIntervalSeconds, root?.debounceMs, root?.excludeGitTracked, settingsDirty]);
 
   useEffect(() => {
     if (!root) return;
@@ -89,6 +98,10 @@ export function ProjectDetailView({
     setRulesDirty(false);
     setRuleImpact(null);
     setRuleError('');
+    setFiles([]);
+    setHistoryList([]);
+    setFilesError('');
+    setHistoryError('');
     api
       .getSyncRules(root.id)
       .then((loaded) => {
@@ -98,10 +111,14 @@ export function ProjectDetailView({
         }
       })
       .catch((error: unknown) => {
-        if (!cancelled) setRuleError(`无法加载规则：${ruleErrorMessage(error)}`);
+        if (!cancelled) setRuleError(`无法加载规则：${getErrorMessage(error, '请重试')}`);
       });
-    api.getFiles(root.id).then(setFiles);
-    api.querySyncHistory(root.name).then(setHistoryList);
+    api.getFiles(root.id)
+      .then((items) => { if (!cancelled) setFiles(items); })
+      .catch((error: unknown) => { if (!cancelled) setFilesError(getErrorMessage(error, '无法加载文件')); });
+    api.querySyncHistory('', 50, root.id)
+      .then((items) => { if (!cancelled) setHistoryList(items); })
+      .catch((error: unknown) => { if (!cancelled) setHistoryError(getErrorMessage(error, '无法加载同步记录')); });
     return () => {
       cancelled = true;
     };
@@ -136,7 +153,7 @@ export function ProjectDetailView({
     try {
       setRuleImpact(await api.previewRuleImpact(root.id, rules));
     } catch (error: unknown) {
-      setRuleError(ruleErrorMessage(error));
+      setRuleError(getErrorMessage(error, '规则操作失败，请重试'));
     } finally {
       setRuleBusy(false);
     }
@@ -150,7 +167,7 @@ export function ProjectDetailView({
       setRulesDirty(false);
       setRuleImpact(null);
     } catch (error: unknown) {
-      setRuleError(ruleErrorMessage(error));
+      setRuleError(getErrorMessage(error, '规则操作失败，请重试'));
     } finally {
       setRuleBusy(false);
     }
@@ -160,14 +177,15 @@ export function ProjectDetailView({
     try {
       await api.updateSyncRoot(root.id, {
         name: projectName.trim() || root.name,
-        pollIntervalSeconds: Math.max(5, pollInterval),
+        pollIntervalSeconds: Math.max(10, Math.min(86400, pollInterval)),
         debounceMs: Math.max(100, debounceMs),
         excludeGitTracked,
       });
       await onRefresh();
+      setSettingsDirty(false);
       alert('项目参数已成功保存');
     } catch (error: unknown) {
-      alert(error instanceof Error ? error.message : '保存项目设置失败');
+      alert(getErrorMessage(error, '保存项目设置失败'));
     }
   };
 
@@ -183,7 +201,7 @@ export function ProjectDetailView({
       await onRefresh();
       onBack();
     } catch (error: unknown) {
-      alert(error instanceof Error ? error.message : '解除绑定失败');
+      alert(getErrorMessage(error, '解除绑定失败'));
     }
   };
 
@@ -237,7 +255,7 @@ export function ProjectDetailView({
                   await api.enableSyncRoot(root.id);
                   await onRefresh();
                 } catch (error: unknown) {
-                  alert(error instanceof Error ? error.message : '启用同步失败');
+                  alert(getErrorMessage(error, '启用同步失败'));
                 }
               }}
               className="gap-1.5"
@@ -478,6 +496,7 @@ export function ProjectDetailView({
       {/* Tab 3: Files Ledger */}
       {activeTab === 'files' && (
         <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl overflow-hidden shadow-soft-sm">
+          {filesError && <p role="alert" className="p-3 text-xs text-rose-700">{filesError}</p>}
           <div className="p-3 bg-slate-50 dark:bg-slate-800/60 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between text-xs">
             <span className="text-slate-900 dark:text-slate-100 font-semibold">
               文件状态清单
@@ -539,6 +558,7 @@ export function ProjectDetailView({
       {/* Tab 4: History */}
       {activeTab === 'history' && (
         <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl overflow-hidden shadow-soft-sm">
+          {historyError && <p role="alert" className="p-3 text-xs text-rose-700">{historyError}</p>}
           <div className="p-3 bg-slate-50 dark:bg-slate-800/60 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between text-xs">
             <span className="text-slate-900 dark:text-slate-100 font-semibold">同步记录</span>
             <span className="text-slate-500 dark:text-slate-400">
@@ -607,7 +627,7 @@ export function ProjectDetailView({
               <input
                 type="text"
                 value={projectName}
-                onChange={(e) => setProjectName(e.target.value)}
+                onChange={(e) => { setProjectName(e.target.value); setSettingsDirty(true); }}
                 className="w-full bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-2 text-xs text-slate-900 dark:text-slate-100 focus:outline-none focus:border-indigo-500"
               />
             </div>
@@ -620,7 +640,9 @@ export function ProjectDetailView({
                 <input
                   type="number"
                   value={pollInterval}
-                  onChange={(e) => setPollInterval(Number(e.target.value))}
+                  min={10}
+                  max={86400}
+                  onChange={(e) => { setPollInterval(Number(e.target.value)); setSettingsDirty(true); }}
                   className="w-full bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-2 text-xs font-mono text-slate-900 dark:text-slate-100 focus:outline-none focus:border-indigo-500"
                 />
               </div>
@@ -632,7 +654,7 @@ export function ProjectDetailView({
                 <input
                   type="number"
                   value={debounceMs}
-                  onChange={(e) => setDebounceMs(Number(e.target.value))}
+                  onChange={(e) => { setDebounceMs(Number(e.target.value)); setSettingsDirty(true); }}
                   className="w-full bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-2 text-xs font-mono text-slate-900 dark:text-slate-100 focus:outline-none focus:border-indigo-500"
                 />
               </div>
@@ -642,7 +664,7 @@ export function ProjectDetailView({
               <input
                 type="checkbox"
                 checked={excludeGitTracked}
-                onChange={(event) => setExcludeGitTracked(event.target.checked)}
+                onChange={(event) => { setExcludeGitTracked(event.target.checked); setSettingsDirty(true); }}
                 className="mt-0.5 h-4 w-4 accent-indigo-600"
               />
               <span className="space-y-0.5">
@@ -711,11 +733,4 @@ export function ProjectDetailView({
       )}
     </div>
   );
-}
-
-function ruleErrorMessage(error: unknown): string {
-  if (error instanceof Error) return error.message;
-  if (typeof error === 'object' && error !== null && 'message' in error)
-    return String(error.message);
-  return String(error || '规则操作失败，请重试');
 }

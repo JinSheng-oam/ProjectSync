@@ -208,12 +208,12 @@ export const api = {
     return mockEngine.handleRetainedRemoteFile(taskId, restore);
   },
 
-  async querySyncHistory(keyword = '', limit = 50): Promise<HistoryItemDto[]> {
+  async querySyncHistory(keyword = '', limit = 50, rootId?: string, offset = 0): Promise<HistoryItemDto[]> {
     if (isTauriEnv) {
       const { invoke } = await import('@tauri-apps/api/core');
-      return invoke('query_sync_history', { keyword, rootId: null, limit, offset: 0 });
+      return invoke('query_sync_history', { keyword, rootId: rootId ?? null, limit, offset });
     }
-    return mockEngine.querySyncHistory(keyword, limit);
+    return mockEngine.querySyncHistory(keyword, limit, rootId, offset);
   },
 
   async updateWebDavAccount(accountId: string, account: { name: string; url: string; username: string; password?: string; tlsVerify: boolean }): Promise<WebDavAccountDto> {
