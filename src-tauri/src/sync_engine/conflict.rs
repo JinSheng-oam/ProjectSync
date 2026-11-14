@@ -72,7 +72,6 @@ impl SyncCoordinator {
                         remote.etag.as_deref(),
                         &remote.hash,
                         &capabilities,
-                        &self.data_dir,
                         None,
                     )
                     .await?;
@@ -83,7 +82,6 @@ impl SyncCoordinator {
                         &local_path,
                         &remote_path,
                         &capabilities,
-                        &self.data_dir,
                         None,
                     )
                     .await?;
@@ -164,7 +162,6 @@ impl SyncCoordinator {
                             &target,
                             &conflict_remote,
                             &capabilities,
-                            &self.data_dir,
                             None,
                         )
                         .await?;
@@ -215,7 +212,6 @@ impl SyncCoordinator {
                             &target,
                             &remote_path,
                             &capabilities,
-                            &self.data_dir,
                             None,
                         )
                         .await?;

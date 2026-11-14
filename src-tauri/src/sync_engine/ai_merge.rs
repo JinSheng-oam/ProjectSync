@@ -583,7 +583,6 @@ impl SyncCoordinator {
                 remote_property.etag.as_deref(),
                 &preview.remote_hash,
                 &capabilities,
-                &self.data_dir,
                 None,
             )
             .await?;
@@ -597,7 +596,6 @@ impl SyncCoordinator {
                     observed.etag.as_deref(),
                     &merged_hash,
                     &capabilities,
-                    &self.data_dir,
                     None,
                 )
                 .await;

@@ -24,7 +24,7 @@ use crate::{
         SyncAction, SyncRuleDto, SyncSummaryDto, WebDavCapabilities,
     },
     filesystem::{
-        atomic_replace, copy_to_trash_async, ensure_safe_parent, hash_file, hash_file_async, move_to_trash, move_to_trash_async, scan_local_async,
+        atomic_replace, copy_to_trash_async, ensure_safe_parent, hash_file_async, move_to_trash, move_to_trash_async, scan_local_async,
         scan_local_cached_excluding_async, is_generated_conflict_copy,
         move_generated_conflict_copies_to_trash_async, RuleEngine,
     },
@@ -37,7 +37,7 @@ use serde::{Deserialize, Serialize};
 use std::{
     collections::{BTreeSet, HashMap, HashSet},
     fs,
-    io::{Read, Write},
+    io::Read,
     path::{Path, PathBuf},
     sync::{
         atomic::{AtomicBool, Ordering},
@@ -451,6 +451,7 @@ impl SyncCoordinator {
             &rules,
             &old_baseline,
             &git_tracked_paths,
+            capabilities.strong_etag_verified,
         )
         .await?;
         let line_ending_equivalent = line_ending_equivalent_paths(
@@ -825,6 +826,7 @@ fn unsafe_capabilities() -> WebDavCapabilities {
     WebDavCapabilities {
         server_header: "unknown".to_owned(),
         etag_type: "None".to_owned(),
+        strong_etag_verified: false,
         supports_if_match: false,
         supports_if_none_match: false,
         supports_lock: false,

@@ -201,6 +201,7 @@ pub(super) async fn scan_remote(
     rules: &[SyncRuleDto],
     cache: &[crate::domain::BaselineEntry],
     excluded_paths: &HashSet<String>,
+    strong_etag_verified: bool,
 ) -> AppResult<Vec<RemoteEntry>> {
     let root_path = normalize_remote_path(root_path)?;
     let rule_engine = RuleEngine::compile(rules)?;
@@ -270,7 +271,7 @@ pub(super) async fn scan_remote(
             let cached = cache_by_path
                 .get(&key)
                 .copied()
-                .filter(|old| can_reuse_remote_hash(old, prop.etag.as_deref(), prop.size));
+                .filter(|old| can_reuse_remote_hash(old, prop.etag.as_deref(), prop.size, strong_etag_verified));
             let entry = RemoteEntry {
                 relative_path: relative,
                 path_key: key,
@@ -323,14 +324,15 @@ fn can_reuse_remote_hash(
     old: &crate::domain::BaselineEntry,
     current_etag: Option<&str>,
     current_size: u64,
+    verified: bool,
 ) -> bool {
     let Some(current_etag) = current_etag else {
         return false;
     };
-    old.remote_hash.is_some()
+    verified && old.remote_hash.is_some()
         && old.remote_size == current_size
         && old.remote_etag.as_deref() == Some(current_etag)
-        && !current_etag.trim_start().starts_with("W/")
+        && crate::webdav::is_strong_etag(current_etag)
 }
 
 #[cfg(test)]
@@ -420,10 +422,11 @@ mod remote_hash_cache_tests {
     #[test]
     fn requires_a_matching_strong_etag_and_size_to_reuse_remote_hash() {
         let cached = baseline(Some("\"v1\""));
-        assert!(can_reuse_remote_hash(&cached, Some("\"v1\""), 4));
-        assert!(!can_reuse_remote_hash(&baseline(None), None, 4));
-        assert!(!can_reuse_remote_hash(&cached, Some("W/\"v1\""), 4));
-        assert!(!can_reuse_remote_hash(&cached, Some("\"v2\""), 4));
-        assert!(!can_reuse_remote_hash(&cached, Some("\"v1\""), 5));
+        assert!(can_reuse_remote_hash(&cached, Some("\"v1\""), 4, true));
+        assert!(!can_reuse_remote_hash(&cached, Some("\"v1\""), 4, false));
+        assert!(!can_reuse_remote_hash(&baseline(None), None, 4, true));
+        assert!(!can_reuse_remote_hash(&cached, Some("W/\"v1\""), 4, true));
+        assert!(!can_reuse_remote_hash(&cached, Some("\"v2\""), 4, true));
+        assert!(!can_reuse_remote_hash(&cached, Some("\"v1\""), 5, true));
     }
 }

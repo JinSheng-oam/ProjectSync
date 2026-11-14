@@ -75,6 +75,7 @@ export interface SyncSummaryDto {
 export interface WebDavCapabilities {
   serverHeader: string;
   etagType: 'Strong' | 'Weak' | 'None';
+  strongEtagVerified?: boolean;
   supportsIfMatch: boolean;
   supportsIfNoneMatch: boolean;
   supportsLock: boolean;

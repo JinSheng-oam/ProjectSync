@@ -13,7 +13,6 @@ pub(super) async fn put_remote_create_only(
     source: &Path,
     destination: &str,
     capabilities: &WebDavCapabilities,
-    data_dir: &Path,
     progress: Option<TransferProgress>,
 ) -> AppResult<()> {
     if !capabilities.safe_create_only {
@@ -41,7 +40,8 @@ pub(super) async fn put_remote_create_only(
             &parent,
             PutCondition::CreateOnly,
             None,
-            data_dir,
+            None,
+            false,
             progress,
         )
         .await;
@@ -59,7 +59,6 @@ pub(super) async fn put_remote_update(
     expected_etag: Option<&str>,
     expected_hash: &str,
     capabilities: &WebDavCapabilities,
-    data_dir: &Path,
     progress: Option<TransferProgress>,
 ) -> AppResult<()> {
     if !capabilities.safe_update_existing {
@@ -98,7 +97,8 @@ pub(super) async fn put_remote_update(
             &parent,
             PutCondition::Unconditional,
             Some(expected_hash),
-            data_dir,
+            expected_etag,
+            capabilities.strong_etag_verified,
             progress,
         )
         .await;
@@ -116,12 +116,13 @@ async fn put_remote_with_lock(
     lock_parent: &str,
     condition: PutCondition,
     expected_hash: Option<&str>,
-    data_dir: &Path,
+    expected_etag: Option<&str>,
+    strong_etag_verified: bool,
     progress: Option<TransferProgress>,
 ) -> AppResult<()> {
     let token = client.lock_exclusive(lock_parent, "infinity").await?;
     let result = async {
-        let current_hash = remote_file_hash(client, destination, data_dir).await?;
+        let current_hash = remote_file_hash(client, destination, expected_hash, expected_etag, strong_etag_verified).await?;
         match (expected_hash, current_hash.as_deref()) {
             (None, None) => {}
             (Some(expected), Some(current)) if expected == current => {}
@@ -176,33 +177,38 @@ fn remote_parent_path(path: &str) -> String {
 async fn remote_file_hash(
     client: &WebDavClient,
     path: &str,
-    data_dir: &Path,
+    expected_hash: Option<&str>,
+    expected_etag: Option<&str>,
+    strong_etag_verified: bool,
 ) -> AppResult<Option<String>> {
     let entries = match client.propfind(path, 0).await {
         Ok(entries) => entries,
         Err(error) if error.code == "DAV_NOT_FOUND" => return Ok(None),
         Err(error) => return Err(error),
     };
-    let Some(entry) = entries.iter().find(|entry| !entry.is_collection) else {
-        if entries.iter().any(|entry| entry.is_collection) {
-            return Err(AppError::new("DAV_CONFLICT", "远端目标路径已被目录占用"));
-        }
-        return Ok(None);
+    let normalized = normalize_remote_path(path)?;
+    let entry = entries.into_iter().find(|entry|
+        href_to_dav_path(client, &entry.path, path).ok().as_deref() == Some(normalized.as_str()))
+        .ok_or_else(|| AppError::new("DAV_INVALID_RESPONSE", "无法确认远端目标路径状态"))?;
+    if entry.is_collection {
+        return Err(AppError::new("DAV_CONFLICT", "远端目标路径已被目录占用"));
+    }
+    let Some(expected_hash) = expected_hash else {
+        // Create-only needs existence, not the contents of an occupied file.
+        return Ok(Some(String::new()));
     };
-    let _ = entry;
-    let staging = data_dir
-        .join("staging")
-        .join(format!("lock-check-{}.bin", uuid::Uuid::new_v4()));
-    if let Some(parent) = staging.parent() {
-        tokio::fs::create_dir_all(parent).await?;
+    if can_reuse_locked_hash(strong_etag_verified, expected_etag, entry.etag.as_deref()) {
+        return Ok(Some(expected_hash.to_owned()));
     }
-    let result = async {
-        client.get_to_file(path, &staging).await?;
-        hash_file(&staging)
+    let (size, hash, received_etag) = client.hash_resource(path).await?;
+    if size != entry.size || entry.etag.as_deref().zip(received_etag.as_deref()).is_some_and(|(listed, received)| listed != received) {
+        return Err(AppError::retryable("DAV_PRECONDITION_FAILED", "读取远端文件期间版本发生变化，请重新同步"));
     }
-    .await;
-    let _ = tokio::fs::remove_file(&staging).await;
-    result.map(Some)
+    Ok(Some(hash))
+}
+
+fn can_reuse_locked_hash(verified: bool, expected: Option<&str>, actual: Option<&str>) -> bool {
+    verified && expected == actual && expected.is_some_and(crate::webdav::is_strong_etag)
 }
 
 pub(super) fn verify_snapshot_etag(listed: Option<&str>, received: Option<&str>) -> AppResult<()> {
@@ -221,6 +227,13 @@ fn snapshot_rejects_content_from_a_different_version() {
     assert!(verify_snapshot_etag(Some("\"v1\""), None).is_err());
     assert!(verify_snapshot_etag(Some("\"v1\""), Some("\"v1\"")).is_ok());
     assert!(verify_snapshot_etag(None, None).is_ok());
+    assert!(can_reuse_locked_hash(true, Some("\"v1\""), Some("\"v1\"")));
+    assert!(!can_reuse_locked_hash(false, Some("\"v1\""), Some("\"v1\"")));
+    assert!(!can_reuse_locked_hash(true, Some("W/\"v1\""), Some("W/\"v1\"")));
+    assert!(!can_reuse_locked_hash(true, Some("\"v1\""), Some("\"v2\"")));
+    assert!(!can_reuse_locked_hash(true, None, None));
+    assert!(!can_reuse_locked_hash(true, Some("unquoted"), Some("unquoted")));
+    assert!(!can_reuse_locked_hash(true, Some("\"bad tag\""), Some("\"bad tag\"")));
 }
 
 pub(super) async fn verify_remote_hash(

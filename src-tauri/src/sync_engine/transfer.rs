@@ -244,7 +244,6 @@ impl SyncCoordinator {
                         &local.absolute_path,
                         &destination,
                         capabilities,
-                        &self.data_dir,
                         Some(progress),
                     )
                     .await?;
@@ -262,7 +261,6 @@ impl SyncCoordinator {
                             .or(remote.etag.as_deref()),
                         &remote.hash,
                         capabilities,
-                        &self.data_dir,
                         Some(progress),
                     )
                     .await?;

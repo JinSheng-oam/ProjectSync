@@ -224,8 +224,8 @@ export function WebDavManager({ accounts, onRefresh }: WebDavManagerProps) {
               {acc.capabilities && (
                 <div className="grid grid-cols-2 gap-2 text-xs text-slate-600 dark:text-slate-400">
                   <div className="bg-slate-50 dark:bg-slate-800/60 p-2 rounded-lg border border-slate-200 dark:border-slate-700 flex justify-between">
-                    <span>ETag 强校验:</span>
-                    <span className="font-mono tabular-nums text-emerald-700 dark:text-emerald-300 font-semibold">{acc.capabilities.etagType}</span>
+                    <span>ETag 版本验证:</span>
+                    <span className="font-mono tabular-nums text-emerald-700 dark:text-emerald-300 font-semibold">{acc.capabilities.etagType} · {acc.capabilities.strongEtagVerified ? '已验证' : '未验证'}</span>
                   </div>
                   <div className="bg-slate-50 dark:bg-slate-800/60 p-2 rounded-lg border border-slate-200 dark:border-slate-700 flex justify-between">
                     <span>If-Match 保护:</span>
@@ -349,7 +349,7 @@ export function WebDavManager({ accounts, onRefresh }: WebDavManagerProps) {
                 探测成功！已成功识别服务端特性：
               </div>
               <div>• Server 标头: <span className="font-mono">{testResult.serverHeader}</span></div>
-              <div>• ETag 强语义: <span className="font-mono">{testResult.etagType}</span></div>
+              <div>• ETag 版本验证: <span className="font-mono">{testResult.etagType} · {testResult.strongEtagVerified ? '已验证' : '未验证'}</span></div>
               <div>• 并发写防护 If-Match: {testResult.supportsIfMatch ? '支持' : '不支持'}</div>
               <div>• WebDAV 独占锁写保护: {testResult.supportsLock ? '已验证' : '未验证'}</div>
               <div>• 安全新建: <span className="font-mono">{testResult.safeCreateOnly ? (testResult.supportsIfNoneMatch ? 'If-None-Match' : '独占锁') : '未验证'}</span></div>

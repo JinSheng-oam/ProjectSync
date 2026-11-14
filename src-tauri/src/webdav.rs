@@ -640,6 +640,11 @@ pub enum PutCondition {
     Unconditional,
 }
 
+pub(crate) fn is_strong_etag(etag: &str) -> bool {
+    etag.strip_prefix('"').and_then(|value| value.strip_suffix('"'))
+        .is_some_and(|value| value.bytes().all(|byte| byte == 0x21 || byte >= 0x23 && byte != 0x7f))
+}
+
 pub fn href_to_dav_path(
     client: &WebDavClient,
     href: &str,

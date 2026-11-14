@@ -8,6 +8,10 @@ where
     if created { probe().await.unwrap_or(false) } else { false }
 }
 
+fn strong_etag_probe_passed(first: Option<&str>, changed: Option<&str>, repeated: Option<&str>) -> bool {
+    matches!((first, changed, repeated), (Some(a), Some(b), Some(c)) if a != b && b == c)
+}
+
 impl WebDavClient {
     pub(crate) async fn probe_locked_delete(&self, project_root: &str) -> AppResult<bool> {
         let path = format!("{}/.projectsync/.projectsync-cleanup-probe-{}", project_root.trim_end_matches('/'), uuid::Uuid::new_v4().simple());
@@ -186,6 +190,7 @@ impl WebDavClient {
         let mut safe_move_no_overwrite = false;
         let mut safe_move_if_match = false;
         let mut etag_type = "None".to_owned();
+        let mut strong_etag_verified = false;
         let mut created = false;
 
         if self.create_collection(&probe_path).await.unwrap_or(false) {
@@ -198,6 +203,7 @@ impl WebDavClient {
                 .await
                 .is_ok()
             {
+                strong_etag_verified = self.probe_strong_etag(&first, &a, &b).await;
                 let props = self.propfind(&probe_path, 1).await.unwrap_or_default();
                 let etag = props
                     .iter()
@@ -327,6 +333,7 @@ impl WebDavClient {
         Ok(WebDavCapabilities {
             server_header,
             etag_type,
+            strong_etag_verified,
             supports_if_match,
             supports_if_none_match,
             supports_lock: lock_exclusion_safe,
@@ -339,6 +346,32 @@ impl WebDavClient {
             probe_cleanup_warning,
             tested_at: unix_ms(),
         })
+    }
+
+    async fn probe_strong_etag(&self, path: &str, a: &Path, b: &Path) -> bool {
+        async fn observed(client: &WebDavClient, path: &str, contents: &[u8]) -> Option<String> {
+            let (size, hash, get_etag) = client.hash_resource(path).await.ok()?;
+            if size != contents.len() as u64 || hash != blake3::hash(contents).to_hex().as_str() {
+                return None;
+            }
+            let expected_path = normalize_remote_path(path).ok()?;
+            let request_url = client.url_for(path).ok()?;
+            let property = client.propfind(path, 0).await.ok()?.into_iter()
+                .find(|entry| !entry.is_collection
+                    && client.dav_path_for_href(&entry.path, &request_url).ok().as_deref() == Some(expected_path.as_str()))?;
+            let etag = property.etag?;
+            let valid = is_strong_etag(&etag);
+            (valid && get_etag.as_deref() == Some(etag.as_str())).then_some(etag)
+        }
+        let first = observed(self, path, b"projectsync capability probe A").await;
+        let changed = if self.put_file(b, path, PutCondition::Unconditional).await.is_ok() {
+            observed(self, path, b"projectsync capability probe B").await
+        } else {
+            None
+        };
+        let repeated = observed(self, path, b"projectsync capability probe B").await;
+        let restored = self.put_file(a, path, PutCondition::Unconditional).await.is_ok();
+        strong_etag_probe_passed(first.as_deref(), changed.as_deref(), repeated.as_deref()) && restored
     }
 
     async fn probe_move_if_match(&self, source: &str, destination: &str) -> bool {
@@ -382,6 +415,14 @@ mod tests {
         assert_eq!(calls.get(), 0);
         assert!(probe_lock_if_created(true, || async { calls.set(calls.get() + 1); Ok(true) }).await);
         assert_eq!(calls.get(), 1);
+    }
+
+    #[test]
+    fn strong_etag_probe_requires_changed_and_stable_versions() {
+        assert!(strong_etag_probe_passed(Some("\"a\""), Some("\"b\""), Some("\"b\"")));
+        assert!(!strong_etag_probe_passed(Some("\"a\""), Some("\"a\""), Some("\"a\"")));
+        assert!(!strong_etag_probe_passed(Some("\"a\""), Some("\"b\""), Some("\"c\"")));
+        assert!(!strong_etag_probe_passed(Some("\"a\""), None, Some("\"b\"")));
     }
 }
 

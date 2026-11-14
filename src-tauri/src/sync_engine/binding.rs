@@ -217,6 +217,7 @@ impl SyncCoordinator {
                 rules,
                 &[],
                 &git_tracked_paths,
+                capabilities.strong_etag_verified,
             )
             .await
             {
