@@ -230,7 +230,7 @@ impl SyncCoordinator {
             &local,
             &remote,
             &[],
-            &self.data_dir,
+            None,
         )
         .await?;
         let root_id = format!("preview-{}", uuid::Uuid::new_v4().simple());

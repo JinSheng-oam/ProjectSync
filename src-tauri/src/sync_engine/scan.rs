@@ -1,12 +1,15 @@
 use super::*;
 
-fn line_ending_insensitive_hash(path: &Path) -> AppResult<Option<String>> {
-    let mut file = fs::File::open(path)?;
+const LINE_ENDING_COMPARE_LIMIT: u64 = 8 * 1024 * 1024;
+const LINE_ENDING_COMPARE_CONCURRENCY: usize = 4;
+
+fn line_ending_hashes(mut file: impl Read) -> AppResult<Option<(String, String)>> {
     let mut buffer = [0_u8; 128 * 1024];
     let mut utf8_tail = Vec::with_capacity(4);
     let mut normalized = Vec::with_capacity(buffer.len() + 1);
     let mut pending_cr = false;
     let mut hasher = blake3::Hasher::new();
+    let mut original = blake3::Hasher::new();
 
     loop {
         let read = file.read(&mut buffer)?;
@@ -14,6 +17,7 @@ fn line_ending_insensitive_hash(path: &Path) -> AppResult<Option<String>> {
             break;
         }
         let bytes = &buffer[..read];
+        original.update(bytes);
         if bytes.contains(&0) {
             return Ok(None);
         }
@@ -54,7 +58,14 @@ fn line_ending_insensitive_hash(path: &Path) -> AppResult<Option<String>> {
     if pending_cr {
         hasher.update(b"\n");
     }
-    Ok(Some(hasher.finalize().to_hex().to_string()))
+    Ok(Some((original.finalize().to_hex().to_string(), hasher.finalize().to_hex().to_string())))
+}
+
+fn bounded_line_ending_file(path: &Path) -> AppResult<Option<(String, String)>> {
+    let mut reader = fs::File::open(path)?.take(LINE_ENDING_COMPARE_LIMIT + 1);
+    let hashes = line_ending_hashes(&mut reader)?;
+    if reader.limit() == 0 { return Ok(None); }
+    Ok(hashes)
 }
 
 pub(super) async fn line_ending_equivalent_paths(
@@ -63,7 +74,7 @@ pub(super) async fn line_ending_equivalent_paths(
     local: &[LocalEntry],
     remote: &[RemoteEntry],
     baseline: &[crate::domain::BaselineEntry],
-    data_dir: &Path,
+    cancellation: Option<Arc<AtomicBool>>,
 ) -> AppResult<HashSet<String>> {
     let remote_by_path = remote
         .iter()
@@ -74,8 +85,10 @@ pub(super) async fn line_ending_equivalent_paths(
         .map(|entry| (entry.path_key.as_str(), entry))
         .collect::<HashMap<_, _>>();
     let mut equivalent = HashSet::new();
+    let mut candidates = Vec::new();
 
     for local_entry in local {
+        ensure_line_ending_scan_active(&cancellation)?;
         let Some(remote_entry) = remote_by_path.get(local_entry.path_key.as_str()) else {
             continue;
         };
@@ -98,42 +111,88 @@ pub(super) async fn line_ending_equivalent_paths(
                 }
             }
         }
-        let Some(local_normalized_hash) =
-            line_ending_insensitive_hash(&local_entry.absolute_path)?
-        else {
-            continue;
-        };
-        if hash_file(&local_entry.absolute_path)? != local_entry.hash {
+        if local_entry.size > LINE_ENDING_COMPARE_LIMIT || remote_entry.size > LINE_ENDING_COMPARE_LIMIT {
             continue;
         }
-
-        let remote_path = remote_file_path(root_path, &remote_entry.relative_path)?;
-        let staging = data_dir
-            .join("staging")
-            .join(format!("line-ending-check-{}.bin", uuid::Uuid::new_v4()));
-        if let Some(parent) = staging.parent() {
-            tokio::fs::create_dir_all(parent).await?;
-        }
-        let remote_normalized_hash = async {
-            client.get_to_file(&remote_path, &staging).await?;
-            if hash_file(&staging)? != remote_entry.hash {
-                return Ok::<_, AppError>(None);
-            }
-            line_ending_insensitive_hash(&staging)
-        }
-        .await;
-        let _ = tokio::fs::remove_file(&staging).await;
-        let Some(remote_normalized_hash) = remote_normalized_hash? else {
-            continue;
-        };
-        if local_normalized_hash == remote_normalized_hash
-            && hash_file(&local_entry.absolute_path)? == local_entry.hash
-        {
-            equivalent.insert(local_entry.path_key.clone());
-        }
+        candidates.push((local_entry.clone(), (*remote_entry).clone()));
     }
 
+    let mut jobs = futures_util::stream::iter(candidates)
+        .map(|(local, remote)| {
+            let cancellation = cancellation.clone();
+            async move {
+                ensure_line_ending_scan_active(&cancellation)?;
+                let local_path = local.absolute_path.clone();
+                let expected = local.hash.clone();
+                let local_normalized = tokio::task::spawn_blocking(move || {
+                    let metadata = fs::metadata(&local_path)?;
+                    if metadata.len() > LINE_ENDING_COMPARE_LIMIT { return Ok(None); }
+                    Ok::<_, AppError>(bounded_line_ending_file(&local_path)?
+                        .and_then(|(raw, normalized)| (raw == expected).then_some(normalized)))
+                }).await.map_err(|error| AppError::new("LOCAL_FILE_READ", format!("换行比较任务失败：{error}")))??;
+                let Some(local_normalized) = local_normalized else { return Ok(None); };
+                ensure_line_ending_scan_active(&cancellation)?;
+                let remote_path = remote_file_path(root_path, &remote.relative_path)?;
+                let download = tokio::select! {
+                    result = client.get_bytes_limited(&remote_path, LINE_ENDING_COMPARE_LIMIT as usize) => result,
+                    _ = wait_for_line_ending_cancel(cancellation.clone()) =>
+                        return Err(AppError::new("SYNC_INTERRUPTED", "同步已按要求停止")),
+                };
+                let (contents, etag) = match download {
+                    Ok(value) => value,
+                    Err(error) if error.code == "DAV_FILE_TOO_LARGE" => return Ok(None),
+                    Err(error) => return Err(error),
+                };
+                if remote.etag.as_deref().zip(etag.as_deref()).is_some_and(|(listed, received)| listed != received) {
+                    return Err(AppError::retryable("DAV_PRECONDITION_FAILED", "读取内容时 WebDAV 文件版本已变化，请重新扫描。"));
+                }
+                let expected = remote.hash.clone();
+                let remote_normalized = tokio::task::spawn_blocking(move || {
+                    Ok::<_, AppError>(line_ending_hashes(std::io::Cursor::new(contents))?
+                        .and_then(|(raw, normalized)| (raw == expected).then_some(normalized)))
+                }).await.map_err(|error| AppError::new("LOCAL_FILE_READ", format!("换行比较任务失败：{error}")))??;
+                ensure_line_ending_scan_active(&cancellation)?;
+                let local_path = local.absolute_path.clone();
+                let current_hash = tokio::task::spawn_blocking(move || bounded_line_ending_file(&local_path))
+                    .await.map_err(|error| AppError::new("LOCAL_FILE_READ", format!("换行比较任务失败：{error}")))??;
+                if remote_normalized.as_deref() == Some(local_normalized.as_str())
+                    && current_hash.is_some_and(|(raw, _)| raw == local.hash)
+                {
+                    Ok(Some(local.path_key))
+                } else {
+                    Ok(None)
+                }
+            }
+        })
+        .buffer_unordered(LINE_ENDING_COMPARE_CONCURRENCY);
+    loop {
+        tokio::select! {
+            result = jobs.next() => match result {
+                Some(result) => if let Some(key) = result? { equivalent.insert(key); },
+                None => break,
+            },
+            _ = wait_for_line_ending_cancel(cancellation.clone()) =>
+                return Err(AppError::new("SYNC_INTERRUPTED", "同步已按要求停止")),
+        }
+    }
     Ok(equivalent)
+}
+
+fn ensure_line_ending_scan_active(cancellation: &Option<Arc<AtomicBool>>) -> AppResult<()> {
+    if cancellation.as_ref().is_some_and(|flag| flag.load(Ordering::Acquire)) {
+        return Err(AppError::new("SYNC_INTERRUPTED", "同步已按要求停止"));
+    }
+    Ok(())
+}
+
+async fn wait_for_line_ending_cancel(cancellation: Option<Arc<AtomicBool>>) {
+    if let Some(flag) = cancellation {
+        while !flag.load(Ordering::Acquire) {
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        }
+    } else {
+        std::future::pending::<()>().await;
+    }
 }
 
 pub(super) async fn scan_remote(
@@ -301,6 +360,29 @@ mod remote_hash_cache_tests {
         }
     }
 
+    #[test]
+    fn line_ending_comparison_handles_unicode_and_rejects_binary() {
+        let crlf = line_ending_hashes(std::io::Cursor::new("中文\r\nnext\r".as_bytes())).unwrap().unwrap().1;
+        let lf = line_ending_hashes(std::io::Cursor::new("中文\nnext\n".as_bytes())).unwrap().unwrap().1;
+        assert_eq!(crlf, lf);
+        assert!(line_ending_hashes(std::io::Cursor::new(b"binary\0data")).unwrap().is_none());
+    }
+
+    #[tokio::test]
+    async fn large_or_cancelled_line_ending_checks_do_not_read_files() {
+        let client = WebDavClient::new("https://example.test/", "user", String::new(), true).unwrap();
+        let local = LocalEntry { relative_path: "large.txt".into(), path_key: "large.txt".into(),
+            absolute_path: PathBuf::from("not-an-existing-file"), hash: "a".into(),
+            size: LINE_ENDING_COMPARE_LIMIT + 1, mtime_ns: 0 };
+        let remote = RemoteEntry { relative_path: "large.txt".into(), path_key: "large.txt".into(),
+            hash: "b".into(), size: 1, modified_at: 0, etag: None, is_collection: false };
+        assert!(line_ending_equivalent_paths(&client, "/", &[local.clone()], &[remote.clone()], &[], None)
+            .await.unwrap().is_empty());
+        let cancelled = Arc::new(AtomicBool::new(true));
+        assert_eq!(line_ending_equivalent_paths(&client, "/", &[local], &[remote], &[], Some(cancelled))
+            .await.unwrap_err().code, "SYNC_INTERRUPTED");
+    }
+
     #[tokio::test]
     async fn unchanged_line_endings_stay_equivalent_without_another_get() {
         let client = WebDavClient::new("https://example.test/", "user", String::new(), true).unwrap();
@@ -317,7 +399,7 @@ mod remote_hash_cache_tests {
         };
         let equivalents = line_ending_equivalent_paths(
             &client, "/", std::slice::from_ref(&local), std::slice::from_ref(&remote),
-            std::slice::from_ref(&baseline), Path::new(""),
+            std::slice::from_ref(&baseline), None,
         ).await.unwrap();
         assert!(equivalents.contains("file.txt"));
         let clean = build_plan(

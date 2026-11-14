@@ -459,7 +459,7 @@ impl SyncCoordinator {
             &local,
             &remote,
             &old_baseline,
-            &self.data_dir,
+            Some(self.cancellation_for(&root.id)?),
         )
         .await?;
         self.ensure_sync_active(&root.id).await?;

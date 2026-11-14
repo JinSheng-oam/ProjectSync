@@ -295,6 +295,26 @@ impl WebDavClient {
         Self::response_bytes(response, "GET").await
     }
 
+    pub(crate) async fn get_bytes_limited(&self, path: &str, limit: usize) -> AppResult<(Vec<u8>, Option<String>)> {
+        let response = self.send(Method::GET, self.url_for(path)?, HeaderMap::new(), None).await?;
+        Self::check_status(response.status(), "GET")?;
+        if response.content_length().is_some_and(|size| size > limit as u64) {
+            return Err(AppError::new("DAV_FILE_TOO_LARGE", "远端文件超过换行比较大小限制"));
+        }
+        let etag = response.headers().get(reqwest::header::ETAG)
+            .and_then(|value| value.to_str().ok()).map(str::to_owned);
+        let mut stream = response.bytes_stream();
+        let mut contents = Vec::new();
+        while let Some(chunk) = stream.next().await {
+            let chunk = chunk.map_err(|_| AppError::retryable("DAV_CONNECTION_FAILED", "读取 WebDAV 文件流失败"))?;
+            if contents.len().saturating_add(chunk.len()) > limit {
+                return Err(AppError::new("DAV_FILE_TOO_LARGE", "远端文件超过换行比较大小限制"));
+            }
+            contents.extend_from_slice(&chunk);
+        }
+        Ok((contents, etag))
+    }
+
     pub async fn put_file(
         &self,
         source: &Path,
