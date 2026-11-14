@@ -43,6 +43,9 @@ export function needsFreshMerge(message: string | null) {
   return /LOCAL_FILE_CHANGED|DAV_PRECONDITION_FAILED|HASH_MISMATCH|AI_MERGE_PREVIEW_STALE|AI_MERGE_PREVIEW_EXPIRED/.test(message ?? '');
 }
 
+type DataSlice = 'roots' | 'accounts' | 'conflicts' | 'tasks' | 'history' | 'settings';
+const ALL_SLICES: DataSlice[] = ['roots', 'accounts', 'conflicts', 'tasks', 'history', 'settings'];
+
 export function useSyncStore() {
   const [theme, setTheme] = useState<'dark' | 'light'>(() => {
     if (typeof window !== 'undefined') {
@@ -66,7 +69,10 @@ export function useSyncStore() {
   const [aiSession, setAiSession] = useState<AiMergeSession | null>(null);
   const [aiMergeQueue, setAiMergeQueue] = useState<string[]>([]);
   const [mergeResults, setMergeResults] = useState({ applied: 0, skipped: 0, failed: 0 });
-  const refreshInFlight = useRef(false);
+  const [eventsReady, setEventsReady] = useState(false);
+  const refreshVersions = useRef<Record<DataSlice, number>>({ roots: 0, accounts: 0, conflicts: 0, tasks: 0, history: 0, settings: 0 });
+  const pendingSlices = useRef(new Set<DataSlice>());
+  const refreshTimer = useRef<number | null>(null);
   const progressByTaskId = useRef(new Map<string, number>());
   const aiOperationInFlight = useRef(false);
 
@@ -85,59 +91,89 @@ export function useSyncStore() {
     setTheme((prev) => (prev === 'dark' ? 'light' : 'dark'));
   }, []);
 
-  // Load all data
-  const refreshAll = useCallback(async () => {
-    if (refreshInFlight.current) return;
-    refreshInFlight.current = true;
-    try {
-      const results = await Promise.allSettled([
-        api.listSyncRoots(),
-        api.listWebDavAccounts(),
-        api.listConflicts(),
-        api.getPendingTasks(),
-        api.querySyncHistory(),
-        api.getAppSettings(),
-      ]);
-      const [rootsResult, accountsResult, conflictsResult, tasksResult, historyResult, settingsResult] = results;
-      if (rootsResult.status === 'fulfilled') setRoots(rootsResult.value);
-      if (accountsResult.status === 'fulfilled') setAccounts(accountsResult.value);
-      if (conflictsResult.status === 'fulfilled') setConflicts(conflictsResult.value);
-      if (tasksResult.status === 'fulfilled') {
-        const activeIds = new Set(tasksResult.value.map((task) => task.id));
-        for (const taskId of progressByTaskId.current.keys()) {
-          if (!activeIds.has(taskId)) progressByTaskId.current.delete(taskId);
+  const refreshSlices = useCallback(async (slices: DataSlice[]) => {
+    const results = await Promise.allSettled(slices.map(async (slice) => {
+      const version = ++refreshVersions.current[slice];
+      const isCurrent = () => refreshVersions.current[slice] === version;
+      switch (slice) {
+        case 'roots': {
+          const value = await api.listSyncRoots();
+          if (isCurrent()) setRoots(value);
+          break;
         }
-        setTasks(tasksResult.value.map((task) => ({
-          ...task,
-          bytesTransferred: progressByTaskId.current.get(task.id) ?? task.bytesTransferred,
-        })));
+        case 'accounts': {
+          const value = await api.listWebDavAccounts();
+          if (isCurrent()) setAccounts(value);
+          break;
+        }
+        case 'conflicts': {
+          const value = await api.listConflicts();
+          if (isCurrent()) setConflicts(value);
+          break;
+        }
+        case 'tasks': {
+          const value = await api.getPendingTasks();
+          if (!isCurrent()) break;
+          const activeIds = new Set(value.map((task) => task.id));
+          for (const id of progressByTaskId.current.keys()) {
+            if (!activeIds.has(id)) progressByTaskId.current.delete(id);
+          }
+          setTasks(value.map((task) => ({
+            ...task, bytesTransferred: progressByTaskId.current.get(task.id) ?? task.bytesTransferred,
+          })));
+          break;
+        }
+        case 'history': {
+          const value = await api.querySyncHistory();
+          if (isCurrent()) setHistory(value);
+          break;
+        }
+        case 'settings': {
+          const value = await api.getAppSettings();
+          if (isCurrent() && value) setDeviceName(value.deviceName);
+          break;
+        }
       }
-      if (historyResult.status === 'fulfilled') setHistory(historyResult.value);
-      if (settingsResult.status === 'fulfilled' && settingsResult.value) setDeviceName(settingsResult.value.deviceName);
-      const failed = results.find((result) => result.status === 'rejected');
-      if (failed?.status === 'rejected') console.error('Some ProjectSync data could not be refreshed', failed.reason);
-    } catch (err: unknown) {
-      console.error('Failed to refresh data', err);
-    } finally {
-      setLoading(false);
-      refreshInFlight.current = false;
+    }));
+    for (const result of results) {
+      if (result.status === 'rejected') console.error('ProjectSync data refresh failed', result.reason);
     }
   }, []);
+
+  const refreshAll = useCallback(async () => {
+    try { await refreshSlices(ALL_SLICES); }
+    finally { setLoading(false); }
+  }, [refreshSlices]);
+
+  const scheduleRefresh = useCallback((...slices: DataSlice[]) => {
+    slices.forEach((slice) => pendingSlices.current.add(slice));
+    if (refreshTimer.current !== null) return;
+    refreshTimer.current = window.setTimeout(() => {
+      refreshTimer.current = null;
+      const pending = [...pendingSlices.current];
+      pendingSlices.current.clear();
+      void refreshSlices(pending);
+    }, 200);
+  }, [refreshSlices]);
 
   useEffect(() => {
     void refreshAll();
     const interval = setInterval(() => {
       if (document.visibilityState === 'visible') void refreshAll();
-    }, 6000);
-    return () => clearInterval(interval);
-  }, [refreshAll]);
+    }, api.isTauri && eventsReady ? 60_000 : 6000);
+    const onVisible = () => { if (document.visibilityState === 'visible') void refreshAll(); };
+    document.addEventListener('visibilitychange', onVisible);
+    return () => { clearInterval(interval); document.removeEventListener('visibilitychange', onVisible); };
+  }, [refreshAll, eventsReady]);
 
   useEffect(() => {
     if (!api.isTauri) return;
     let mounted = true;
-    let unlisten: (() => void) | undefined;
+    const unlisteners: Array<() => void> = [];
     void import('@tauri-apps/api/event')
-      .then(({ listen }) => listen<{
+      .then(async ({ listen }) => {
+        const subscriptions = await Promise.allSettled([
+          listen<{
         rootId: string;
         taskId: string;
         path: string;
@@ -145,12 +181,13 @@ export function useSyncStore() {
         bytesTransferred: number;
         totalBytes: number;
       }>('sync://progress', ({ payload }) => {
+        refreshVersions.current.tasks++;
         progressByTaskId.current.set(payload.taskId, payload.bytesTransferred);
         setTasks((current) => {
           const existing = current.find((task) => task.id === payload.taskId);
           if (existing) {
             return current.map((task) => task.id === payload.taskId
-              ? { ...task, bytesTransferred: payload.bytesTransferred, totalBytes: payload.totalBytes }
+              ? { ...task, status: 'Running', bytesTransferred: payload.bytesTransferred, totalBytes: payload.totalBytes }
               : task);
           }
           return [{
@@ -166,17 +203,40 @@ export function useSyncStore() {
             updatedAt: Date.now(),
           }, ...current];
         });
-      }))
-      .then((stopListening) => {
-        if (mounted) unlisten = stopListening;
-        else stopListening();
+          }),
+          ...(['sync://task-completed', 'sync://task-failed', 'sync://task-cancelled'] as const).map((eventName) =>
+            listen<{ taskId: string }>(eventName, ({ payload }) => {
+              progressByTaskId.current.delete(payload.taskId);
+              scheduleRefresh('tasks', 'roots');
+            })),
+          listen('sync://conflict-created', () => scheduleRefresh('conflicts', 'roots')),
+          listen('sync://history-updated', () => scheduleRefresh('history')),
+          listen<{ rootId: string; status: SyncRootDto['status'] }>('sync://root-status', ({ payload }) => {
+            refreshVersions.current.roots++;
+            setRoots((current) => current.map((root) => root.id === payload.rootId ? { ...root, status: payload.status } : root));
+            scheduleRefresh('roots');
+          }),
+          listen('sync://network-status', () => scheduleRefresh('accounts')),
+        ]);
+        for (const result of subscriptions) {
+          if (result.status === 'fulfilled') {
+            if (mounted) unlisteners.push(result.value);
+            else result.value();
+          } else {
+            console.error('Failed to subscribe to sync events', result.reason);
+          }
+        }
+        if (mounted) setEventsReady(subscriptions.every((result) => result.status === 'fulfilled'));
       })
       .catch((error: unknown) => console.error('Failed to subscribe to transfer progress', error));
     return () => {
       mounted = false;
-      unlisten?.();
+      unlisteners.forEach((unlisten) => unlisten());
+      if (refreshTimer.current !== null) window.clearTimeout(refreshTimer.current);
+      refreshTimer.current = null;
+      pendingSlices.current.clear();
     };
-  }, []);
+  }, [scheduleRefresh]);
 
   const handleSyncNow = async (rootId: string) => {
     setRoots((prev) =>

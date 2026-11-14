@@ -309,6 +309,7 @@ impl SyncCoordinator {
             return Err(AppError::new("ROOT_PAUSED", "同步项目已暂停"));
         }
         self.db.set_root_status(root_id, "SCANNING_LOCAL").await?;
+        self.emit("sync://root-status", serde_json::json!({"rootId":root_id,"status":"SYNCING","timestamp":unix_ms()}));
         let result = self.sync_locked(&root, &mut summary).await;
         let interrupted = matches!(
             result.as_ref().err().map(|error| error.code.as_str()),
