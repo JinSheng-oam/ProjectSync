@@ -1,6 +1,20 @@
 use super::*;
 
 impl Database {
+    pub(super) async fn reconcile_conflict_path_keys(&self) -> AppResult<()> {
+        let mut tx = self.pool.begin().await?;
+        let rows = sqlx::query("SELECT id,relative_path FROM sync_conflicts WHERE path_key IS NULL")
+            .fetch_all(&mut *tx).await?;
+        for row in rows {
+            let path: String = row.get("relative_path");
+            sqlx::query("UPDATE sync_conflicts SET path_key=? WHERE id=? AND path_key IS NULL")
+                .bind(path_key(&path)).bind(row.get::<String, _>("id"))
+                .execute(&mut *tx).await?;
+        }
+        tx.commit().await?;
+        Ok(())
+    }
+
     pub async fn refresh_conflict_versions(&self, id: &str, local_hash: &str, remote: &RemoteEntry) -> AppResult<()> {
         let result = sqlx::query("UPDATE sync_conflicts SET local_hash=?,remote_hash=?,remote_etag=?,updated_at=? WHERE id=? AND status='UNRESOLVED'")
             .bind(local_hash).bind(&remote.hash).bind(remote.etag.as_deref())
@@ -30,20 +44,20 @@ impl Database {
              SET updated_at=CASE WHEN conflict_type IS NOT ?1 OR local_hash IS NOT ?2
                  OR remote_hash IS NOT ?3 OR base_hash IS NOT ?4 OR remote_etag IS NOT ?5
                  THEN ?6 ELSE updated_at END,
-                 conflict_type=?1,local_hash=?2,remote_hash=?3,base_hash=?4,remote_etag=?5
+                 conflict_type=?1,local_hash=?2,remote_hash=?3,base_hash=?4,remote_etag=?5,relative_path=?9
              WHERE status='UNRESOLVED' AND id=(
-                 SELECT id FROM sync_conflicts WHERE root_id=?7 AND relative_path=?8
+                 SELECT id FROM sync_conflicts WHERE root_id=?7 AND path_key=?8
                  AND status='UNRESOLVED' ORDER BY created_at DESC LIMIT 1
              ) RETURNING id",
         )
         .bind(conflict_type).bind(local_hash).bind(remote_hash).bind(base_hash)
-        .bind(remote_etag).bind(now).bind(root_id).bind(&item.path)
+        .bind(remote_etag).bind(now).bind(root_id).bind(path_key(&item.path)).bind(&item.path)
         .fetch_optional(&self.pool).await?;
         if let Some(existing_id) = existing_id {
             return Ok((existing_id, false));
         }
-        sqlx::query("INSERT INTO sync_conflicts(id,root_id,relative_path,conflict_type,local_hash,remote_hash,base_hash,remote_etag,status,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,'UNRESOLVED',?,?)")
-            .bind(&id).bind(root_id).bind(&item.path).bind(conflict_type)
+        sqlx::query("INSERT INTO sync_conflicts(id,root_id,relative_path,path_key,conflict_type,local_hash,remote_hash,base_hash,remote_etag,status,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,'UNRESOLVED',?,?)")
+            .bind(&id).bind(root_id).bind(&item.path).bind(path_key(&item.path)).bind(conflict_type)
             .bind(local_hash).bind(remote_hash).bind(base_hash).bind(remote_etag)
             .bind(now).bind(now).execute(&self.pool).await?;
         Ok((id, true))
@@ -54,7 +68,7 @@ impl Database {
         conflict_id: Option<&str>,
         root_id: Option<&str>,
     ) -> AppResult<Vec<ConflictItemDto>> {
-        let rows = sqlx::query("SELECT c.*,f.base_size,f.base_mtime_ms,f.local_size,f.local_mtime_ns,f.remote_size,f.remote_mtime_ms, dn.value AS device_name, di.value AS device_id FROM sync_conflicts c LEFT JOIN sync_files f ON f.root_id=c.root_id AND f.path_key=lower(c.relative_path) LEFT JOIN app_settings dn ON dn.key='device_name' LEFT JOIN app_settings di ON di.key='device_id' WHERE c.status='UNRESOLVED' AND (? IS NULL OR c.id=?) AND (? IS NULL OR c.root_id=?) ORDER BY c.created_at DESC")
+        let rows = sqlx::query("SELECT c.*,f.base_size,f.base_mtime_ms,f.local_size,f.local_mtime_ns,f.remote_size,f.remote_mtime_ms, dn.value AS device_name, di.value AS device_id FROM sync_conflicts c LEFT JOIN sync_files f ON f.root_id=c.root_id AND f.path_key=c.path_key LEFT JOIN app_settings dn ON dn.key='device_name' LEFT JOIN app_settings di ON di.key='device_id' WHERE c.status='UNRESOLVED' AND (? IS NULL OR c.id=?) AND (? IS NULL OR c.root_id=?) ORDER BY c.created_at DESC")
             .bind(conflict_id).bind(conflict_id).bind(root_id).bind(root_id).fetch_all(&self.pool).await?;
         rows.iter()
             .map(|r| {
@@ -157,8 +171,8 @@ impl Database {
 
     pub async fn resolve_conflicts_for_path(&self, root_id: &str, path: &str) -> AppResult<()> {
         let now = unix_ms();
-        sqlx::query("UPDATE sync_conflicts SET status='RESOLVED',resolution='CONTENT_MATCH',resolved_at=?,updated_at=? WHERE root_id=? AND lower(relative_path)=lower(?) AND status='UNRESOLVED'")
-            .bind(now).bind(now).bind(root_id).bind(path).execute(&self.pool).await?;
+        sqlx::query("UPDATE sync_conflicts SET status='RESOLVED',resolution='CONTENT_MATCH',resolved_at=?,updated_at=? WHERE root_id=? AND path_key=? AND status='UNRESOLVED'")
+            .bind(now).bind(now).bind(root_id).bind(path_key(path)).execute(&self.pool).await?;
         Ok(())
     }
 

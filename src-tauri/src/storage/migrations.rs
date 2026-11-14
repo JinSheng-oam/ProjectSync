@@ -92,10 +92,20 @@ mod tests {
             .execute(&pool).await.unwrap();
         sqlx::query("INSERT INTO sync_history(root_id,operation,result,created_at) VALUES ('old','UPLOAD_NEW','SUCCESS',1)")
             .execute(&pool).await.unwrap();
+        sqlx::query("INSERT INTO sync_files(root_id,relative_path,path_key,local_size,remote_size,created_at,updated_at) VALUES ('old','ΟΣ.md','ος.md',19,23,1,1)")
+            .execute(&pool).await.unwrap();
+        sqlx::query("INSERT INTO sync_conflicts(id,root_id,relative_path,conflict_type,local_hash,remote_hash,status,created_at,updated_at) VALUES ('conflict','old','ΟΣ.md','CONCURRENT_MODIFICATION','l','r','UNRESOLVED',1,1)")
+            .execute(&pool).await.unwrap();
         pool.close().await;
 
         let db = Database::open(&path).await.unwrap();
         assert_eq!(sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM sync_rules WHERE root_id='old'").fetch_one(&db.pool).await.unwrap(), 1);
+        assert_eq!(db.baselines("old").await.unwrap()[0].path_key, "οσ.md");
+        let conflict = db.conflicts(Some("conflict"), Some("old")).await.unwrap();
+        assert_eq!(conflict[0].local_version.size_bytes, 19);
+        assert_eq!(conflict[0].remote_version.size_bytes, 23);
+        db.resolve_conflicts_for_path("old", "οσ.MD").await.unwrap();
+        assert!(db.conflicts(Some("conflict"), Some("old")).await.unwrap().is_empty());
         assert_eq!(db.delete_account("a").await.unwrap_err().code, "ACCOUNT_IN_USE");
         db.delete_root("old").await.unwrap();
         let insert = "INSERT INTO sync_roots(id,remote_project_id,account_id,name,local_path,remote_path,created_at,updated_at) VALUES (?,'shared','a','project','C:/project','/projects/project',2,2)";

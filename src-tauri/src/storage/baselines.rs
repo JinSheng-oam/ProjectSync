@@ -1,8 +1,73 @@
 use super::*;
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn ambiguous_legacy_path_keys_stop_sync_without_losing_records() {
+        let pool = SqlitePoolOptions::new().max_connections(1)
+            .connect_with(SqliteConnectOptions::new().in_memory(true).foreign_keys(false))
+            .await.unwrap();
+        sqlx::migrate!("./migrations").run(&pool).await.unwrap();
+        let db = Database { pool, path: PathBuf::new() };
+        for (path, key) in [("ΟΣ.md", "ος.md"), ("οσ.md", "οσ.md")] {
+            sqlx::query("INSERT INTO sync_files(root_id,relative_path,path_key,created_at,updated_at) VALUES ('root',?,?,1,1)")
+                .bind(path).bind(key).execute(&db.pool).await.unwrap();
+        }
+        db.reconcile_file_path_keys().await.unwrap();
+        assert_eq!(db.baselines("root").await.unwrap_err().code, "CASE_COLLISION");
+        assert_eq!(sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM sync_files").fetch_one(&db.pool).await.unwrap(), 2);
+    }
+}
+
 impl Database {
+    // Older releases used String::to_lowercase in some writes, which differs
+    // from path_key's per-character folding for e.g. Greek final sigma.
+    pub(super) async fn reconcile_file_path_keys(&self) -> AppResult<()> {
+        let mut tx = self.pool.begin().await?;
+        let rows = sqlx::query("SELECT id,root_id,relative_path,path_key FROM sync_files")
+            .fetch_all(&mut *tx).await?;
+        let mut seen = HashSet::new();
+        let mut collisions = HashSet::new();
+        let mut changes = Vec::new();
+        for row in rows {
+            let root: String = row.get("root_id");
+            let path: String = row.get("relative_path");
+            let old: String = row.get("path_key");
+            let key = path_key(&path);
+            if !seen.insert((root.clone(), key.clone())) {
+                collisions.insert(root.clone());
+            }
+            if key != old {
+                changes.push((row.get::<i64, _>("id"), root, key));
+            }
+        }
+        let changes = changes.into_iter().filter(|(_, root, _)| !collisions.contains(root)).collect::<Vec<_>>();
+        for (id, _, _) in &changes {
+            let temporary = format!(".projectsync-rekey-{}", uuid::Uuid::new_v4());
+            sqlx::query("UPDATE sync_files SET path_key=? WHERE id=?")
+                .bind(temporary).bind(id).execute(&mut *tx).await?;
+        }
+        for (id, _, key) in &changes {
+            sqlx::query("UPDATE sync_files SET path_key=? WHERE id=?")
+                .bind(key).bind(id).execute(&mut *tx).await?;
+        }
+        tx.commit().await?;
+        Ok(())
+    }
+
     pub async fn baselines(&self, root_id: &str) -> AppResult<Vec<BaselineEntry>> {
         let rows = sqlx::query("SELECT relative_path,path_key,baseline_state,sync_state,base_hash,base_remote_hash,base_size,base_mtime_ms,local_exists,local_hash,remote_exists,remote_hash,remote_etag,local_size,remote_size,local_mtime_ns,remote_mtime_ms FROM sync_files WHERE root_id=?").bind(root_id).fetch_all(&self.pool).await?;
+        let mut seen = HashSet::new();
+        for row in &rows {
+            let path: &str = row.get("relative_path");
+            let stored_key: &str = row.get("path_key");
+            let key = path_key(path);
+            if key != stored_key || !seen.insert(key) {
+                return Err(AppError::new("CASE_COLLISION", format!("本地同步记录包含大小写冲突的路径：{path}；为保护数据，本轮同步已停止")));
+            }
+        }
         Ok(rows
             .iter()
             .map(|r| BaselineEntry {
@@ -51,7 +116,7 @@ impl Database {
             sqlx::query("UPDATE sync_files SET sync_state='IGNORED',updated_at=? WHERE root_id=? AND path_key=?")
                 .bind(unix_ms())
                 .bind(root_id)
-                .bind(path.to_lowercase())
+                .bind(path_key(path))
                 .execute(&mut *tx)
                 .await?;
         }
@@ -59,7 +124,7 @@ impl Database {
             sqlx::query("UPDATE sync_files SET baseline_state='UNKNOWN',base_hash=NULL,base_remote_hash=NULL,base_size=NULL,base_mtime_ms=NULL,sync_state='UNKNOWN',updated_at=? WHERE root_id=? AND path_key=? AND sync_state='IGNORED'")
                 .bind(unix_ms())
                 .bind(root_id)
-                .bind(path.to_lowercase())
+                .bind(path_key(path))
                 .execute(&mut *tx)
                 .await?;
         }
@@ -119,7 +184,7 @@ impl Database {
         local: Option<&LocalEntry>,
         remote: Option<&RemoteEntry>,
     ) -> AppResult<()> {
-        let key = path.to_lowercase();
+        let key = path_key(path);
         let now = unix_ms();
         let base_size = hash.map(|_| {
             local
@@ -190,7 +255,7 @@ impl Database {
 
     pub async fn mark_line_endings_equivalent(&self, root_id: &str, path: &str) -> AppResult<()> {
         sqlx::query("UPDATE sync_files SET sync_state='LINE_ENDINGS_EQUIVALENT',updated_at=? WHERE root_id=? AND path_key=?")
-            .bind(unix_ms()).bind(root_id).bind(path.to_lowercase()).execute(&self.pool).await?;
+            .bind(unix_ms()).bind(root_id).bind(path_key(path)).execute(&self.pool).await?;
         Ok(())
     }
 }

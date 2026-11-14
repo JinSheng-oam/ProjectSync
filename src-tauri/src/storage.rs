@@ -8,7 +8,7 @@ mod migrations;
 
 use migrations::reconcile_migration_line_endings;
 
-use crate::{domain::*, filesystem::is_generated_conflict_copy, security::unix_ms};
+use crate::{domain::*, filesystem::is_generated_conflict_copy, security::{path_key, unix_ms}};
 use sqlx::{
     sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions, SqliteSynchronous},
     Row, SqlitePool,
@@ -72,6 +72,8 @@ impl Database {
             pool,
             path: path.to_path_buf(),
         };
+        db.reconcile_file_path_keys().await?;
+        db.reconcile_conflict_path_keys().await?;
         db.ensure_identity().await?;
         Ok(db)
     }
