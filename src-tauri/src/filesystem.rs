@@ -15,43 +15,69 @@ use walkdir::WalkDir;
 pub struct RuleEngine {
     includes: GlobSet,
     excludes: GlobSet,
-    has_include: bool,
+    include_parents: Option<GlobSet>,
+}
+
+fn compile_sync_glob(pattern: &str) -> AppResult<globset::Glob> {
+    GlobBuilder::new(pattern)
+        .literal_separator(true)
+        .backslash_escape(true)
+        .case_insensitive(true)
+        .build()
+        .map_err(|e| AppError::new("RULE_INVALID", format!("Glob 规则无效：{e}")))
 }
 
 impl RuleEngine {
     pub fn compile(rules: &[SyncRuleDto]) -> AppResult<Self> {
         let mut include_builder = GlobSetBuilder::new();
         let mut exclude_builder = GlobSetBuilder::new();
-        let mut has_include = false;
+        let mut parent_builder = GlobSetBuilder::new();
+        let mut can_prune = true;
         for rule in rules.iter().filter(|r| r.enabled) {
             let pattern = rule.pattern.trim();
             if pattern.is_empty() {
                 return Err(AppError::new("RULE_INVALID", "同步规则不能为空"));
             }
-            let glob = GlobBuilder::new(pattern)
-                .literal_separator(true)
-                .backslash_escape(true)
-                .case_insensitive(true)
-                .build()
-                .map_err(|e| AppError::new("RULE_INVALID", format!("Glob 规则无效：{e}")))?;
+            let glob = compile_sync_glob(pattern)?;
             match rule.rule_type {
                 crate::domain::RuleType::Include => {
                     include_builder.add(glob);
-                    has_include = true;
+                    // For simple component globs, every possible parent is a slash
+                    // prefix. Keep scanning when advanced syntax makes that uncertain.
+                    let fixed_depth = pattern.strip_suffix("/**").unwrap_or(pattern);
+                    if fixed_depth.contains("**")
+                        || fixed_depth.contains(['[', ']', '{', '}', '\\'])
+                    {
+                        can_prune = false;
+                    } else {
+                        for (index, _) in pattern.match_indices('/').filter(|(index, _)| *index > 0) {
+                            parent_builder.add(compile_sync_glob(&pattern[..index])?);
+                        }
+                    }
                 }
                 crate::domain::RuleType::Exclude => {
                     exclude_builder.add(glob);
                 }
             }
         }
+        let includes = include_builder
+            .build()
+            .map_err(|e| AppError::new("RULE_INVALID", e.to_string()))?;
+        let include_parents = if can_prune && !includes.is_empty() {
+            Some(
+                parent_builder
+                    .build()
+                    .map_err(|e| AppError::new("RULE_INVALID", e.to_string()))?,
+            )
+        } else {
+            None
+        };
         Ok(Self {
-            includes: include_builder
-                .build()
-                .map_err(|e| AppError::new("RULE_INVALID", e.to_string()))?,
+            includes,
             excludes: exclude_builder
                 .build()
                 .map_err(|e| AppError::new("RULE_INVALID", e.to_string()))?,
-            has_include,
+            include_parents,
         })
     }
 
@@ -60,7 +86,13 @@ impl RuleEngine {
             && !path
                 .match_indices('/')
                 .any(|(index, _)| self.is_excluded(&path[..index], true))
-            && (!self.has_include || self.includes.is_match(path))
+            && (self.includes.is_empty() || self.includes.is_match(path))
+    }
+
+    fn may_include_at_or_below(&self, path: &str) -> bool {
+        self.include_parents
+            .as_ref()
+            .is_none_or(|parents| self.includes.is_match(path) || parents.is_match(path))
     }
 
     pub(crate) fn is_excluded(&self, path: &str, is_directory: bool) -> bool {
@@ -138,10 +170,11 @@ pub fn scan_local_cached_excluding(
         );
         let file_type = item.file_type();
         if rule_engine.is_excluded(&relative, file_type.is_dir() || file_type.is_symlink())
+            || !rule_engine.may_include_at_or_below(&relative)
             || excluded_paths.contains(&path_key(&relative))
             || (file_type.is_file() && is_generated_conflict_copy(&relative))
         {
-            if file_type.is_dir() {
+            if file_type.is_dir() && !file_type.is_symlink() {
                 walker.skip_current_dir();
             }
             continue;
@@ -209,7 +242,7 @@ fn incomplete_local_scan(path: &str, reason: &str) -> AppError {
 
 #[cfg(all(test, windows))]
 #[test]
-fn local_scan_reports_junction_and_resumes_with_an_explicit_exclusion() {
+fn local_scan_only_blocks_junctions_that_can_affect_sync() {
     let root = std::env::temp_dir().join(format!("projectsync-junction-{}", uuid::Uuid::new_v4()));
     let parent = root.join("tools");
     let junction = parent.join("sdk");
@@ -230,7 +263,22 @@ fn local_scan_reports_junction_and_resumes_with_an_explicit_exclusion() {
     assert!(created.status.success(), "{}", String::from_utf8_lossy(&created.stderr));
     let document = root.join("README.md");
     fs::write(&document, b"content").unwrap();
+    let docs_dir = root.join("docs");
+    let nested_doc = docs_dir.join("guide.md");
+    fs::create_dir(&docs_dir).unwrap();
+    fs::write(&nested_doc, b"guide").unwrap();
     let blocked = scan_local(&root, &[]).err();
+    let include = |pattern: &str| SyncRuleDto {
+        id: None,
+        rule_type: crate::domain::RuleType::Include,
+        pattern: pattern.into(),
+        priority: 100,
+        enabled: true,
+    };
+    let docs_only = scan_local(&root, &[include("docs/**"), include("*.md")]);
+    let nested = scan_local(&root, &[include("tools/*/README.md")]).err();
+    let recursive = scan_local(&root, &[include("**/*.md")]).err();
+    let alternate = scan_local(&root, &[include("{docs,tools}/**")]).err();
     let unblocked = scan_local(
         &root,
         &[SyncRuleDto {
@@ -245,13 +293,21 @@ fn local_scan_reports_junction_and_resumes_with_an_explicit_exclusion() {
     fs::remove_dir(parent).unwrap();
     fs::remove_dir(target).unwrap();
     fs::remove_file(document).unwrap();
+    fs::remove_file(nested_doc).unwrap();
+    fs::remove_dir(docs_dir).unwrap();
     fs::remove_dir(root).unwrap();
     let blocked = blocked.expect("an unexcluded junction must block sync");
     assert_eq!(blocked.code, "SCAN_INCOMPLETE");
     assert!(blocked.message.contains("tools/sdk"));
+    for result in [nested, recursive, alternate] {
+        assert_eq!(result.unwrap().code, "SCAN_INCOMPLETE");
+    }
+    let docs = docs_only.unwrap();
+    assert_eq!(docs.len(), 2);
+    assert_eq!(docs[0].relative_path, "README.md");
+    assert_eq!(docs[1].relative_path, "docs/guide.md");
     let files = unblocked.unwrap();
-    assert_eq!(files.len(), 1);
-    assert_eq!(files[0].relative_path, "README.md");
+    assert_eq!(files.len(), 2);
 }
 
 fn is_transfer_staging_file(path: &str) -> bool {
