@@ -47,7 +47,7 @@ export function OverviewDashboard({
 }: OverviewDashboardProps) {
   const unresolvedConflicts = conflicts.filter((c) => c.status === 'UNRESOLVED');
   const onlineAccounts = accounts.filter((a) => a.status === 'ONLINE');
-  const activeTasks = tasks.filter((t) => t.status === 'Running' || t.status === 'Pending');
+  const activeTasks = tasks.filter((t) => t.status === 'Running' || t.status === 'Pending' || t.status === 'RetryWait');
 
   return (
     <div className="space-y-6 max-w-7xl mx-auto">
