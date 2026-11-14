@@ -159,6 +159,8 @@ impl AppState {
                     }
                     _=interval.tick()=>{
                         let roots=match state.db.roots().await {Ok(roots)=>roots,Err(error)=>{tracing::error!(error=%error,"unable to list projects for scheduler");continue;}};
+                        let active_ids = roots.iter().filter(|root| root.enabled).map(|root| root.id.clone()).collect::<HashSet<_>>();
+                        prune_scheduler_maps(&mut debounce, &mut last_poll, &active_ids);
                         let now=Instant::now();
                         for root in roots.into_iter().filter(|root|root.enabled){
                             let retry_due=state.db.has_due_retry(&root.id).await.unwrap_or(false);
@@ -226,6 +228,42 @@ impl AppState {
         .await
         .map_err(|e| AppError::new("DIAGNOSTICS_EXPORT_FAILED", e.to_string()))??;
         Ok(())
+    }
+}
+
+fn prune_scheduler_maps(
+    debounce: &mut HashMap<String, JoinHandle<()>>,
+    last_poll: &mut HashMap<String, Instant>,
+    active_ids: &HashSet<String>,
+) {
+    debounce.retain(|id, handle| {
+        if !active_ids.contains(id) {
+            handle.abort();
+            false
+        } else {
+            !handle.is_finished()
+        }
+    });
+    last_poll.retain(|id, _| active_ids.contains(id));
+}
+
+#[cfg(test)]
+mod scheduler_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn scheduler_discards_removed_projects_and_finished_debounce_tasks() {
+        let done = tokio::spawn(async {});
+        while !done.is_finished() { tokio::task::yield_now().await; }
+        let removed = tokio::spawn(std::future::pending::<()>());
+        let live = tokio::spawn(std::future::pending::<()>());
+        let mut debounce = HashMap::from([("finished".into(), done), ("removed".into(), removed), ("live".into(), live)]);
+        let mut last_poll = HashMap::from([("removed".into(), Instant::now()), ("live".into(), Instant::now())]);
+        let active = HashSet::from(["finished".into(), "live".into()]);
+        prune_scheduler_maps(&mut debounce, &mut last_poll, &active);
+        assert_eq!(debounce.keys().map(String::as_str).collect::<Vec<_>>(), vec!["live"]);
+        assert_eq!(last_poll.keys().map(String::as_str).collect::<Vec<_>>(), vec!["live"]);
+        debounce.remove("live").unwrap().abort();
     }
 }
 

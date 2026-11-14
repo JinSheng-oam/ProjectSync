@@ -51,13 +51,7 @@ pub async fn create_sync_root(
         if let Err(error) = state.install_watcher(&root) {
             tracing::warn!(root_id=%root.id,error=%error,"local watcher unavailable; periodic scans remain active");
         }
-        let sync = state.sync.clone();
-        let root_id = root.id.clone();
-        tauri::async_runtime::spawn(async move {
-            if let Err(error) = sync.sync_now(&root_id).await {
-                tracing::warn!(root_id=%root_id,error=%error,"initial sync did not complete");
-            }
-        });
+        state.sync.schedule_sync(root.id.clone());
         Ok(root)
     }
     .await)
@@ -103,8 +97,10 @@ pub async fn enable_sync_root(state: State<'_, AppState>, root_id: String) -> Ap
             .into_iter()
             .find(|r| r.id == root_id)
             .ok_or_else(|| crate::domain::AppError::new("ROOT_NOT_FOUND", "同步项目不存在"))?;
-        state.install_watcher(&root)?;
-        let _ = state.sync.sync_now(&root_id).await?;
+        if let Err(error) = state.install_watcher(&root) {
+            tracing::warn!(root_id=%root.id,error=%error,"local watcher unavailable; periodic scans remain active");
+        }
+        state.sync.schedule_sync(root_id);
         Ok(())
     }
     .await)

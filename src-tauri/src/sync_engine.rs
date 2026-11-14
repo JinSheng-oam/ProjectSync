@@ -801,8 +801,17 @@ impl SyncCoordinator {
             return Err(AppError::new("ROOT_DISABLED", "同步项目已停用"));
         }
         self.db.set_root_status(root_id, "IDLE").await?;
-        let _ = self.sync_now(root_id).await?;
+        self.schedule_sync(root_id.to_owned());
         Ok(())
+    }
+
+    pub fn schedule_sync(&self, root_id: String) {
+        let sync = self.clone();
+        tauri::async_runtime::spawn(async move {
+            if let Err(error) = sync.sync_now(&root_id).await {
+                tracing::warn!(root_id=%root_id, error=%error, "background sync did not complete");
+            }
+        });
     }
 
     fn emit(&self, event: &str, payload: serde_json::Value) {
