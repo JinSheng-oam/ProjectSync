@@ -387,7 +387,7 @@ impl SyncCoordinator {
                         "本地文件在同步期间发生变化",
                     ));
                 }
-                move_to_trash(&self.data_dir, &root.id, &item.path, &local.absolute_path)?;
+                let trash = move_to_trash(&self.data_dir, &root.id, &item.path, &local.absolute_path)?;
                 self.db
                     .add_tombstone(
                         &root.id,
@@ -396,6 +396,7 @@ impl SyncCoordinator {
                         Some(&local.hash),
                         item.remote.as_ref().map(|v| v.hash.as_str()),
                         Some("LOCAL_TRASHED"),
+                        Some(trash.to_string_lossy().as_ref()),
                     )
                     .await?;
                 self.db
@@ -437,6 +438,7 @@ impl SyncCoordinator {
                         Some(&remote.hash),
                         None,
                         Some("REMOTE_MOVED_TO_TRASH"),
+                        Some(&trash),
                     )
                     .await?;
                 self.db

@@ -80,6 +80,55 @@ struct RootManifest {
 
 type TransferProgress = Arc<dyn Fn(u64) + Send + Sync>;
 
+#[derive(Debug)]
+struct PendingDownload {
+    path: String,
+    hash: String,
+}
+
+impl PendingDownload {
+    fn from_plan(item: &PlannedAction) -> Option<Self> {
+        if !matches!(item.action, SyncAction::DownloadNew | SyncAction::DownloadUpdate) {
+            return None;
+        }
+        Some(Self { path: item.path.clone(), hash: item.remote.as_ref()?.hash.clone() })
+    }
+}
+
+fn recycle_waits_for_download(item: &PlannedAction, pending: &[PendingDownload]) -> bool {
+    let Some(local) = item.local.as_ref() else { return true; };
+    let name = path_key(item.path.rsplit('/').next().unwrap_or(&item.path));
+    pending.iter().any(|download| {
+        download.hash == local.hash
+            || path_key(download.path.rsplit('/').next().unwrap_or(&download.path)) == name
+    })
+}
+
+#[cfg(test)]
+mod recycle_tests {
+    use super::*;
+
+    #[test]
+    fn failed_download_delays_only_likely_related_local_recycling() {
+        let item = PlannedAction {
+            path: "old/report.md".into(),
+            action: SyncAction::MoveLocalToTrash,
+            conflict: None,
+            local: Some(LocalEntry {
+                relative_path: "old/report.md".into(), path_key: "old/report.md".into(),
+                absolute_path: PathBuf::from("old/report.md"), hash: "original".into(),
+                size: 1, mtime_ns: 0,
+            }),
+            remote: None, expected_remote_etag: None, reason: String::new(),
+        };
+        let download = |path: &str, hash: &str| PendingDownload { path: path.into(), hash: hash.into() };
+        assert!(!recycle_waits_for_download(&item, &[download("other/unrelated.md", "different")]));
+        assert!(recycle_waits_for_download(&item, &[download("new/renamed.md", "original")]));
+        assert!(recycle_waits_for_download(&item, &[download("new/REPORT.MD", "edited")]));
+        assert!(!recycle_waits_for_download(&item, &[]));
+    }
+}
+
 impl SyncCoordinator {
     pub fn new(db: Database, data_dir: PathBuf, app: AppHandle) -> Self {
         Self {
@@ -435,19 +484,12 @@ impl SyncCoordinator {
         self.db.set_root_status(&root.id, "SYNCING").await?;
         let mut transfer_jobs = Vec::new();
         let mut local_recycle = Vec::new();
-        let mut planned_downloads = 0;
-        let downloaded_before = summary.downloaded;
+        let mut pending_downloads = Vec::new();
         for item in plan {
             self.ensure_sync_active(&root.id).await?;
             if item.action == SyncAction::MoveLocalToTrash {
                 local_recycle.push(item);
                 continue;
-            }
-            if matches!(
-                item.action,
-                SyncAction::DownloadNew | SyncAction::DownloadUpdate
-            ) {
-                planned_downloads += 1;
             }
             if matches!(
                 item.action,
@@ -477,6 +519,9 @@ impl SyncCoordinator {
                 if ready {
                     transfer_jobs.push((item, task, total));
                 } else {
+                    if let Some(download) = PendingDownload::from_plan(&item) {
+                        pending_downloads.push(download);
+                    }
                     summary.skipped += 1;
                 }
                 continue;
@@ -502,6 +547,7 @@ impl SyncCoordinator {
                                 previous_hash,
                                 None,
                                 Some("CONFIRMED_DELETED"),
+                                None,
                             )
                             .await?;
                         self.db
@@ -512,6 +558,7 @@ impl SyncCoordinator {
                                 previous_hash,
                                 None,
                                 Some("CONFIRMED_DELETED"),
+                                None,
                             )
                             .await?;
                     }
@@ -669,51 +716,57 @@ impl SyncCoordinator {
                 let client = client.clone();
                 let capabilities = capabilities.clone();
                 async move {
-                    self.execute_planned_task(root, &client, &capabilities, &item, &task, total)
-                        .await
+                    let download = PendingDownload::from_plan(&item);
+                    let result = self.execute_planned_task(root, &client, &capabilities, &item, &task, total).await;
+                    (download, result)
                 }
             })
             .buffer_unordered(root.max_parallel_transfers.clamp(1, 8) as usize)
             .collect::<Vec<_>>()
             .await;
-        for result in transfer_results {
+        for (download, result) in transfer_results {
             let (uploaded, downloaded, failed, blocked) = result?;
+            if downloaded == 0 {
+                if let Some(download) = download {
+                    pending_downloads.push(download);
+                    if failed == 0 && blocked == 0 { summary.skipped += 1; }
+                }
+            }
             summary.uploaded += uploaded;
             summary.downloaded += downloaded;
             summary.failed += failed;
             summary.blocked += blocked;
         }
-        // A remote reorganization can appear as new content plus disappeared
-        // paths, even when the content also changed and cannot be paired by hash.
-        // A skipped or cancelled download is not counted as a success.
-        if summary.downloaded - downloaded_before == planned_downloads {
-            for item in local_recycle {
-                self.ensure_sync_active(&root.id).await?;
-                let total = item.local.as_ref().map_or(0, |entry| entry.size);
-                let (task, ready) = self
-                    .db
-                    .prepare_task(
-                        &root.id,
-                        &item.path,
-                        &item.action,
-                        total,
-                        item.local.as_ref().map(|entry| entry.hash.as_str()),
-                        None,
-                        None,
-                    )
-                    .await?;
-                if ready {
-                    let (_, _, failed, blocked) = self
-                        .execute_planned_task(&root, &client, &capabilities, &item, &task, total)
-                        .await?;
-                    summary.failed += failed;
-                    summary.blocked += blocked;
-                } else {
-                    summary.skipped += 1;
-                }
+        // A failed download only postpones likely moves (same content or name).
+        // Other deletions still recheck both sides and keep a local trash copy.
+        for item in local_recycle {
+            if recycle_waits_for_download(&item, &pending_downloads) {
+                summary.skipped += 1;
+                continue;
             }
-        } else {
-            summary.skipped += local_recycle.len() as u64;
+            self.ensure_sync_active(&root.id).await?;
+            let total = item.local.as_ref().map_or(0, |entry| entry.size);
+            let (task, ready) = self
+                .db
+                .prepare_task(
+                    &root.id,
+                    &item.path,
+                    &item.action,
+                    total,
+                    item.local.as_ref().map(|entry| entry.hash.as_str()),
+                    None,
+                    None,
+                )
+                .await?;
+            if ready {
+                let (_, _, failed, blocked) = self
+                    .execute_planned_task(&root, &client, &capabilities, &item, &task, total)
+                    .await?;
+                summary.failed += failed;
+                summary.blocked += blocked;
+            } else {
+                summary.skipped += 1;
+            }
         }
         if !root.initial_sync_completed && summary.failed == 0 && summary.blocked == 0 {
             self.db.mark_initial_completed(&root.id).await?;

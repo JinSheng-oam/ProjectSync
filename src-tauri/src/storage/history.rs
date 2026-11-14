@@ -32,6 +32,8 @@ mod tests {
         assert!(second.iter().all(|entry| !first.iter().any(|old| old.id == entry.id)));
         assert!(db.history("文档", Some("r1"), 20, 0, Some("UPLOAD_NEW"), None, None).await.unwrap().is_empty());
         assert!(db.history("文档", Some("r1"), 20, 0, None, Some("SUCCESS"), None).await.unwrap().is_empty());
+        db.add_tombstone("r1", "文档.md", "LOCAL", Some("hash"), None, Some("LOCAL_TRASHED"), Some("C:/trash/文档.md")).await.unwrap();
+        assert_eq!(sqlx::query_scalar::<_, String>("SELECT trash_path FROM sync_tombstones WHERE root_id='r1'").fetch_one(&db.pool).await.unwrap(), "C:/trash/文档.md");
     }
 }
 
@@ -54,9 +56,10 @@ impl Database {
         previous_hash: Option<&str>,
         counterpart_hash: Option<&str>,
         status: Option<&str>,
+        trash_path: Option<&str>,
     ) -> AppResult<()> {
-        sqlx::query("INSERT INTO sync_tombstones(root_id,relative_path,side,previous_hash,observed_counterpart_hash,device_id,trash_path,status,created_at,completed_at) VALUES(?,?,?,?,?,?,NULL,?,?,?)")
-            .bind(root_id).bind(path).bind(side).bind(previous_hash).bind(counterpart_hash).bind(self.device_id().await?).bind(status.unwrap_or("COMPLETED")).bind(unix_ms()).bind(unix_ms()).execute(&self.pool).await?;
+        sqlx::query("INSERT INTO sync_tombstones(root_id,relative_path,side,previous_hash,observed_counterpart_hash,device_id,trash_path,status,created_at,completed_at) VALUES(?,?,?,?,?,?,?,?,?,?)")
+            .bind(root_id).bind(path).bind(side).bind(previous_hash).bind(counterpart_hash).bind(self.device_id().await?).bind(trash_path).bind(status.unwrap_or("COMPLETED")).bind(unix_ms()).bind(unix_ms()).execute(&self.pool).await?;
         Ok(())
     }
 
