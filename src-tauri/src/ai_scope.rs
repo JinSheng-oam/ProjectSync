@@ -106,15 +106,7 @@ async fn suggest(
         None,
     )
     .await?;
-    let content = content.trim();
-    let content = content
-        .strip_prefix("```json")
-        .or_else(|| content.strip_prefix("```"))
-        .unwrap_or(content)
-        .trim()
-        .strip_suffix("```")
-        .unwrap_or(content)
-        .trim();
+    let content = strip_scope_fences(&content);
     let mut proposal: Proposal = serde_json::from_str(content)
         .map_err(|_| AppError::new("AI_RESPONSE_INVALID", "AI 未返回有效规则 JSON，请重试"))?;
     if proposal.rules.is_empty() || proposal.rules.len() > 100 {
@@ -129,4 +121,28 @@ async fn suggest(
     }
     RuleEngine::compile(&proposal.rules)?;
     Ok(proposal.rules)
+}
+
+fn strip_scope_fences(content: &str) -> &str {
+    let content = content.trim();
+    let content = content
+        .strip_prefix("```json")
+        .or_else(|| content.strip_prefix("```"))
+        .unwrap_or(content)
+        .trim();
+    content.strip_suffix("```").unwrap_or(content).trim()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parses_scope_json_with_complete_or_unclosed_fences() {
+        let json = r#"{"rules":[{"ruleType":"INCLUDE","pattern":"*.md","enabled":true,"priority":10}]}"#;
+        for input in [json.to_string(), format!("```json\n{json}\n```"), format!("```json\n{json}"), format!("```\n{json}\n```")] {
+            let proposal: Proposal = serde_json::from_str(strip_scope_fences(&input)).unwrap();
+            assert_eq!(proposal.rules[0].pattern, "*.md");
+        }
+    }
 }
