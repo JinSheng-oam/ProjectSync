@@ -22,6 +22,13 @@ struct AiMergePreviewRecord {
     created_at: i64,
 }
 
+impl AiMergePreviewRecord {
+    fn remote_size(&self) -> AppResult<u64> {
+        self.remote_content.as_ref().map(|content| content.len() as u64)
+            .ok_or_else(|| AppError::new("AI_MERGE_PREVIEW_EXPIRED", "合并预览缺少远端原始内容，请重新生成"))
+    }
+}
+
 fn strip_markdown_fences(input: &str) -> String {
     let trimmed = input.trim();
     if let Some(stripped) = trimmed.strip_prefix("```") {
@@ -329,6 +336,7 @@ impl SyncCoordinator {
                 "AI 合并预览与当前冲突记录不匹配",
             ));
         }
+        let remote_size = record.remote_size()?;
 
         if instruction == "__DIRECT_USER_EDIT__" {
             let base_content = current_content.unwrap_or(&record.merged_content);
@@ -361,7 +369,7 @@ impl SyncCoordinator {
                 remote_content: record.remote_content.clone(),
                 suggestions: record.suggestions,
                 local_size: local_meta.len(),
-                remote_size: local_meta.len(),
+                remote_size,
                 model: record.model.clone(),
                 created_at: record.created_at,
                 expires_at: record.created_at.saturating_add(AI_MERGE_PREVIEW_TTL_MS),
@@ -418,7 +426,7 @@ impl SyncCoordinator {
             remote_content: record.remote_content.clone(),
             suggestions,
             local_size: local_meta.len(),
-            remote_size: local_meta.len(),
+            remote_size,
             model: config.model,
             created_at: record.created_at,
             expires_at: record.created_at.saturating_add(AI_MERGE_PREVIEW_TTL_MS),
@@ -426,6 +434,16 @@ impl SyncCoordinator {
     }
 
     pub async fn apply_ai_merge(&self, conflict_id: &str, preview_id: &str) -> AppResult<String> {
+        let (root_id, ..) = self.db.conflict_record(conflict_id).await?;
+        let lock = self.lock_for(&root_id)?;
+        let _guard = lock.lock().await;
+        // Reload after acquiring the project lock: another sync or resolution
+        // may have changed or resolved the conflict while we waited.
+        let (locked_root_id, path, local_hash, remote_hash, _base_hash, expected_etag) =
+            self.db.conflict_record(conflict_id).await?;
+        if locked_root_id != root_id {
+            return Err(AppError::retryable("AI_MERGE_PREVIEW_STALE", "冲突所属项目已变化，请重新生成预览"));
+        }
         let preview_path = ai_merge_preview_path(&self.data_dir, preview_id)?;
         let preview_bytes = tokio::fs::read(&preview_path).await.map_err(|_| {
             AppError::new(
@@ -448,8 +466,6 @@ impl SyncCoordinator {
                 "AI 合并预览已过期，请重新生成",
             ));
         }
-        let (root_id, path, local_hash, remote_hash, _base_hash, expected_etag) =
-            self.db.conflict_record(conflict_id).await?;
         if local_hash.as_deref() != Some(preview.local_hash.as_str())
             || remote_hash.as_deref() != Some(preview.remote_hash.as_str())
             || expected_etag != preview.remote_etag
@@ -680,7 +696,19 @@ fn cleanup_ai_merge_previews(data_dir: &Path) {
 
 #[cfg(test)]
 mod ai_merge_response_tests {
-    use super::parse_ai_merge_response;
+    use super::{parse_ai_merge_response, AiMergePreviewRecord};
+
+    #[test]
+    fn preview_remote_size_uses_the_original_utf8_bytes() {
+        let mut record: AiMergePreviewRecord = serde_json::from_value(serde_json::json!({
+            "conflictId": "c", "localHash": "l", "remoteHash": "r",
+            "remoteEtag": null, "mergedContent": "merged", "localContent": "x",
+            "remoteContent": "远端\r\n", "model": "m", "createdAt": 1
+        })).unwrap();
+        assert_eq!(record.remote_size().unwrap(), "远端\r\n".len() as u64);
+        record.remote_content = None;
+        assert_eq!(record.remote_size().unwrap_err().code, "AI_MERGE_PREVIEW_EXPIRED");
+    }
 
     #[test]
     fn parses_merged_file_first_and_analysis_second() {
