@@ -15,7 +15,7 @@ impl SyncCoordinator {
         let (account, client) = self.client_for(&root.account_id).await?;
         let capabilities = account.capabilities.unwrap_or_else(unsafe_capabilities);
         let rules = self.db.rules(&root_id).await?;
-        let target = ensure_safe_parent(&root.local_path, &path)?;
+        let target = ensure_safe_parent_async(&root.local_path, &path).await?;
         let remote_path = remote_file_path(&root.remote_path, &path)?;
         let current_local = if tokio::fs::try_exists(&target).await? {
             Some(hash_file_async(&target).await?)
@@ -117,10 +117,10 @@ impl SyncCoordinator {
                             "远端冲突版本读取后发生变化",
                         ));
                     }
-                    if tokio::fs::try_exists(&target).await? {
-                        move_to_trash_async(&self.data_dir, &root.id, &path, &target).await?;
+                    if let Some(expected) = local_hash.as_deref() {
+                        move_to_trash_if_unchanged_async(&self.data_dir, &root.id, &path, &target, expected).await?;
                     }
-                    atomic_replace(&stage, &target)?;
+                    atomic_install_new_async(&stage, &target).await?;
                     let local = LocalEntry {
                         relative_path: path.clone(),
                         path_key: path_key(&path),
@@ -133,14 +133,10 @@ impl SyncCoordinator {
                         .update_base(&root.id, &path, Some(&hash), Some(&local), Some(remote))
                         .await?;
                 } else {
-                    if tokio::fs::try_exists(&target).await? {
-                        if Some(hash_file_async(&target).await?.as_str()) != local_hash.as_deref() {
-                            return Err(AppError::retryable(
-                                "LOCAL_FILE_CHANGED",
-                                "确认期间本地旧文件发生变化；本地文件已保留",
-                            ));
-                        }
-                        move_to_trash_async(&self.data_dir, &root.id, &path, &target).await?;
+                    if let Some(expected) = local_hash.as_deref() {
+                        move_to_trash_if_unchanged_async(&self.data_dir, &root.id, &path, &target, expected).await?;
+                    } else if tokio::fs::try_exists(&target).await? {
+                        return Err(AppError::retryable("LOCAL_FILE_CHANGED", "确认期间本地出现了新文件；本地文件已保留"));
                     }
                     self.db
                         .update_base(&root.id, &path, None, None, None)
@@ -187,7 +183,7 @@ impl SyncCoordinator {
                                 "保存本地冲突版本后原文件发生变化",
                             ));
                         }
-                        atomic_replace(&stage, &target)?;
+                        atomic_replace_if_unchanged_async(&stage, &target, local_hash).await?;
                         let local = LocalEntry {
                             relative_path: path.clone(),
                             path_key: path_key(&path),
@@ -248,7 +244,7 @@ impl SyncCoordinator {
                             "远端版本读取后发生变化",
                         ));
                     }
-                    atomic_replace(&stage, &target)?;
+                    atomic_install_new_async(&stage, &target).await?;
                     let local = LocalEntry {
                         relative_path: path.clone(),
                         path_key: path_key(&path),

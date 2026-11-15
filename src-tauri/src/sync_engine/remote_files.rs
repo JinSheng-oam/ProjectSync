@@ -110,6 +110,20 @@ pub(super) async fn put_remote_update(
     ))
 }
 
+pub(super) async fn rollback_remote_merge(
+    client: &WebDavClient,
+    original: &Path,
+    destination: &str,
+    merged_etag: Option<&str>,
+    merged_hash: &str,
+    original_hash: &str,
+    capabilities: &WebDavCapabilities,
+) -> AppResult<()> {
+    put_remote_update(client, original, destination, merged_etag, merged_hash, capabilities, None).await?;
+    verify_remote_hash(client, destination, original_hash, original, capabilities).await?;
+    Ok(())
+}
+
 async fn put_remote_with_lock(
     client: &WebDavClient,
     source: &Path,
@@ -395,6 +409,17 @@ async fn digest_verification_avoids_get_only_for_a_matching_server_digest() {
     assert_eq!(verify_remote_hash(&client, "/good", "different", &source.0, &capabilities).await.unwrap_err().code, "LOCAL_FILE_CHANGED");
     assert_eq!(client.get_bytes_limited("/good", 1024).await.unwrap_err().code, "DAV_FILE_TOO_LARGE");
     assert_eq!(client.get_bytes_limited("/chunked", 1024).await.unwrap_err().code, "DAV_FILE_TOO_LARGE");
+    let staging = TempFile(std::env::temp_dir().join(format!("projectsync-cancel-test-{}", uuid::Uuid::new_v4())));
+    let cancellation = CancellationToken::new();
+    let progress_cancellation = cancellation.clone();
+    let progress: TransferProgress = Arc::new(move |_| progress_cancellation.cancel());
+    let cancelled = tokio::time::timeout(std::time::Duration::from_secs(1),
+        client.get_to_file_cancellable("/slow", &staging.0, Some(progress), Some(&cancellation)))
+        .await.expect("staged download should stop promptly").unwrap_err();
+    assert_eq!(cancelled.code, "TASK_CANCELLED");
+    let staged = tokio::fs::read(&staging.0).await.unwrap();
+    assert!(!staged.is_empty() && staged.len() < contents.len());
+    tokio::fs::remove_file(&staging.0).await.expect("cancelled download closes its staging file");
     capabilities.repr_digest_sha256_verified = false;
     assert_eq!(verify_remote_hash(&client, "/good", &expected, &source.0, &capabilities).await.unwrap().hash, expected);
     let counts: serde_json::Value = serde_json::from_slice(&client.get_bytes("/_counts").await.unwrap()).unwrap();
@@ -407,6 +432,31 @@ async fn digest_verification_avoids_get_only_for_a_matching_server_digest() {
     assert!(probed.supports_if_none_match);
     assert!(!probed.supports_lock);
     assert!(probed.probe_cleanup_warning.is_none());
+
+    // A merge which loses a race with a local edit must restore only the exact
+    // remote version it just wrote; another device's newer write must survive.
+    let original = TempFile(std::env::temp_dir().join(format!("projectsync-original-{}", uuid::Uuid::new_v4())));
+    let merged = TempFile(std::env::temp_dir().join(format!("projectsync-merged-{}", uuid::Uuid::new_v4())));
+    let edited = TempFile(std::env::temp_dir().join(format!("projectsync-edited-{}", uuid::Uuid::new_v4())));
+    tokio::fs::write(&original.0, b"original remote").await.unwrap();
+    tokio::fs::write(&merged.0, b"merged result").await.unwrap();
+    tokio::fs::write(&edited.0, b"another device").await.unwrap();
+    let original_hash = blake3::hash(b"original remote").to_hex().to_string();
+    let merged_hash = blake3::hash(b"merged result").to_hex().to_string();
+    for path in ["/rollback", "/rollback-race"] {
+        client.put_file(&original.0, path, PutCondition::CreateOnly).await.unwrap();
+        let before = read_remote_entry(&client, path).await.unwrap();
+        put_remote_update(&client, &merged.0, path, before.etag.as_deref(), &original_hash, &probed, None).await.unwrap();
+        let written = verify_remote_hash(&client, path, &merged_hash, &merged.0, &probed).await.unwrap();
+        if path == "/rollback-race" {
+            client.put_file(&edited.0, path, PutCondition::IfMatch(written.etag.clone().unwrap())).await.unwrap();
+            assert_eq!(rollback_remote_merge(&client, &original.0, path, written.etag.as_deref(), &merged_hash, &original_hash, &probed).await.unwrap_err().code, "DAV_PRECONDITION_FAILED");
+            assert_eq!(client.get_bytes(path).await.unwrap(), b"another device");
+        } else {
+            rollback_remote_merge(&client, &original.0, path, written.etag.as_deref(), &merged_hash, &original_hash, &probed).await.unwrap();
+            assert_eq!(client.get_bytes(path).await.unwrap(), b"original remote");
+        }
+    }
 }
 
 pub(super) async fn read_remote_snapshot(

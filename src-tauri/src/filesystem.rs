@@ -108,6 +108,7 @@ impl RuleEngine {
     }
 }
 
+#[cfg(all(test, windows))]
 pub fn scan_local(root: &Path, rules: &[SyncRuleDto]) -> AppResult<Vec<LocalEntry>> {
     scan_local_cached(root, rules, &[])
 }
@@ -131,6 +132,7 @@ pub async fn scan_local_cached_excluding_async(
         .map_err(|error| AppError::new("LOCAL_SCAN_FAILED", format!("本地扫描任务失败：{error}")))?
 }
 
+#[cfg(all(test, windows))]
 pub fn scan_local_cached(
     root: &Path,
     rules: &[SyncRuleDto],
@@ -507,12 +509,78 @@ pub fn ensure_safe_parent(root: &Path, relative_path: &str) -> AppResult<PathBuf
     Ok(target)
 }
 
+pub async fn ensure_safe_parent_async(root: &Path, relative_path: &str) -> AppResult<PathBuf> {
+    let root = root.to_owned();
+    let relative_path = relative_path.to_owned();
+    tokio::task::spawn_blocking(move || ensure_safe_parent(&root, &relative_path))
+        .await
+        .map_err(|error| AppError::new("LOCAL_PATH_INVALID", format!("准备本地目录失败：{error}")))?
+}
+
 pub fn atomic_replace(staging: &Path, target: &Path) -> AppResult<()> {
     atomic_commit(staging, target, true)
 }
 
 pub fn atomic_install_new(staging: &Path, target: &Path) -> AppResult<()> {
     atomic_commit(staging, target, false)
+}
+
+pub async fn atomic_install_new_async(staging: &Path, target: &Path) -> AppResult<()> {
+    let staging = staging.to_owned();
+    let target = target.to_owned();
+    tokio::task::spawn_blocking(move || atomic_install_new(&staging, &target))
+        .await
+        .map_err(|error| AppError::new("LOCAL_REPLACE_FAILED", format!("提交本地文件失败：{error}")))?
+}
+
+pub async fn atomic_replace_if_unchanged_async(
+    staging: &Path,
+    target: &Path,
+    expected_hash: &str,
+) -> AppResult<()> {
+    let staging = staging.to_owned();
+    let target = target.to_owned();
+    let expected_hash = expected_hash.to_owned();
+    tokio::task::spawn_blocking(move || {
+        let mut options = OpenOptions::new();
+        options.read(true);
+        #[cfg(windows)]
+        {
+            use std::os::windows::fs::OpenOptionsExt;
+            use windows_sys::Win32::Storage::FileSystem::{FILE_SHARE_DELETE, FILE_SHARE_READ};
+            options.share_mode(FILE_SHARE_READ | FILE_SHARE_DELETE);
+        }
+        let mut original = options.open(&target).map_err(|error| {
+            AppError::retryable("LOCAL_FILE_CHANGED", format!("无法确认本地原文件的当前状态：{error}"))
+        })?;
+        if hash_reader(&mut original)? != expected_hash {
+            return Err(AppError::retryable("LOCAL_FILE_CHANGED", "本地文件在写入前发生变化；未覆盖"));
+        }
+        // Windows MoveFileExW cannot replace a target while this read handle
+        // denies write sharing. Close it immediately before the rename; doing
+        // both in one blocking job avoids an async scheduling gap.
+        drop(original);
+        atomic_replace(&staging, &target)
+    }).await.map_err(|error| AppError::new("LOCAL_REPLACE_FAILED", format!("提交本地文件失败：{error}")))?
+}
+
+#[cfg(test)]
+#[tokio::test]
+async fn checked_replace_preserves_an_edited_original() {
+    let dir = std::env::temp_dir().join(format!("projectsync-replace-test-{}", uuid::Uuid::new_v4()));
+    tokio::fs::create_dir(&dir).await.unwrap();
+    let target = dir.join("notes.md");
+    let stage = dir.join("stage");
+    tokio::fs::write(&target, b"edited locally").await.unwrap();
+    tokio::fs::write(&stage, b"remote version").await.unwrap();
+    let expected = blake3::hash(b"earlier local version").to_hex().to_string();
+    assert_eq!(atomic_replace_if_unchanged_async(&stage, &target, &expected).await.unwrap_err().code, "LOCAL_FILE_CHANGED");
+    assert_eq!(tokio::fs::read(&target).await.unwrap(), b"edited locally");
+    assert_eq!(tokio::fs::read(&stage).await.unwrap(), b"remote version");
+    let current = blake3::hash(b"edited locally").to_hex().to_string();
+    atomic_replace_if_unchanged_async(&stage, &target, &current).await.unwrap();
+    assert_eq!(tokio::fs::read(&target).await.unwrap(), b"remote version");
+    tokio::fs::remove_dir_all(&dir).await.unwrap();
 }
 
 #[cfg(test)]
@@ -610,6 +678,16 @@ pub fn move_to_trash(
     relative_path: &str,
     source: &Path,
 ) -> AppResult<PathBuf> {
+    move_to_trash_checked(data_dir, root_id, relative_path, source, None)
+}
+
+fn move_to_trash_checked(
+    data_dir: &Path,
+    root_id: &str,
+    relative_path: &str,
+    source: &Path,
+    expected_hash: Option<&str>,
+) -> AppResult<PathBuf> {
     let source_meta = fs::symlink_metadata(source)
         .map_err(|e| AppError::new("LOCAL_TRASH_FAILED", e.to_string()))?;
     if source_meta.file_type().is_symlink()
@@ -647,6 +725,9 @@ pub fn move_to_trash(
         .open(source)
         .map_err(|e| AppError::new("LOCAL_TRASH_FAILED", format!("无法读取待回收文件：{e}")))?;
     let source_hash = hash_reader(&mut input)?;
+    if expected_hash.is_some_and(|expected| expected != source_hash) {
+        return Err(AppError::retryable("LOCAL_FILE_CHANGED", "回收前本地文件发生变化；原文件已保留"));
+    }
     input
         .seek(SeekFrom::Start(0))
         .map_err(|e| AppError::new("LOCAL_TRASH_FAILED", e.to_string()))?;
@@ -678,13 +759,32 @@ pub fn move_to_trash(
     Ok(destination)
 }
 
-pub async fn move_to_trash_async(data_dir: &Path, root_id: &str, relative_path: &str, source: &Path) -> AppResult<PathBuf> {
+pub async fn move_to_trash_if_unchanged_async(data_dir: &Path, root_id: &str, relative_path: &str, source: &Path, expected_hash: &str) -> AppResult<PathBuf> {
     let data_dir = data_dir.to_owned();
     let root_id = root_id.to_owned();
     let relative_path = relative_path.to_owned();
     let source = source.to_owned();
-    tokio::task::spawn_blocking(move || move_to_trash(&data_dir, &root_id, &relative_path, &source))
+    let expected_hash = expected_hash.to_owned();
+    tokio::task::spawn_blocking(move || move_to_trash_checked(&data_dir, &root_id, &relative_path, &source, Some(&expected_hash)))
         .await.map_err(|error| AppError::new("LOCAL_TRASH_FAILED", format!("本地回收任务失败：{error}")))?
+}
+
+#[cfg(test)]
+#[tokio::test]
+async fn async_recycle_keeps_a_verified_copy_before_removing_the_original() {
+    let dir = std::env::temp_dir().join(format!("projectsync-recycle-test-{}", uuid::Uuid::new_v4()));
+    let source = dir.join("project").join("notes.md");
+    tokio::fs::create_dir_all(source.parent().unwrap()).await.unwrap();
+    let contents = vec![b'x'; 1024 * 1024];
+    tokio::fs::write(&source, &contents).await.unwrap();
+    let stale_hash = blake3::hash(b"outdated").to_hex().to_string();
+    assert_eq!(move_to_trash_if_unchanged_async(&dir, "root", "notes.md", &source, &stale_hash).await.unwrap_err().code, "LOCAL_FILE_CHANGED");
+    assert_eq!(tokio::fs::read(&source).await.unwrap(), contents);
+    let current = blake3::hash(&contents).to_hex().to_string();
+    let trash = move_to_trash_if_unchanged_async(&dir, "root", "notes.md", &source, &current).await.unwrap();
+    assert!(!tokio::fs::try_exists(&source).await.unwrap());
+    assert_eq!(tokio::fs::read(&trash).await.unwrap(), contents);
+    tokio::fs::remove_dir_all(&dir).await.unwrap();
 }
 
 pub fn unique_conflict_path(original: &str, device_name: &str) -> AppResult<String> {

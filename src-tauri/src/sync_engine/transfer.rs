@@ -1,5 +1,12 @@
 use super::*;
 
+fn ensure_task_not_cancelled(cancellation: Option<&CancellationToken>) -> AppResult<()> {
+    if cancellation.is_some_and(CancellationToken::is_cancelled) {
+        return Err(AppError::new("TASK_CANCELLED", "用户已取消当前文件传输"));
+    }
+    Ok(())
+}
+
 impl SyncCoordinator {
     pub async fn handle_retained_remote_file(&self, task_id: &str, restore: bool) -> AppResult<()> {
         let (root_id, _) = self.db.remote_trash_task(task_id).await?;
@@ -11,7 +18,7 @@ impl SyncCoordinator {
         }
 
         let root = self.db.root(&root_id).await?;
-        let target = ensure_safe_parent(&root.local_path, &path)?;
+        let target = ensure_safe_parent_async(&root.local_path, &path).await?;
         match tokio::fs::symlink_metadata(&target).await {
             Ok(_) => return Err(AppError::new("LOCAL_FILE_CHANGED", "本地原位置已有文件，未覆盖")),
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
@@ -30,7 +37,7 @@ impl SyncCoordinator {
         };
         let id = uuid::Uuid::new_v4().to_string();
         let caps = account.capabilities.unwrap_or_else(unsafe_capabilities);
-        let bytes = match self.execute_item(&root, &client, &caps, &item, &id).await {
+        let bytes = match self.execute_item(&root, &client, &caps, &item, &id, None).await {
             Ok(bytes) => bytes,
             Err(error) => {
                 let _ = tokio::fs::remove_file(target.with_file_name(format!(".projectsync-{id}.stage"))).await;
@@ -58,7 +65,7 @@ impl SyncCoordinator {
         self.ensure_sync_active(&root.id).await?;
         let cancellation = Arc::new(ActiveTaskCancellation {
             token: CancellationToken::new(),
-            finished: Arc::new(tokio::sync::Notify::new()),
+            finished: CancellationToken::new(),
         });
         let _completion = TaskCompletionGuard(cancellation.finished.clone());
         self.task_cancellations
@@ -80,10 +87,10 @@ impl SyncCoordinator {
             serde_json::json!({"rootId":root.id,"taskId":task_id,"path":item.path,"operation":item.action,"bytesTransferred":0,"totalBytes":total}),
         );
         let started = Instant::now();
-        let result = tokio::select! {
-            result = self.execute_item(root, client, capabilities, item, task_id) => result,
-            _ = cancellation.token.cancelled() => Err(AppError::new("TASK_CANCELLED", "用户已取消当前文件传输")),
-        };
+        // Do not drop a whole transfer future on cancellation: a remote PUT, local
+        // rename or trash copy may already have committed. The individual steps
+        // below honour cancellation before writes and during staged downloads.
+        let result = self.execute_item(root, client, capabilities, item, task_id, Some(&cancellation.token)).await;
         if let Ok(mut tasks) = self.task_cancellations.lock() {
             tasks.remove(task_id);
         }
@@ -221,7 +228,9 @@ impl SyncCoordinator {
         capabilities: &WebDavCapabilities,
         item: &PlannedAction,
         task_id: &str,
+        cancellation: Option<&CancellationToken>,
     ) -> AppResult<u64> {
+        ensure_task_not_cancelled(cancellation)?;
         let destination = remote_file_path(&root.remote_path, &item.path)?;
         match item.action {
             SyncAction::UploadNew | SyncAction::UploadUpdate => {
@@ -235,7 +244,9 @@ impl SyncCoordinator {
                         "上传期间本地文件发生变化",
                     ));
                 }
+                ensure_task_not_cancelled(cancellation)?;
                 ensure_remote_parent(client, &destination).await?;
+                ensure_task_not_cancelled(cancellation)?;
                 let progress =
                     self.transfer_progress(&root.id, task_id, &item.path, item.action, local.size);
                 if item.action == SyncAction::UploadNew {
@@ -289,7 +300,8 @@ impl SyncCoordinator {
                     .remote
                     .as_ref()
                     .ok_or_else(|| AppError::new("DAV_NOT_FOUND", "远端文件已不存在"))?;
-                let target = ensure_safe_parent(&root.local_path, &item.path)?;
+                let target = ensure_safe_parent_async(&root.local_path, &item.path).await?;
+                ensure_task_not_cancelled(cancellation)?;
                 if item.action == SyncAction::DownloadNew && tokio::fs::try_exists(&target).await? {
                     return Err(AppError::new(
                         "LOCAL_FILE_CHANGED",
@@ -300,9 +312,10 @@ impl SyncCoordinator {
                 let _ = tokio::fs::remove_file(&staging).await;
                 let progress =
                     self.transfer_progress(&root.id, task_id, &item.path, item.action, remote.size);
-                let size = client
-                    .get_to_file_with_progress(&destination, &staging, Some(progress))
-                    .await?;
+                let size = client.get_to_file_cancellable(
+                    &destination, &staging, Some(progress), cancellation,
+                ).await?;
+                ensure_task_not_cancelled(cancellation)?;
                 let hash = hash_file_async(&staging).await?;
                 if hash != remote.hash {
                     return Err(AppError::retryable(
@@ -320,6 +333,7 @@ impl SyncCoordinator {
                         "下载期间远端版本发生变化；已保留临时文件",
                     ));
                 }
+                ensure_task_not_cancelled(cancellation)?;
                 if item.action == SyncAction::DownloadUpdate {
                     if let Some(local) = item.local.as_ref() {
                         if !tokio::fs::try_exists(&target).await? || hash_file_async(&target).await? != local.hash {
@@ -335,10 +349,12 @@ impl SyncCoordinator {
                         "下载目标已存在；未覆盖",
                     ));
                 }
+                ensure_task_not_cancelled(cancellation)?;
                 if item.action == SyncAction::DownloadNew {
-                    crate::filesystem::atomic_install_new(&staging, &target)?;
+                    atomic_install_new_async(&staging, &target).await?;
                 } else {
-                    atomic_replace(&staging, &target)?;
+                    let local = item.local.as_ref().ok_or_else(|| AppError::new("LOCAL_FILE_CHANGED", "待替换的本地文件已不存在"))?;
+                    atomic_replace_if_unchanged_async(&staging, &target, &local.hash).await?;
                 }
                 let verified = hash_file_async(&target).await?;
                 if verified != remote.hash {
@@ -387,7 +403,8 @@ impl SyncCoordinator {
                         "本地文件在同步期间发生变化",
                     ));
                 }
-                let trash = move_to_trash(&self.data_dir, &root.id, &item.path, &local.absolute_path)?;
+                ensure_task_not_cancelled(cancellation)?;
+                let trash = move_to_trash_if_unchanged_async(&self.data_dir, &root.id, &item.path, &local.absolute_path, &local.hash).await?;
                 self.db
                     .add_tombstone(
                         &root.id,
@@ -427,6 +444,7 @@ impl SyncCoordinator {
                     item.path.replace('/', "_")
                 );
                 ensure_remote_parent(client, &trash).await?;
+                ensure_task_not_cancelled(cancellation)?;
                 client
                     .move_resource(&destination, &trash, false, Some(etag))
                     .await?;

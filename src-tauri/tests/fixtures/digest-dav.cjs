@@ -29,6 +29,13 @@ const server = http.createServer((req, res) => {
       res.write(contents.subarray(0, 2048));
       return res.end(contents.subarray(2048));
     }
+    if (req.method === 'GET' && path === '/slow') {
+      res.writeHead(200, { 'Content-Length': contents.length });
+      res.write(contents.subarray(0, 4096));
+      const timer = setTimeout(() => res.end(contents.subarray(4096)), 2000);
+      res.on('close', () => clearTimeout(timer));
+      return;
+    }
     const name = path.slice(1);
     if (['good', 'bad', 'corrupt', 'mismatch'].includes(name)) {
       const etag = '"version-1"';

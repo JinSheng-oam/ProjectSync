@@ -17,7 +17,7 @@ use reqwest::{
 use serde::Serialize;
 use std::{path::Path, str::FromStr, sync::Arc};
 use tokio::{fs::File, io::AsyncWriteExt};
-use tokio_util::io::ReaderStream;
+use tokio_util::{io::ReaderStream, sync::CancellationToken};
 use url::Url;
 use zeroize::Zeroizing;
 
@@ -286,9 +286,26 @@ impl WebDavClient {
         destination: &Path,
         progress: Option<Arc<dyn Fn(u64) + Send + Sync>>,
     ) -> AppResult<u64> {
-        let response = self
-            .send(Method::GET, self.url_for(path)?, HeaderMap::new(), None)
-            .await?;
+        self.get_to_file_cancellable(path, destination, progress, None).await
+    }
+
+    pub(crate) async fn get_to_file_cancellable(
+        &self,
+        path: &str,
+        destination: &Path,
+        progress: Option<Arc<dyn Fn(u64) + Send + Sync>>,
+        cancellation: Option<&CancellationToken>,
+    ) -> AppResult<u64> {
+        let request = self.send(Method::GET, self.url_for(path)?, HeaderMap::new(), None);
+        let response = if let Some(cancellation) = cancellation {
+            tokio::select! {
+                biased;
+                _ = cancellation.cancelled() => return Err(AppError::new("TASK_CANCELLED", "用户已取消当前文件传输")),
+                result = request => result?,
+            }
+        } else {
+            request.await?
+        };
         let status = response.status();
         Self::check_status(status, "GET")?;
         let mut stream = response.bytes_stream();
@@ -296,7 +313,22 @@ impl WebDavClient {
             .await
             .map_err(|e| AppError::new("LOCAL_STAGING_FAILED", e.to_string()))?;
         let mut total = 0_u64;
-        while let Some(chunk) = stream.next().await {
+        loop {
+            let next = if let Some(cancellation) = cancellation {
+                tokio::select! {
+                    biased;
+                    _ = cancellation.cancelled() => {
+                        // Await pending filesystem work before the caller removes
+                        // the staging file, especially on Windows.
+                        file.flush().await.map_err(|e| AppError::new("LOCAL_STAGING_FAILED", e.to_string()))?;
+                        return Err(AppError::new("TASK_CANCELLED", "用户已取消当前文件传输"));
+                    }
+                    next = stream.next() => next,
+                }
+            } else {
+                stream.next().await
+            };
+            let Some(chunk) = next else { break };
             let chunk = chunk.map_err(|_| {
                 AppError::retryable("DAV_CONNECTION_FAILED", "读取 WebDAV 文件流失败")
             })?;

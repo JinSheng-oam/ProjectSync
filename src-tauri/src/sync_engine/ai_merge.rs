@@ -119,7 +119,7 @@ impl SyncCoordinator {
             {
                 return Err(AppError::new("AI_MERGE_UNSUPPORTED", "该路径已被同步规则排除。"));
             }
-            let target = ensure_safe_parent(&root.local_path, &path)?;
+            let target = ensure_safe_parent_async(&root.local_path, &path).await?;
             let metadata = tokio::fs::metadata(&target).await
                 .map_err(|_| AppError::new("LOCAL_NOT_FOUND", "本地版本不存在，请回到冲突中心手动裁决。"))?;
             if !metadata.is_file() || metadata.len() > AI_MERGE_SOURCE_LIMIT {
@@ -154,7 +154,7 @@ impl SyncCoordinator {
         let remote_hash = remote_hash
             .ok_or_else(|| AppError::new("AI_MERGE_UNSUPPORTED", "远端冲突版本不存在，无法合并。请在冲突中心手动裁决。"))?;
         let root = self.db.root(&root_id).await?;
-        let target = ensure_safe_parent(&root.local_path, &path)?;
+        let target = ensure_safe_parent_async(&root.local_path, &path).await?;
         let local_meta = tokio::fs::metadata(&target).await
             .map_err(|_| AppError::new("LOCAL_NOT_FOUND", "本地冲突版本不存在"))?;
         if !local_meta.is_file() {
@@ -352,7 +352,7 @@ impl SyncCoordinator {
             }
             let (root_id, path, _, _, _, _) = self.db.conflict_record(conflict_id).await?;
             let root = self.db.root(&root_id).await?;
-            let target = ensure_safe_parent(&root.local_path, &path)?;
+            let target = ensure_safe_parent_async(&root.local_path, &path).await?;
             let local_meta = tokio::fs::metadata(&target).await.map_err(|_| AppError::new("LOCAL_NOT_FOUND", "本地冲突版本不存在"))?;
 
             record.merged_content = base_content.to_string();
@@ -382,7 +382,7 @@ impl SyncCoordinator {
 
         let (root_id, path, _, _, _, _) = self.db.conflict_record(conflict_id).await?;
         let root = self.db.root(&root_id).await?;
-        let target = ensure_safe_parent(&root.local_path, &path)?;
+        let target = ensure_safe_parent_async(&root.local_path, &path).await?;
         let local_meta = tokio::fs::metadata(&target).await.map_err(|_| AppError::new("LOCAL_NOT_FOUND", "本地冲突版本不存在"))?;
 
         let base_content = current_content.unwrap_or(&record.merged_content);
@@ -488,7 +488,7 @@ impl SyncCoordinator {
                 "当前 WebDAV 未通过 If-Match 或独占写锁的安全覆盖验证，不能写入远端；请启用条件写入或 LOCK 后重新检测连接能力。",
             ));
         }
-        let target = ensure_safe_parent(&root.local_path, &path)?;
+        let target = ensure_safe_parent_async(&root.local_path, &path).await?;
         if !tokio::fs::metadata(&target).await.is_ok_and(|meta| meta.is_file()) || hash_file_async(&target).await? != preview.local_hash {
             return Err(AppError::retryable(
                 "LOCAL_FILE_CHANGED",
@@ -576,6 +576,9 @@ impl SyncCoordinator {
                 );
                 error
             })?;
+            if hash_file_async(&target).await? != preview.local_hash {
+                return Err(AppError::retryable("LOCAL_FILE_CHANGED", "备份期间本地版本发生变化，未写入远端；请重新合并"));
+            }
             put_remote_update(
                 &client,
                 &merged_stage,
@@ -588,17 +591,20 @@ impl SyncCoordinator {
             .await?;
             let observed =
                 verify_remote_hash(&client, &remote_path, &merged_hash, &merged_stage, &capabilities).await?;
-            if let Err(local_error) = atomic_replace(&merged_stage, &target) {
-                let rollback = put_remote_update(
+            if let Err(local_error) = atomic_replace_if_unchanged_async(&merged_stage, &target, &preview.local_hash).await {
+                let rollback = rollback_remote_merge(
                     &client,
                     &remote_stage,
                     &remote_path,
                     observed.etag.as_deref(),
                     &merged_hash,
+                    &preview.remote_hash,
                     &capabilities,
-                    None,
                 )
                 .await;
+                if rollback.is_ok() && local_error.code == "LOCAL_FILE_CHANGED" {
+                    return Err(AppError::retryable("LOCAL_FILE_CHANGED", "写入期间本地文件发生变化，已保留本地新版本并回滚远端；请重新合并"));
+                }
                 return Err(AppError::new(
                     "AI_MERGE_LOCAL_WRITE_FAILED",
                     if rollback.is_ok() {

@@ -10,7 +10,7 @@ pub(crate) use cleanup::{CleanupSelection, RemoteCleanupInventory, RemoteCleanup
 
 use plan::{build_plan, preview_from_plan};
 use remote_files::{
-    ensure_remote_parent, put_remote_create_only, put_remote_update, read_remote_snapshot,
+    ensure_remote_parent, put_remote_create_only, put_remote_update, read_remote_snapshot, rollback_remote_merge,
     verify_remote_hash,
 };
 use scan::{line_ending_equivalent_paths, scan_remote};
@@ -24,7 +24,7 @@ use crate::{
         SyncAction, SyncRuleDto, SyncSummaryDto, WebDavCapabilities,
     },
     filesystem::{
-        atomic_replace, copy_to_trash_async, ensure_safe_parent, hash_file_async, move_to_trash, move_to_trash_async, scan_local_async,
+        atomic_replace_if_unchanged_async, atomic_install_new_async, copy_to_trash_async, ensure_safe_parent_async, hash_file_async, move_to_trash_if_unchanged_async, scan_local_async,
         scan_local_cached_excluding_async, is_generated_conflict_copy,
         move_generated_conflict_copies_to_trash_async, RuleEngine,
     },
@@ -51,14 +51,14 @@ use tokio_util::sync::CancellationToken;
 
 struct ActiveTaskCancellation {
     token: CancellationToken,
-    finished: Arc<tokio::sync::Notify>,
+    finished: CancellationToken,
 }
 
-struct TaskCompletionGuard(Arc<tokio::sync::Notify>);
+struct TaskCompletionGuard(CancellationToken);
 
 impl Drop for TaskCompletionGuard {
     fn drop(&mut self) {
-        self.0.notify_one();
+        self.0.cancel();
     }
 }
 
@@ -177,17 +177,23 @@ impl SyncCoordinator {
             .get(task_id)
             .cloned()
             .ok_or_else(|| AppError::new("TASK_NOT_RUNNING", "该文件当前没有可取消的传输"))?;
-        let completed = cancellation.finished.notified();
         cancellation.token.cancel();
-        tokio::time::timeout(std::time::Duration::from_secs(10), completed)
+        tokio::time::timeout(std::time::Duration::from_secs(10), cancellation.finished.cancelled())
             .await
             .map_err(|_| {
                 AppError::retryable(
                     "TASK_CANCEL_TIMEOUT",
-                    "已发送取消请求，但当前文件传输尚未停止",
+                    "已发送取消请求；当前操作仍在安全收尾，请查看传输队列中的最终结果",
                 )
             })?;
-        Ok(())
+        match self.db.task_status(task_id).await? {
+            crate::domain::TaskStatus::Cancelled => Ok(()),
+            crate::domain::TaskStatus::Succeeded => Err(AppError::new(
+                "TASK_ALREADY_COMPLETED",
+                "文件已进入写入阶段并完成同步，未能取消",
+            )),
+            _ => Err(AppError::new("TASK_NOT_CANCELLED", "文件任务未以取消状态结束，请查看传输队列")),
+        }
     }
 
     fn transfer_progress(

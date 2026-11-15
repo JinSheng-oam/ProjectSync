@@ -265,6 +265,15 @@ impl Database {
         Ok(row.get::<i64, _>("attempts").max(0) as u32)
     }
 
+    pub async fn task_status(&self, task_id: &str) -> AppResult<TaskStatus> {
+        let status: String = sqlx::query_scalar("SELECT status FROM sync_tasks WHERE id=?")
+            .bind(task_id)
+            .fetch_optional(&self.pool)
+            .await?
+            .ok_or_else(|| AppError::new("TASK_NOT_FOUND", "同步任务不存在"))?;
+        Ok(TaskStatus::from_db(&status))
+    }
+
     pub async fn reconcile_tasks_for_path(
         &self,
         root_id: &str,
