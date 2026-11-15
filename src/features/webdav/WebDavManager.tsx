@@ -228,6 +228,10 @@ export function WebDavManager({ accounts, onRefresh }: WebDavManagerProps) {
                     <span className="font-mono tabular-nums text-emerald-700 dark:text-emerald-300 font-semibold">{acc.capabilities.etagType} · {acc.capabilities.strongEtagVerified ? '已验证' : '未验证'}</span>
                   </div>
                   <div className="bg-slate-50 dark:bg-slate-800/60 p-2 rounded-lg border border-slate-200 dark:border-slate-700 flex justify-between">
+                    <span>远端摘要快速校验:</span>
+                    <span className="font-semibold">{acc.capabilities.reprDigestSha256Verified ? '已验证' : '未验证'}</span>
+                  </div>
+                  <div className="bg-slate-50 dark:bg-slate-800/60 p-2 rounded-lg border border-slate-200 dark:border-slate-700 flex justify-between">
                     <span>If-Match 保护:</span>
                     <span className="text-emerald-700 dark:text-emerald-300 font-semibold">
                       {acc.capabilities.supportsIfMatch ? '支持' : '不支持'}
@@ -350,6 +354,7 @@ export function WebDavManager({ accounts, onRefresh }: WebDavManagerProps) {
               </div>
               <div>• Server 标头: <span className="font-mono">{testResult.serverHeader}</span></div>
               <div>• ETag 版本验证: <span className="font-mono">{testResult.etagType} · {testResult.strongEtagVerified ? '已验证' : '未验证'}</span></div>
+              <div>• 远端摘要快速校验: {testResult.reprDigestSha256Verified ? '已验证' : '未验证'}</div>
               <div>• 并发写防护 If-Match: {testResult.supportsIfMatch ? '支持' : '不支持'}</div>
               <div>• WebDAV 独占锁写保护: {testResult.supportsLock ? '已验证' : '未验证'}</div>
               <div>• 安全新建: <span className="font-mono">{testResult.safeCreateOnly ? (testResult.supportsIfNoneMatch ? 'If-None-Match' : '独占锁') : '未验证'}</span></div>

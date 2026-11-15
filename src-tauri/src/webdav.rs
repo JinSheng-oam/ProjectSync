@@ -8,6 +8,7 @@ use crate::{
     security::{normalize_remote_path, unix_ms, validate_webdav_url},
 };
 use futures_util::StreamExt;
+use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
 use quick_xml::{events::Event, Reader};
 use reqwest::{
     header::{HeaderMap, HeaderName, HeaderValue, ACCEPT, CONTENT_LENGTH, CONTENT_TYPE},
@@ -32,6 +33,13 @@ pub struct DavEntry {
     pub is_collection: bool,
 }
 
+#[derive(Debug)]
+pub(crate) struct ReprDigest {
+    pub etag: String,
+    pub sha256: [u8; 32],
+    pub size: Option<u64>,
+}
+
 #[derive(Clone)]
 pub struct WebDavClient {
     base_url: Url,
@@ -41,6 +49,11 @@ pub struct WebDavClient {
 }
 
 impl WebDavClient {
+    #[cfg(test)]
+    pub(crate) fn disable_proxy_for_test(&mut self) {
+        self.client = reqwest::Client::builder().no_proxy().build().unwrap();
+    }
+
     pub fn new(
         base_url: &str,
         username: &str,
@@ -244,6 +257,22 @@ impl WebDavClient {
             size += chunk.len() as u64;
         }
         Ok((size, hasher.finalize().to_hex().to_string(), etag))
+    }
+
+    pub(crate) async fn head_repr_digest(&self, path: &str) -> AppResult<Option<ReprDigest>> {
+        let mut headers = HeaderMap::new();
+        headers.insert(HeaderName::from_static("want-repr-digest"), HeaderValue::from_static("sha-256=1"));
+        headers.insert(reqwest::header::ACCEPT_ENCODING, HeaderValue::from_static("identity"));
+        headers.insert(reqwest::header::CACHE_CONTROL, HeaderValue::from_static("no-cache, no-store"));
+        let response = self.send(Method::HEAD, self.url_for(path)?, headers, None).await?;
+        if !response.status().is_success() { return Ok(None); }
+        let headers = response.headers();
+        let Some(etag) = headers.get(reqwest::header::ETAG).and_then(|v| v.to_str().ok())
+            .filter(|etag| is_strong_etag(etag)) else { return Ok(None); };
+        let Some(sha256) = parse_repr_sha256(headers) else { return Ok(None); };
+        let size = headers.get(CONTENT_LENGTH).and_then(|value| value.to_str().ok())
+            .and_then(|value| value.parse().ok());
+        Ok(Some(ReprDigest { etag: etag.to_owned(), sha256, size }))
     }
 
     pub async fn get_to_file(&self, path: &str, destination: &Path) -> AppResult<u64> {
@@ -645,6 +674,29 @@ pub(crate) fn is_strong_etag(etag: &str) -> bool {
         .is_some_and(|value| value.bytes().all(|byte| byte == 0x21 || byte >= 0x23 && byte != 0x7f))
 }
 
+fn parse_repr_sha256(headers: &HeaderMap) -> Option<[u8; 32]> {
+    let mut sha = None;
+    let mut length = 0usize;
+    for value in headers.get_all("repr-digest").iter() {
+        let value = value.to_str().ok()?;
+        length = length.checked_add(value.len())?;
+        if length > 8192 { return None; }
+        for member in value.split(',') {
+            let (algorithm, encoded) = member.trim().split_once('=')?;
+            if algorithm.is_empty() || !algorithm.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b"-_.*".contains(&b)) {
+                return None;
+            }
+            let encoded = encoded.trim().strip_prefix(':')?.strip_suffix(':')?;
+            let digest = BASE64.decode(encoded).ok()?;
+            if algorithm == "sha-256" {
+                if sha.is_some() { return None; }
+                sha = Some(digest.try_into().ok()?);
+            }
+        }
+    }
+    sha
+}
+
 pub fn href_to_dav_path(
     client: &WebDavClient,
     href: &str,
@@ -682,5 +734,23 @@ mod mkcol_tests {
         assert_eq!(client.validate_existing_collection("/parent", vec![entry.clone()]).unwrap_err().code, "DAV_CONFLICT");
         assert!(!client.validate_existing_collection("/parent", vec![DavEntry { is_collection: true, ..entry }]).unwrap());
         assert_eq!(client.validate_existing_collection("/parent", vec![]).unwrap_err().code, "DAV_INVALID_RESPONSE");
+    }
+
+    #[test]
+    fn repr_digest_requires_a_valid_unique_sha256_byte_sequence() {
+        use sha2::{Digest, Sha256};
+        let expected: [u8; 32] = Sha256::digest(b"abc").into();
+        let value = BASE64.encode(expected);
+        let mut headers = HeaderMap::new();
+        headers.insert("repr-digest", HeaderValue::from_str(&format!("sha-256=:{value}:")).unwrap());
+        assert_eq!(parse_repr_sha256(&headers), Some(expected));
+        headers.append("repr-digest", HeaderValue::from_str(&format!("sha-256=:{value}:")).unwrap());
+        assert_eq!(parse_repr_sha256(&headers), None);
+        headers.insert("repr-digest", HeaderValue::from_static("sha-256=:not-base64:"));
+        assert_eq!(parse_repr_sha256(&headers), None);
+        headers.insert("repr-digest", HeaderValue::from_static("sha-256=:YQ==:"));
+        assert_eq!(parse_repr_sha256(&headers), None);
+        headers.insert("repr-digest", HeaderValue::from_static("other=\"x, sha-256=:YQ==:\""));
+        assert_eq!(parse_repr_sha256(&headers), None);
     }
 }

@@ -88,7 +88,7 @@ impl SyncCoordinator {
                 }
                 let hash = hash_file_async(&local_path).await?;
                 let observed =
-                    verify_remote_hash(&client, &remote_path, &hash).await?;
+                    verify_remote_hash(&client, &remote_path, &hash, &local_path, &capabilities).await?;
                 let local = scan_local_async(&root.local_path, &rules).await?
                     .into_iter()
                     .find(|e| e.relative_path == path);
@@ -165,7 +165,7 @@ impl SyncCoordinator {
                             None,
                         )
                         .await?;
-                        verify_remote_hash(&client, &conflict_remote, local_hash).await?;
+                        verify_remote_hash(&client, &conflict_remote, local_hash, &target, &capabilities).await?;
                     } else {
                         copy_to_trash_async(&self.data_dir, &root.id, &path, "keep-both", &target).await?;
                     }
@@ -216,7 +216,7 @@ impl SyncCoordinator {
                         )
                         .await?;
                         let observed =
-                            verify_remote_hash(&client, &remote_path, local_hash)
+                            verify_remote_hash(&client, &remote_path, local_hash, &target, &capabilities)
                                 .await?;
                         let local = scan_local_async(&root.local_path, &rules).await?
                             .into_iter()

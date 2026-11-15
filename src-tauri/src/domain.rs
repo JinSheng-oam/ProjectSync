@@ -111,6 +111,8 @@ pub struct WebDavCapabilities {
     pub etag_type: String,
     #[serde(default)]
     pub strong_etag_verified: bool,
+    #[serde(default)]
+    pub repr_digest_sha256_verified: bool,
     pub supports_if_match: bool,
     pub supports_if_none_match: bool,
     pub supports_lock: bool,

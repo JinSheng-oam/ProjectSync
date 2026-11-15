@@ -828,6 +828,7 @@ fn unsafe_capabilities() -> WebDavCapabilities {
         server_header: "unknown".to_owned(),
         etag_type: "None".to_owned(),
         strong_etag_verified: false,
+        repr_digest_sha256_verified: false,
         supports_if_match: false,
         supports_if_none_match: false,
         supports_lock: false,

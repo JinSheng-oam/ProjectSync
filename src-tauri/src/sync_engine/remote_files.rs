@@ -1,4 +1,5 @@
 use super::*;
+use sha2::{Digest, Sha256};
 
 pub(super) async fn ensure_remote_parent(client: &WebDavClient, path: &str) -> AppResult<()> {
     let parent = path
@@ -240,7 +241,17 @@ pub(super) async fn verify_remote_hash(
     client: &WebDavClient,
     path: &str,
     expected: &str,
+    source: &Path,
+    capabilities: &WebDavCapabilities,
 ) -> AppResult<RemoteEntry> {
+    const DIGEST_FAST_PATH_MIN_BYTES: u64 = 1024 * 1024;
+    if capabilities.strong_etag_verified && capabilities.repr_digest_sha256_verified
+        && tokio::fs::metadata(source).await.is_ok_and(|metadata| metadata.len() >= DIGEST_FAST_PATH_MIN_BYTES)
+    {
+        if let Some(entry) = verify_remote_digest(client, path, expected, source).await? {
+            return Ok(entry);
+        }
+    }
     let observed = read_remote_entry(client, path).await?;
     if observed.hash != expected {
         return Err(AppError::retryable(
@@ -249,6 +260,153 @@ pub(super) async fn verify_remote_hash(
         ));
     }
     Ok(observed)
+}
+
+async fn verify_remote_digest(
+    client: &WebDavClient,
+    path: &str,
+    expected: &str,
+    source: &Path,
+) -> AppResult<Option<RemoteEntry>> {
+    let Some(head) = client.head_repr_digest(path).await.ok().flatten() else { return Ok(None); };
+    let normalized = normalize_remote_path(path)?;
+    let property = match client.propfind(path, 0).await {
+        Ok(entries) => entries.into_iter().find(|entry| !entry.is_collection
+            && href_to_dav_path(client, &entry.path, path).ok().as_deref() == Some(normalized.as_str())),
+        Err(_) => None,
+    };
+    let Some(property) = property else { return Ok(None); };
+    if !digest_matches_properties(&head, &property) {
+        return Ok(None);
+    }
+    let source = source.to_owned();
+    let (size, blake, sha) = tokio::task::spawn_blocking(move || -> AppResult<(u64, String, [u8; 32])> {
+        let mut file = fs::File::open(source)?;
+        let mut buffer = [0u8; 128 * 1024];
+        let mut size = 0u64;
+        let mut blake = blake3::Hasher::new();
+        let mut sha = Sha256::new();
+        loop {
+            let count = file.read(&mut buffer)?;
+            if count == 0 { break; }
+            size = size.saturating_add(count as u64);
+            blake.update(&buffer[..count]);
+            sha.update(&buffer[..count]);
+        }
+        Ok((size, blake.finalize().to_hex().to_string(), sha.finalize().into()))
+    }).await.map_err(|error| AppError::new("LOCAL_FILE_READ", format!("计算文件摘要失败：{error}")))??;
+    if blake != expected {
+        return Err(AppError::retryable("LOCAL_FILE_CHANGED", "上传校验期间本地文件发生变化"));
+    }
+    if !digest_matches_local(&head, property.size, size, &sha) {
+        return Ok(None);
+    }
+    let confirmed = client.head_repr_digest(path).await.ok().flatten();
+    if !confirmed.is_some_and(|value| value.etag == head.etag
+        && digest_matches_local(&value, property.size, size, &sha))
+    {
+        return Ok(None);
+    }
+    Ok(Some(RemoteEntry {
+        relative_path: String::new(), path_key: String::new(), hash: blake, size,
+        modified_at: property.modified_at, etag: property.etag, is_collection: false,
+    }))
+}
+
+fn digest_matches_properties(head: &crate::webdav::ReprDigest, property: &crate::webdav::DavEntry) -> bool {
+    property.etag.as_deref() == Some(head.etag.as_str())
+        && head.size.is_none_or(|size| size == property.size)
+}
+
+fn digest_matches_local(head: &crate::webdav::ReprDigest, remote_size: u64, local_size: u64, sha: &[u8; 32]) -> bool {
+    remote_size == local_size && head.sha256 == *sha
+        && head.size.is_none_or(|size| size == local_size)
+}
+
+#[test]
+fn digest_fast_path_requires_matching_versions_sizes_and_content() {
+    use crate::webdav::{DavEntry, ReprDigest};
+    let head = ReprDigest { etag: "\"v1\"".into(), sha256: [1; 32], size: Some(10) };
+    let mut property = DavEntry { path: String::new(), size: 10, modified_at: 0,
+        etag: Some("\"v1\"".into()), is_collection: false };
+    assert!(digest_matches_properties(&head, &property));
+    assert!(digest_matches_local(&head, property.size, 10, &[1; 32]));
+    assert!(!digest_matches_local(&head, property.size, 10, &[2; 32]));
+    assert!(!digest_matches_local(&head, property.size, 11, &[1; 32]));
+    property.etag = Some("\"v2\"".into());
+    assert!(!digest_matches_properties(&head, &property));
+    property.etag = Some("\"v1\"".into());
+    property.size = 11;
+    assert!(!digest_matches_properties(&head, &property));
+}
+
+#[cfg(test)]
+#[tokio::test]
+#[ignore = "uses a local Node.js WebDAV fixture"]
+async fn digest_verification_avoids_get_only_for_a_matching_server_digest() {
+    use std::io::{BufRead, BufReader};
+    use std::process::{Child, Command, Stdio};
+
+    struct Server(Child);
+    impl Drop for Server {
+        fn drop(&mut self) {
+            let _ = self.0.kill();
+            let _ = self.0.wait();
+        }
+    }
+    struct TempFile(PathBuf);
+    impl Drop for TempFile {
+        fn drop(&mut self) { let _ = std::fs::remove_file(&self.0); }
+    }
+
+    let fixture = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/digest-dav.cjs");
+    let mut command = Command::new("node");
+    command.arg(fixture).stdout(Stdio::piped()).stderr(Stdio::null());
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        command.creation_flags(0x0800_0000);
+    }
+    let mut server = Server(command.spawn().expect("start local WebDAV fixture"));
+    let stdout = server.0.stdout.take().unwrap();
+    let port = tokio::time::timeout(std::time::Duration::from_secs(10), tokio::task::spawn_blocking(move || {
+        let mut line = String::new();
+        BufReader::new(stdout).read_line(&mut line).unwrap();
+        line.trim().parse::<u16>().unwrap()
+    })).await.unwrap().unwrap();
+    let mut client = WebDavClient::new(&format!("http://127.0.0.1:{port}/"), "test", String::new(), true).unwrap();
+    client.disable_proxy_for_test();
+    let source = TempFile(std::env::temp_dir().join(format!("projectsync-digest-test-{}", uuid::Uuid::new_v4())));
+    let contents = vec![b'a'; 1024 * 1024 + 7];
+    tokio::fs::write(&source.0, &contents).await.unwrap();
+    let expected = blake3::hash(&contents).to_hex().to_string();
+    let mut capabilities = unsafe_capabilities();
+    capabilities.strong_etag_verified = true;
+    capabilities.repr_digest_sha256_verified = true;
+    assert_eq!(verify_remote_hash(&client, "/good", &expected, &source.0, &capabilities).await.unwrap().hash, expected);
+    assert_eq!(verify_remote_hash(&client, "/bad", &expected, &source.0, &capabilities).await.unwrap().hash, expected);
+    assert_eq!(verify_remote_hash(&client, "/corrupt", &expected, &source.0, &capabilities).await.unwrap_err().code, "HASH_MISMATCH");
+    assert_eq!(verify_remote_hash(&client, "/mismatch", &expected, &source.0, &capabilities).await.unwrap_err().code, "DAV_PRECONDITION_FAILED");
+    let counts: serde_json::Value = serde_json::from_slice(&client.get_bytes("/_counts").await.unwrap()).unwrap();
+    assert_eq!(counts["good"], 0);
+    assert_eq!(counts["bad"], 1);
+    assert_eq!(counts["corrupt"], 1);
+    assert_eq!(counts["mismatch"], 1);
+    assert_eq!(verify_remote_hash(&client, "/good", "different", &source.0, &capabilities).await.unwrap_err().code, "LOCAL_FILE_CHANGED");
+    assert_eq!(client.get_bytes_limited("/good", 1024).await.unwrap_err().code, "DAV_FILE_TOO_LARGE");
+    assert_eq!(client.get_bytes_limited("/chunked", 1024).await.unwrap_err().code, "DAV_FILE_TOO_LARGE");
+    capabilities.repr_digest_sha256_verified = false;
+    assert_eq!(verify_remote_hash(&client, "/good", &expected, &source.0, &capabilities).await.unwrap().hash, expected);
+    let counts: serde_json::Value = serde_json::from_slice(&client.get_bytes("/_counts").await.unwrap()).unwrap();
+    // One attempted limited GET and one fallback full GET; the fast path above used none.
+    assert_eq!(counts["good"], 2);
+    let probed = client.test_connection().await.unwrap();
+    assert!(probed.strong_etag_verified);
+    assert!(probed.repr_digest_sha256_verified);
+    assert!(probed.supports_if_match);
+    assert!(probed.supports_if_none_match);
+    assert!(!probed.supports_lock);
+    assert!(probed.probe_cleanup_warning.is_none());
 }
 
 pub(super) async fn read_remote_snapshot(

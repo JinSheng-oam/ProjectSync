@@ -266,7 +266,7 @@ impl SyncCoordinator {
                     .await?;
                 }
                 let observed =
-                    verify_remote_hash(client, &destination, &local.hash).await?;
+                    verify_remote_hash(client, &destination, &local.hash, &local.absolute_path, capabilities).await?;
                 if hash_file_async(&local.absolute_path).await? != local.hash {
                     return Err(AppError::retryable(
                         "LOCAL_FILE_CHANGED",

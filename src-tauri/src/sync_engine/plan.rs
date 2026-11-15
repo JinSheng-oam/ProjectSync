@@ -337,8 +337,10 @@ mod tests {
         let mut legacy_report = serde_json::to_value(&capabilities).unwrap();
         legacy_report.as_object_mut().unwrap().remove("safeMoveIfMatch");
         legacy_report.as_object_mut().unwrap().remove("strongEtagVerified");
+        legacy_report.as_object_mut().unwrap().remove("reprDigestSha256Verified");
         let mut loaded: WebDavCapabilities = serde_json::from_value(legacy_report).unwrap();
         assert!(!loaded.strong_etag_verified);
+        assert!(!loaded.repr_digest_sha256_verified);
         let mut file = RemoteEntry {
             relative_path: "notes.md".into(),
             path_key: "notes.md".into(),

@@ -1,4 +1,5 @@
 use super::*;
+use sha2::{Digest, Sha256};
 
 async fn probe_lock_if_created<F, Fut>(created: bool, probe: F) -> bool
 where
@@ -191,6 +192,7 @@ impl WebDavClient {
         let mut safe_move_if_match = false;
         let mut etag_type = "None".to_owned();
         let mut strong_etag_verified = false;
+        let mut repr_digest_sha256_verified = false;
         let mut created = false;
 
         if self.create_collection(&probe_path).await.unwrap_or(false) {
@@ -203,7 +205,8 @@ impl WebDavClient {
                 .await
                 .is_ok()
             {
-                strong_etag_verified = self.probe_strong_etag(&first, &a, &b).await;
+                (strong_etag_verified, repr_digest_sha256_verified) =
+                    self.probe_strong_etag(&first, &a, &b).await;
                 let props = self.propfind(&probe_path, 1).await.unwrap_or_default();
                 let etag = props
                     .iter()
@@ -334,6 +337,7 @@ impl WebDavClient {
             server_header,
             etag_type,
             strong_etag_verified,
+            repr_digest_sha256_verified,
             supports_if_match,
             supports_if_none_match,
             supports_lock: lock_exclusion_safe,
@@ -348,8 +352,8 @@ impl WebDavClient {
         })
     }
 
-    async fn probe_strong_etag(&self, path: &str, a: &Path, b: &Path) -> bool {
-        async fn observed(client: &WebDavClient, path: &str, contents: &[u8]) -> Option<String> {
+    async fn probe_strong_etag(&self, path: &str, a: &Path, b: &Path) -> (bool, bool) {
+        async fn observed(client: &WebDavClient, path: &str, contents: &[u8]) -> Option<(String, bool)> {
             let (size, hash, get_etag) = client.hash_resource(path).await.ok()?;
             if size != contents.len() as u64 || hash != blake3::hash(contents).to_hex().as_str() {
                 return None;
@@ -361,7 +365,12 @@ impl WebDavClient {
                     && client.dav_path_for_href(&entry.path, &request_url).ok().as_deref() == Some(expected_path.as_str()))?;
             let etag = property.etag?;
             let valid = is_strong_etag(&etag);
-            (valid && get_etag.as_deref() == Some(etag.as_str())).then_some(etag)
+            if !valid || get_etag.as_deref() != Some(etag.as_str()) { return None; }
+            let expected_sha: [u8; 32] = Sha256::digest(contents).into();
+            let digest_valid = client.head_repr_digest(path).await.ok().flatten().is_some_and(|head|
+                head.etag == etag && head.sha256 == expected_sha
+                    && head.size.is_none_or(|size| size == contents.len() as u64));
+            Some((etag, digest_valid))
         }
         let first = observed(self, path, b"projectsync capability probe A").await;
         let changed = if self.put_file(b, path, PutCondition::Unconditional).await.is_ok() {
@@ -371,7 +380,15 @@ impl WebDavClient {
         };
         let repeated = observed(self, path, b"projectsync capability probe B").await;
         let restored = self.put_file(a, path, PutCondition::Unconditional).await.is_ok();
-        strong_etag_probe_passed(first.as_deref(), changed.as_deref(), repeated.as_deref()) && restored
+        let strong = strong_etag_probe_passed(
+            first.as_ref().map(|item| item.0.as_str()),
+            changed.as_ref().map(|item| item.0.as_str()),
+            repeated.as_ref().map(|item| item.0.as_str()),
+        ) && restored;
+        let digest = strong && first.as_ref().is_some_and(|item| item.1)
+            && changed.as_ref().is_some_and(|item| item.1)
+            && repeated.as_ref().is_some_and(|item| item.1);
+        (strong, digest)
     }
 
     async fn probe_move_if_match(&self, source: &str, destination: &str) -> bool {

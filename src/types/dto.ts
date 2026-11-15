@@ -76,6 +76,7 @@ export interface WebDavCapabilities {
   serverHeader: string;
   etagType: 'Strong' | 'Weak' | 'None';
   strongEtagVerified?: boolean;
+  reprDigestSha256Verified?: boolean;
   supportsIfMatch: boolean;
   supportsIfNoneMatch: boolean;
   supportsLock: boolean;

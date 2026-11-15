@@ -587,7 +587,7 @@ impl SyncCoordinator {
             )
             .await?;
             let observed =
-                verify_remote_hash(&client, &remote_path, &merged_hash).await?;
+                verify_remote_hash(&client, &remote_path, &merged_hash, &merged_stage, &capabilities).await?;
             if let Err(local_error) = atomic_replace(&merged_stage, &target) {
                 let rollback = put_remote_update(
                     &client,
